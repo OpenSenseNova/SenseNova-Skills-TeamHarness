@@ -1,0 +1,3 @@
+# Every Agent has an accountable Human Owner
+
+Every Agent has exactly one active Human Owner who is accountable for the Agent's conduct in the Workspace. Responsibility includes unilateral authority to suspend the Agent, request cancellation of active work, restrict delegated capabilities and budgets, constrain local resources, and inspect the Agent's shared audit history. Agent actions remain authored by the Agent, shared identity and permissions remain subject to Workspace governance, and ownership cannot expand authority, delete history, or rewrite historical responsibility after an ownership change; Workspace administrators may also suspend the Agent or transfer ownership.
