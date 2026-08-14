@@ -1,0 +1,3 @@
+# Messages, execution, work, and review are independent
+
+Conversation has one immutable Message kind and no special final or result Message. Run terminal outcome is recorded by the execution layer; WorkItem, Result Submission, and Review state change only through explicit Workspace commands; and natural-language content never mutates structured state. Every Agent-authored Message carries mandatory producing-Run provenance while Human-authored Messages carry none, but Message presence or absence still neither determines Run success nor creates a separate response-expectation state. This separation prevents conversational output, execution health, responsibility, candidate result, and review judgment from collapsing into one ambiguous fact.

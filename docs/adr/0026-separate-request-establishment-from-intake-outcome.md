@@ -1,0 +1,3 @@
+# Separate Request establishment from intake outcome
+
+`not_requested` means an Agent Request could not legally be established, such as when the target is not requestable, cannot access the result Discussion Scope, or the author lacks request authority. If establishment succeeds, the immutable Mention Outcome is `requested` and references a pending Agent Request. Temporary suspension, Node, scheduling, concurrency, or other recoverable conditions become derived `waiting` or `blocked` intake dispositions; an explicit irrecoverable intake refusal becomes the Request's terminal `rejected` state. No intake result rewrites the Mention Outcome.

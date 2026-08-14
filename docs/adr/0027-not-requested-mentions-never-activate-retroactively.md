@@ -1,0 +1,3 @@
+# Not-requested Mentions never activate retroactively
+
+A `not_requested` Agent Mention Outcome is immutable and never creates an Agent Request when its original establishment failure later disappears. Authority, membership, or Discussion Scope access changes apply only to new collaboration intents; a Human or Agent must publish a new explicit Agent Mention to create a new Outcome and possible Request under current facts. This differs from an existing pending Request, which was already legally established and may be automatically reevaluated when a temporary waiting or blocking condition clears.

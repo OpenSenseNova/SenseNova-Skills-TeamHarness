@@ -1,0 +1,3 @@
+# Mention Outcome reasons use permissioned projections
+
+Every reader of a Message can see whether each Agent Mention target was `requested` or `not_requested`, so collaboration never implies that an Agent received a Request when it did not. A `not_requested` Outcome stores one authoritative structured reason. Only a current Workspace Owner or the target Agent's current Owner receives the exact governance reason; other readers receive only a safe summary derived from that same fact. Public and private reason states are not duplicated, and every snapshot, follow stream, search, cache, and audit projection applies the observer's current authorization.
