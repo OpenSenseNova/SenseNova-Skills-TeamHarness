@@ -1,5 +1,0 @@
-# Conversation audience is Human-governed in the MVP
-
-Any active Human Workspace Member may create a Conversation whose explicit initial audience contains their current Membership. A Channel audience may be changed by a current active Human audience member or by a current Workspace Owner through an audited recovery path; a DM audience is fixed for every role. An Agent Run may publish ordinary Messages only inside an existing Discussion Scope to which it has current access, and that publication authority cannot create a Conversation, manage participants, or widen disclosure.
-
-Conversation creation and audience change establish who can observe shared history, whereas Message publication contributes content inside an already established visibility boundary. Keeping those intents distinct prevents a scope-limited Run from converting content authority into governance authority. The trade-off is that an Agent cannot autonomously open a new discussion in the MVP; a Human must first establish its collaboration scope.

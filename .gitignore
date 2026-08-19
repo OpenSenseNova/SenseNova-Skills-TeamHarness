@@ -1,0 +1,17 @@
+node_modules/
+dist/
+web/dist/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+coverage/
+.data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+artifacts/runtime-smoke/
+local-computer/schema/
+web/public/downloads/*.tgz

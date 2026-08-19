@@ -1,0 +1,271 @@
+import { execFileSync } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { Readable, Writable } from 'node:stream';
+import { resolve } from 'node:path';
+import { agent, methods, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
+
+let promptCount = 0;
+let finishCancelledPrompt: (() => void) | undefined;
+const config = new Map<string, string>([
+  ['model', 'fake-default'],
+  ['reasoning_effort', 'medium'],
+]);
+let mode = 'default';
+let legacyModel = 'fake-legacy-default';
+let initialObjective = '';
+let initialArtifact: {
+  id: string;
+  path: string;
+  artifactType: string;
+  currentRevision: string;
+  digest: string;
+  name: string;
+} | null = null;
+
+function promptText(prompt: unknown): string {
+  if (!Array.isArray(prompt)) return '';
+  return prompt.map((part) => (
+    typeof part === 'object' && part !== null && (part as { type?: unknown }).type === 'text'
+      ? String((part as { text?: unknown }).text ?? '')
+      : ''
+  )).join('\n');
+}
+
+function triggerMessage(prompt: string): string {
+  const lines = prompt.split('\n');
+  const triggerIndex = lines.findIndex((line) => (
+    line.startsWith('[event="message.created"') && line.includes(' trigger=true')
+  ));
+  if (triggerIndex === -1) return '';
+  const body: string[] = [];
+  for (let index = triggerIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (line.startsWith('[event=')) break;
+    body.push(line);
+  }
+  return body.join('\n').trim();
+}
+
+function runTeamctl(args: string[]): Record<string, unknown> {
+  const output = execFileSync(
+    process.platform === 'win32' ? 'teamctl.cmd' : 'teamctl',
+    args,
+    { encoding: 'utf8' },
+  );
+  return JSON.parse(output.trim()) as Record<string, unknown>;
+}
+
+function publishThroughTeamctl(): void {
+  const mode = process.env.FAKE_ACP_USE_TEAMCTL;
+  if (!mode) return;
+  const firstPublicationPrompt = Number(process.env.FAKE_ACP_TEAMCTL_AFTER_PROMPT ?? '1');
+  if (promptCount < firstPublicationPrompt) return;
+  const inbox = runTeamctl(['inbox', 'check']);
+  const targets = ((inbox.result as { targets?: Array<{ target: string }> } | undefined)?.targets ?? []);
+  const target = targets[0]?.target;
+  if (!target) return;
+  const checked = runTeamctl(['message', 'check', '--target', target]);
+  const checkedResult = checked.result as {
+    discussion?: { messages?: Array<{ id: string; body: string }> };
+    attention?: Array<{ messageId: string }>;
+  } | undefined;
+  const discussionMessages = checkedResult?.discussion?.messages ?? [];
+  const attentionMessageIds = new Set((checkedResult?.attention ?? []).map((item) => item.messageId));
+  const attentionObjective = discussionMessages
+    .filter((message) => attentionMessageIds.has(message.id))
+    .map((message) => message.body)
+    .join('\n');
+  initialObjective = discussionMessages.map((message) => message.body).join('\n');
+  if (mode === 'message') {
+    runTeamctl(['message', 'send', '--target', target, '--body', `prompt-${promptCount}`]);
+    return;
+  }
+  if (mode !== 'multi-artifact') throw new Error(`Unsupported FAKE_ACP_USE_TEAMCTL mode ${mode}.`);
+  const artifactPath = resolve(process.cwd(), 'multi-agent-artifact.md');
+  if (/@writer\b/iu.test(attentionObjective)) {
+    writeFileSync(artifactPath, '# Multi-Agent Artifact\n\nWriter draft.\n', 'utf8');
+    runTeamctl([
+      'artifact', 'publish', '--file', artifactPath, '--name', 'multi-agent-artifact.md',
+      '--type', 'markdown',
+    ]);
+    runTeamctl(['message', 'send', '--target', target, '--body', 'Writer published the first Artifact version.']);
+    return;
+  }
+  const artifact = initialArtifact ?? (
+    process.env.FAKE_ACP_ARTIFACT_ID
+    && process.env.FAKE_ACP_ARTIFACT_PATH
+    && process.env.FAKE_ACP_ARTIFACT_REVISION
+    && process.env.FAKE_ACP_ARTIFACT_DIGEST
+      ? {
+          id: process.env.FAKE_ACP_ARTIFACT_ID,
+          path: process.env.FAKE_ACP_ARTIFACT_PATH,
+          artifactType: process.env.FAKE_ACP_ARTIFACT_TYPE ?? 'markdown',
+          currentRevision: process.env.FAKE_ACP_ARTIFACT_REVISION,
+          digest: process.env.FAKE_ACP_ARTIFACT_DIGEST,
+          name: process.env.FAKE_ACP_ARTIFACT_NAME ?? 'multi-agent-artifact.md',
+        }
+      : null
+  );
+  if (!artifact || artifact.name !== 'multi-agent-artifact.md') {
+    throw new Error('Reviewer did not receive an Artifact baseline event.');
+  }
+  const original = readFileSync(artifact.path, 'utf8');
+  writeFileSync(artifactPath, `${original.trim()}\n\nReviewer revision.\n`, 'utf8');
+  runTeamctl([
+    'artifact', 'publish', '--file', artifactPath,
+    '--name', artifact.name, '--type', artifact.artifactType,
+    '--artifact-id', artifact.id,
+    '--expected-current-revision', artifact.currentRevision,
+    '--expected-content-digest', artifact.digest,
+  ]);
+  runTeamctl(['message', 'send', '--target', target, '--body', 'Reviewer published the second Artifact version.']);
+}
+const configOptions = () => [
+  {
+    id: 'model', name: 'Model', category: 'model', type: 'select' as const,
+    currentValue: config.get('model')!,
+    options: [
+      { value: 'fake-default', name: 'Fake default' },
+      { value: 'fake-pro', name: 'Fake pro' },
+    ],
+  },
+  {
+    id: 'reasoning_effort', name: 'Reasoning effort', category: 'thought_level', type: 'select' as const,
+    currentValue: config.get('reasoning_effort')!,
+    options: ['low', 'medium', 'high'].map((value) => ({ value, name: value })),
+  },
+];
+const app = agent({ name: 'fake-acp-agent' })
+  .onRequest(methods.agent.initialize, () => ({
+    protocolVersion: PROTOCOL_VERSION,
+    agentCapabilities: { loadSession: true },
+    agentInfo: { name: 'fake-acp-agent', version: '1.0.0' },
+  }))
+  .onRequest(methods.agent.session.new, () => ({
+    sessionId: 'fake-session-1',
+    configOptions: process.env.FAKE_ACP_LEGACY_MODELS === '1'
+      ? configOptions().filter((option) => option.category !== 'model')
+      : configOptions(),
+    ...(process.env.FAKE_ACP_LEGACY_MODELS === '1' ? {
+      models: {
+        currentModelId: legacyModel,
+        availableModels: [
+          { modelId: 'fake-legacy-default', name: 'Fake legacy default' },
+          { modelId: 'fake-legacy-pro', name: 'Fake legacy pro' },
+        ],
+      },
+    } : {}),
+    modes: {
+      currentModeId: mode,
+      availableModes: [
+        { id: 'default', name: 'Default' },
+        { id: 'autonomous', name: 'Autonomous' },
+      ],
+    },
+  }))
+  .onRequest(methods.agent.session.setConfigOption, ({ params }) => {
+    config.set(params.configId, String(params.value));
+    return { configOptions: configOptions() };
+  })
+  .onRequest('session/set_model', (params) => params as { modelId: string }, ({ params }) => {
+    legacyModel = params.modelId;
+    return {};
+  })
+  .onRequest(methods.agent.session.setMode, ({ params }) => {
+    mode = params.modeId;
+    return {};
+  })
+  .onRequest(methods.agent.session.load, async ({ params, client }) => {
+    await client.notify(methods.client.session.update, {
+      sessionId: params.sessionId,
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'replayed local view' },
+      },
+    });
+  })
+  .onRequest(methods.agent.session.prompt, async ({ params, client }) => {
+    promptCount += 1;
+    const currentPrompt = promptText(params.prompt);
+    if (/context-manifest|context-feed|addendum cursor|additional workspace information/iu.test(currentPrompt)) {
+      throw new Error('Runtime prompt contains a removed push-context instruction.');
+    }
+    const forbiddenPromptText = process.env.FAKE_ACP_FORBID_PROMPT_TEXT;
+    if (forbiddenPromptText && currentPrompt.includes(forbiddenPromptText)) {
+      throw new Error('Runtime wake embedded a user Message body.');
+    }
+    if (promptCount === 1) {
+      initialObjective = triggerMessage(currentPrompt);
+      const artifactHeader = currentPrompt.split('\n').find((line) => (
+        line.includes('source="artifact"') && line.includes('path=')
+      ));
+      if (artifactHeader) {
+        const field = (name: string): string => {
+          const match = artifactHeader.match(
+            new RegExp(`(?:^| )${name}=("(?:\\\\.|[^"\\\\])*"|[^\\s\\]]+)`, 'u'),
+          );
+          if (!match?.[1]) return '';
+          return match[1].startsWith('"') ? String(JSON.parse(match[1])) : match[1];
+        };
+        initialArtifact = {
+          id: field('id'), path: field('path'), artifactType: field('artifactType'),
+          currentRevision: field('currentRevision'), digest: field('digest'), name: field('name'),
+        };
+      }
+    }
+    if (process.env.FAKE_ACP_REQUEST_TEAMCTL_PERMISSION === '1' && process.env.FAKE_ACP_USE_TEAMCTL) {
+      const permission = await client.request(methods.client.session.requestPermission, {
+        sessionId: params.sessionId,
+        toolCall: {
+          toolCallId: 'fake-teamctl-return',
+          kind: 'execute',
+          status: 'pending',
+            rawInput: { command: `teamctl message send --target conversation:test --body 'prompt-${promptCount}'`, cwd: process.cwd() },
+        },
+        options: [
+          { optionId: 'allow-once', name: 'Allow Once', kind: 'allow_once' },
+          { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },
+        ],
+      });
+      if (permission.outcome.outcome !== 'selected' || permission.outcome.optionId !== 'allow-once') {
+        throw new Error('Attempt-scoped teamctl permission was not granted once.');
+      }
+    }
+    publishThroughTeamctl();
+    await client.notify(methods.client.session.update, {
+      sessionId: params.sessionId,
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: {
+          type: 'text',
+          text: process.env.FAKE_ACP_ECHO_CONFIG === '1'
+            ? JSON.stringify({
+                model: process.env.FAKE_ACP_LEGACY_MODELS === '1' ? legacyModel : config.get('model'),
+                reasoningEffort: config.get('reasoning_effort'),
+                mode,
+              })
+            : `prompt-${promptCount}`,
+        },
+      },
+    });
+    if (promptCount === 2 && process.env.FAKE_ACP_WAIT_FOR_CANCEL === '1') {
+      await client.notify(methods.client.session.update, {
+        sessionId: params.sessionId,
+        update: { sessionUpdate: 'usage_update', used: 2, size: 100 },
+      });
+      await new Promise<void>((resolvePrompt) => { finishCancelledPrompt = resolvePrompt; });
+      return { stopReason: 'cancelled' };
+    }
+    return { stopReason: 'end_turn' };
+  })
+  .onNotification(methods.agent.session.cancel, () => {
+    finishCancelledPrompt?.();
+    finishCancelledPrompt = undefined;
+  });
+
+const stream = ndJsonStream(
+  Writable.toWeb(process.stdout) as WritableStream<Uint8Array>,
+  Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>,
+);
+const connection = app.connect(stream);
+await connection.closed;

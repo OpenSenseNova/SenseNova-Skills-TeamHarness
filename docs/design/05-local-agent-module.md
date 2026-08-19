@@ -1,8 +1,8 @@
 # Local Agent Module：Agent Instance、Workspace 写回与 ACP Runtime
 
-> 状态：Step 6 Proposed
-> 上游：`CONTEXT.md`、`docs/ARCHITECTURE_V2.md`、ADR-0001、ADR-0002、ADR-0003、ADR-0006、ADR-0007、ADR-0008、ADR-0011、ADR-0014、ADR-0015
-> 本文范围：统一定义本地 Agent Instance、Runtime 对 Workspace 的 CLI/MCP 写回能力，以及首个 ACP v1 stdio Runtime Adapter。
+> 状态：Step 6 现有链路已实现；Project Working Copy / Attempt Worktree 契约已接受、实现待同步
+> 上游：`CONTEXT.md`、`docs/ARCHITECTURE_V1.md`、ADR-0001、ADR-0002、ADR-0003、ADR-0006、ADR-0007、ADR-0008、ADR-0011、ADR-0014、ADR-0015、ADR-0044
+> 本文范围：统一定义本地 Agent Instance、Runtime 对 Workspace 的 CLI/MCP 写回能力，以及通用 ACP v1 stdio Runtime Adapter。Snapshot、Manifest 与 Private Context 的权威字段见 `docs/design/08-context-and-privacy.md`。
 
 ## 1. 本层要解决的问题
 
@@ -42,7 +42,7 @@ Agent Instance（该 Agent 在一台 Device 上的长期本地承载）
 
 ![单次 Attempt 的 Runtime 执行与 Workspace 写回时序图](https://kroki.io/plantuml/svg/eNqNV01vGzcQve-vGNgXCbVgOInbwICDKLLVGLUbwy7qiy8Ud2SxocgtybWc_Po-cr8oR0Lji1bamTczb94M6Y8-CBfqtS6CCprpi2GahsDrKtCE7moT1Jrp8oVlHZQ1JExJD9Z99ZWQTA9OBZ4shPxaFCtVMi2tDQv7UvivylTCiTX5lSjtRpknWgrtOXsT3Z6crU05s9o6Opynv8yi5KWodZhbE_4USGPqlNC739-r70wnb7KXU-fspkV--_bdyelpUZQiiIXwTAd9DY9mWoeVRSHfDkj4rLiYz7uLX4sCBdHBtZVC0_SJTaAbW9aaD2Dxfj6dzwoihAxKqkrg7UEyujJg1khOoI3b4cXp5fuLdzvNwfRncKsb--axd2CQHlltMumacmUCPzkR27I_FVm15tNSVIFdk07zTIeXJ4jw22unW2cle39fV-yelbeN0_AVfu_nJ_NPr_3aSD2Dn5Qp0fjk3T4nUt_MZq9Kms5uO63tLwU2DY9tfgm3I6Mrpcc9P6f7KG2yULRoWvydy17c5-dFMfR68qHFPqNpbwvsC4X3Qa4ezQjfrsqjzj8-XjOkdEQzyI9fwh0vx4WQQT2LwA1a0WBm4CWXdaWVTCYd0qNx7MEtkxTIBkp8NEvHDEXLBnsA6ng8owWe2upHIikOKbkmSdFBj4vOYZJlMbu-omO6AaG_tL9JxyU-43hlSbcyOSNbsel3wKiNei1qI1f3Fcu87san6HwBkwnnjEDnxoykXa8hcSTqnvwRsXk-og2acaFchjU4FhkGELumn8W8o2XVKGJwbS2KznLyQx6hVJbgXX7bAt8qu4WlVRrHouRdqeWlDokpoyKbkNEIKMFKq_9m5-MKPaeT8VZiQ8DY_4XScGWP3kTZ3jDkWPqisBBt5xVfxHbJNP0o499aoYMYmZ3JZOY8WifAKA2i3Vnk5mWcqD01enCD8MeGNyO5QTfXsrqPOnZ-X4Gty1WZIe6CBGfQ78gu_uFIOYOMdhQIwlFL9mE8QGTSTmt6kGp0clZrhq6y9nUqbeXTrNtB-O367eW1hDKQI2amndktrDTpcd90ZUQleyggO-HSutHWVvSwUjoJNi6hUDtDylMC47whH3awdlxXOMBwYqGH3mPmkVClRcwrWKvxUcdfx1syyKppwXt2Lp9T5kS5tDbxSPfx2IagMCYICIs8s2wHBRZrGTSBn2GXYq8kj56h1j792K-jD5nHGT03s8H55aJdEigXSIhwnm2phvVxgsy2-FZy0V-hXyWIWbGOH_BWaUyyRLYlHVwt0RU4YSfjbpFss24PtcS5SLMh9MAeYlaaI4EYobzLe4ftNtncsa-s8TzywVZ3OFes-ek2fqkDwnLBuF7RLN45dNoImJFUa-v4atFEs5HbGenHcWzMYZbXGlP1tFFhBanjIoIGYCkqW27rZXv--_JiOxOqTkmm5H_PQIhfKuw0n8D2nSZ_Xd7dHEWqDf1xdX3dL-w4dFXboz0s9sHJdvzFZsYxZmwNGae0vTZgBuIKagSRJnmgNBdxPE36-8UxzZWBUG_aUW0mKYll-8UGt5heqsVrOeddJ19LyRiBEutwC6Tp_W290N2R8Nnq_wFTphMr0PgFCofOdRAoY-kbwLzTFaLGXoOtV7F_NsporaAm8zRZRvdxw_cucZa4dFnMwnjvLcKxjnevvt9oja0dHnOPYRO0gPn-WLRznI12d2f4iMTwD9F_HxV3ow)
 
-这条时序强调两个不同的完成条件：ACP `stopReason` 只结束 Runtime turn；只有 Runtime 显式调用 Workspace command 并成功提交 Final Message，Workspace Run 才能成功。
+这条时序强调两个不同的完成条件：ACP `stopReason` 只结束 Runtime turn；只有 Runtime 显式提交 `RuntimeReturnEnvelope`，并由 Workspace 在同一权威事务中完成允许的 Message publish 与 Run terminal transition，Run 才结束。`no_output` 和 `discard` 不创建空 Message。
 
 ## 2. 明确的对象边界
 
@@ -68,7 +68,7 @@ Agent Instance 是一个 Workspace Agent 在一台已绑定 Device 上的长期�
 | Workspace Agent | Agent 是共享身份和作者；Agent Instance 是该身份在一台 Device 上的本地承载，没有第二个 Workspace 身份。 |
 | Agent Request | Agent Request 是一次持久请求；Agent Instance 可以先于它存在并处理很多请求。 |
 | Run / Attempt | Run 是逻辑执行，Attempt 是一次具体执行；它们都是 Agent Instance 的短期工作。 |
-| Runtime | Runtime 是 Codex、Claude、Gemini、Goose 等可替换执行引擎；Agent Instance 不实现模型推理。 |
+| Runtime | Runtime 是 Codex、Claude、Gemini、Goose、Hermes 或显式注册的 ACP harness；Agent Instance 不实现模型推理。 |
 | Runtime process / session | 它们是某个 Attempt 的执行资源；Agent Instance 在它们关闭后仍存在。 |
 | AgentRunHandle | 它是 `run()` 为一个已有 Workspace Run / Attempt 返回的本地控制对象，生命周期短于 Agent Instance。 |
 | 消息队列 | Agent Instance 不保存任务权威队列；Assigned Request Inbox 由 Workspace Authority 从持久事实重建。 |
@@ -86,7 +86,7 @@ AgentInstanceKey = (WorkspaceId, AgentId, DeviceId)
 
 1. 同一进程内，同一个 `AgentInstanceKey` 至多有一个非终止实例；
 2. 同一个 Agent 可以先后或按 Workspace 政策在不同 Device 上形成不同本地实例，但这些实例都不是新的 Agent；
-3. Device 迁移时，旧实例进入 Draining，新实例从 Workspace 共享上下文重新物化；
+3. Device 迁移时，旧实例进入 Draining；新实例在每个 Attempt 启动时从 Workspace Snapshot 重新物化被授权的团队文档；
 4. 只存在于旧 Device 的私有上下文不会自动迁移；必须经过显式导出、授权和导入；
 5. Runtime Binding 的变更只替换未来 Local Execution 使用的执行引擎，不自动重建 Agent Instance；
 6. 已启动 Attempt 固定使用启动时记录的 binding revision 和 Runtime descriptor，不在运行中静默换 Runtime。
@@ -111,12 +111,6 @@ type AgentInstanceRecord = {
 
   lifecycle: "provisioning" | "ready" | "draining" | "stopped" | "faulted";
 
-  standingContext: {
-    sharedVersion: ContextVersion;
-    localPrivateVersion: ContextVersion | null;
-    materializedPath: AbsolutePath;
-  };
-
   intake: {
     configuredMaxParallelAttempts: number;
     lastAssignedRequestCursor: InboxCursor | null;
@@ -140,64 +134,38 @@ type AgentInstanceLiveState = {
 };
 ```
 
-`AgentRunHandle` 是 Agent Instance 对一个 Workspace Run / Attempt 的本地控制对象；它不是新的共享领域身份。`Runtime process`、ACP `sessionId`、PID、stdio handle 和 Runtime 取消令牌只能封装在该 handle 的 `LocalExecution` 内，不能放在 Agent Instance 的身份或 Standing Agent Context 中。
+`AgentRunHandle` 是 Agent Instance 对一个 Workspace Run / Attempt 的本地控制对象；它不是新的共享领域身份。`Runtime process`、ACP `sessionId`、PID、stdio handle 和 Runtime 取消令牌只能封装在该 handle 的 `LocalExecution` 内，不能放在 Agent Instance 身份或 Workspace 共享上下文中。
 
-## 5. Standing Agent Context
+## 5. Workspace Documents 与执行上下文
 
-### 5.1 定义
+### 5.1 共享知识的唯一模型
 
-Standing Agent Context 是 Agent 自己长期持有、且不随某个任务或 Runtime 改变的上下文。它至少包含：
+Agent 没有角色上下文或长期 persona。团队规则、流程、指南和共享知识都属于 Workspace Document Library：Document 有稳定 ID，内容按不可变版本增长，任何 Agent 都只能通过当前 Run/Attempt 的授权 Snapshot 读取它。Skill 则是 Computer/Runtime 的本地安装能力，由 Local Computer 扫描并上报元数据；Document 与 Skill 不是同一种资源。
 
-- Agent 身份说明：名称、角色、职责边界；
-- 长期指令：工作方式、质量标准、必须遵守的限制；
-- 协作约定：沟通风格、何时提问、何时保持沉默；
-- 长期记忆或知识引用：已确认事实、经验、索引和来源；
-- 默认能力声明与使用偏好，但不包含某次执行的临时授权；
-- 上下文版本、来源和更新时间。
+本层明确区分：
 
-它明确不包含：
-
-- 当前 Agent Request 的正文；
-- WorkItem、Run、Attempt 或 Execution Lease 状态；
-- Run Context Snapshot；
-- 当前 Runtime、模型、ACP session、PID 或进程历史；
-- 未经 Private Context Grant 允许使用的 Owner 私有内容；
-- 某个任务的临时工作目录和中间产物。
-
-### 5.2 共享部分与本地部分
-
-Standing Agent Context 分成两个权威范围：
-
-| 部分 | 权威位置 | 迁移语义 |
+| 资源 | 权威位置 | 执行语义 |
 |---|---|---|
-| Shared Standing Context | Workspace Authority 中的版本化结构化记录 | 跟随 Agent，可在新 Device 重新物化。 |
-| Local Private Agent Context | Host 的 Local Custody | 默认只在当前 Device，不因 Agent 绑定迁移而自动上传。 |
-| Runtime Materialization | Agent Home / Attempt input 中的只读文件视图 | 是缓存或投影，可以从权威版本重建。 |
+| Workspace Document | Workspace Authority | Runtime 通过显式授权读取精确版本；V1 不推送更新。 |
+| Local Private Context | Host 的 Local Custody | 只对具有当前 Run Grant 的 Attempt 物化，不自动上传或迁移。 |
+| Runtime Skill inventory | Local Computer / Runtime | 按绑定 Runtime 扫描，Workspace 只保存脱敏 metadata 与 digest。 |
+| Runtime developer instructions | Agent session | 首次 wake 提供身份、边界和 `teamctl` 说明，不承载消息正文。 |
 
-如果一条长期记忆必须在换机器后仍然存在，就必须通过明确的共享上下文更新用例提交给 Workspace；不能依赖某台机器上的 `MEMORY.md` 恰好还在。
+### 5.2 每次执行拿到什么
 
-### 5.3 每次执行拿到什么
-
-每个 Attempt 启动时组装一次不可变输入：
+每个 Agent Session 首次启动时只组装稳定开发者说明：
 
 ```text
-Execution Context
-  = Standing Agent Context Snapshot
-  + Run Context Snapshot
-  + explicitly granted Private Context Snapshot
-  + execution envelope
+Runtime Bootstrap
+  = Agent name and description
+  + Workspace identity
+  + execution directory and policy boundaries
+  + teamctl usage instructions
 ```
 
-其中 execution envelope 只包含当前 Attempt 必须知道的目标、预算、工作目录、可用能力和 Workspace CLI/MCP 使用说明；凭据本身不进入这个 Runtime-readable 文本快照。
+用户消息、Conversation 历史和共享文档都不进入 bootstrap。Runtime 收到 `Agent Inbox changed` 后主动调用 `teamctl inbox check` 与 `teamctl message check`；凭据本身不进入 Runtime-readable 文本。
 
-每个快照都记录来源版本。Standing Agent Context 在 Attempt 运行期间发生更新时：
-
-- 已运行 Attempt 继续使用原版本；
-- 新 Attempt 使用新版本；
-- 不向已有 Runtime session 静默热更新；
-- 如确有必要刷新，必须形成可审计的显式执行输入事件。
-
-Runtime Adapter 只负责把已经组装好的快照渲染并传给 Runtime，不拥有 Standing Agent Context，也不能自行改变它。
+显式读取的来源记录稳定 ID、不可变版本和 digest。V1 不把 Document/Artifact 更新自动加入 Inbox，也不生成 context manifest。Runtime Adapter 只负责 ACP Session 与输入/取消，不拥有或修改 Workspace Document。
 
 ## 6. Agent Home 与文件形态
 
@@ -209,18 +177,13 @@ agent-home/
     └── <agent-id>/
         ├── instance.json
         ├── state.db
-        ├── shared-context/
-        │   └── <shared-version>/
-        │       ├── AGENT.md
-        │       ├── instructions.md
-        │       └── manifest.json
         ├── private-context/
         │   ├── sources/
         │   └── notes/
         ├── attempts/
         │   └── <attempt-id>/
         │       ├── input/       # frozen runtime-readable projection
-        │       ├── work/        # task-specific mutable workdir
+        │       ├── work/        # Workspace scratch 或 Project Attempt worktree
         │       └── recovery.json
         └── recovery/
             └── pending-candidates/
@@ -229,11 +192,10 @@ agent-home/
 各位置的语义：
 
 - `instance.json`：便于诊断的非敏感实例摘要；不能单独恢复共享权威事实；
-- `state.db`：本地事务状态，例如 inbox cursor、上下文版本、Attempt 恢复索引和 pending candidate 索引；
-- `shared-context/<version>`：Workspace 共享上下文的不可变本地投影；
+- `state.db`：本地事务状态，例如 inbox cursor、Snapshot refs、Attempt 恢复索引和 pending candidate 索引；
 - `private-context`：Local Custody 下的来源文件或笔记，只有获得相应 grant 时才进入执行快照；
 - `attempts/<attempt-id>/input`：该 Attempt 的只读上下文，多个 Runtime 不共享可写输入文件；
-- `attempts/<attempt-id>/work`：只属于该 Attempt 的可写工作目录；
+- `attempts/<attempt-id>/work`：只属于该 Attempt 的可写工作目录；Workspace Attempt 在此使用隔离 scratch，Project Attempt 在此建立隔离 Git worktree；
 - `recovery`：尚未提交的候选结果和重启恢复元数据。
 
 下列内容禁止写进 materialized context 或普通 JSON/Markdown：
@@ -245,7 +207,15 @@ agent-home/
 
 Credential 只在 Agent Home 中保存引用。Local Custody 在创建 RuntimeWorkspaceBinding 时解析当前 Agent 的凭据或 CLI profile，并通过进程环境、凭据文件引用或 MCP server 配置传给 Runtime。秘密值不得写入 materialized context、普通日志或 recovery JSON。
 
-### 6.1 长期记忆的写入
+### 6.1 Project Working Copy 与 Attempt Worktree
+
+Project 的主 Git Repository 是共享身份；它在某台 Computer 上的绝对路径是 Local Working Copy，只属于该 Computer 的 Local Custody。Local Agent Module 维护 `(Project, Repository, Computer) → Local Working Copy` 映射，并在执行前验证该目录仍是匹配的 Git checkout。Workspace Authority 只能看到脱敏后的 availability、Repository identity、branch、commit 与同步状态，不能获得绝对路径、Git 凭据或未提交内容。
+
+有 Primary Repository 的 Project Attempt 必须从匹配 Local Working Copy 建立隔离 Git worktree，并把 `attempts/<attempt-id>/work` 作为 Runtime `cwd`。不同 Attempt 不能共享主 checkout 或可写 worktree；没有匹配 Working Copy、Repository identity 不一致或 worktree 无法建立时必须 fail closed。没有 Primary Repository 的 Project Attempt 与 Workspace Attempt 使用自己的隔离 scratch workdir，不能使用 Workspace 根目录、用户 Home 或任意已有目录。
+
+Workspace-level Attempt 不绑定 Project Repository，使用隔离 scratch directory。无论哪种 scope，Runtime 对目录的写入都只是本地执行副作用，不会自动成为 Message、Artifact 或其他共享事实；共享结果必须经 Workspace CLI/MCP 的受控发布路径显式提交。
+
+### 6.2 长期记忆的写入
 
 Runtime 不得直接修改正在被其他 Attempt 读取的共享 `MEMORY.md`。它只能提交 `ProposedContextChange`：
 
@@ -293,16 +263,15 @@ interface AgentInstanceManager {
 `ensureAgentInstance` 的含义是“存在就恢复并返回，不存在就创建”，而不是“启动 Codex”。它执行：
 
 1. 向 Workspace 读取并验证 Agent 状态、Owner/Host、Device Binding 和 binding revision；
-2. 取得 Shared Standing Context 的当前版本；
-3. 创建或打开 Agent Home，并校验本地记录与绑定是否一致；
-4. 物化共享上下文的不可变文件视图；
-5. 加载本地私有上下文目录和版本索引，但不默认把内容授予任何 Run；
+2. 创建或打开 Agent Home，并校验本地记录与绑定是否一致；
+3. 加载本地私有上下文索引，但不默认把内容授予任何 Run；
+4. 校验 Workspace Document 与 Initial Snapshot 物化能力；Document 内容只在 Attempt 启动后按精确 source refs 获取；
 6. 恢复 Assigned Request cursor、pending candidate 和未完成 Attempt 索引；
 7. 检查 Runtime Binding 是否可解析、可启动，但此时不创建 Runtime process/session；
 8. 注册实时 wake listener，并立即通过 Workspace Assigned Request Inbox 做一次恢复性读取；
 9. 状态进入 `ready`。
 
-如果共享 Standing Agent Context 无法读取或校验，实例必须 fail closed 进入 `faulted`，不能使用空白 persona 启动任务。
+如果 Initial Snapshot 引用的 Workspace Document 无法读取或 digest 校验失败，对应 Attempt 必须 fail closed；不能省略材料后继续启动 Runtime。
 
 ### 7.1 一个具体例子
 
@@ -405,7 +374,7 @@ effective parallelism
 每个并行 Attempt 必须拥有独立的：
 
 - `AttemptId` 和 Execution Lease；
-- Standing Agent Context version 与 Run Context Snapshot 引用；
+- Agent Inbox claim receipt、Discussion Scope position 与 Binding revision；
 - 工作目录；
 - 独立的 RuntimeWorkspaceBinding 和审计关联信息；V1 允许底层复用同一 Agent credential/profile；
 - Runtime execution handle；
@@ -462,6 +431,7 @@ type AuthorizedRunDispatch = {
   attemptId: AttemptId;
   bindingRevision: number;
   leaseFence: LeaseFence;
+  executionScopeRef: AuthorizedExecutionScopeRef;
   runContextSnapshotRef: RunContextSnapshotRef;
   privateContextGrantRefs: PrivateContextGrantRef[];
   budget: ExecutionBudget;
@@ -469,20 +439,21 @@ type AuthorizedRunDispatch = {
 };
 ```
 
+`AuthorizedExecutionScopeRef` 必须能让 Local Agent Module 区分 Workspace scratch 与 Project Repository 执行；Project 引用还必须固定 Project、Repository identity/version 与允许的 base ref，不能只传一个目录字符串。其具体 wire 字段由 Workspace 后端、OpenAPI 与 Local Computer 契约共同定义，Web 不自行构造。
+
 完整顺序是：
 
 ```text
-Human publishes a Message containing @Agent
-→ Workspace atomically commits Message + Agent Request
-→ Workspace authorizes the request and creates/returns Run
-→ wake only signals the matching Agent Instance
-→ Agent Instance reconciles Assigned Request Inbox
-→ Device obtains current Attempt Execution Lease
-→ Local Node calls agentInstance.run(AuthorizedRunDispatch)
+Human publishes a DM Message or a Message containing @Agent
+→ Workspace atomically commits Message + Agent Request + Inbox Item
+→ wake only signals the matching Agent ID and sequence
+→ Agent Session calls teamctl inbox check
+→ message check atomically claims one Discussion Scope
+→ Workspace creates or reuses the Run/Attempt and returns a receipt
 → run() deduplicates by AttemptId and reserves one execution slot
-→ run() freezes Standing Agent Context Snapshot
-→ run() obtains Run Context Snapshot and granted Private Context
-→ run() creates Attempt workdir and RuntimeWorkspaceBinding
+→ run() resolves a matching Local Working Copy when Project-scoped
+→ run() creates an isolated scratch directory or Attempt worktree
+→ run() creates RuntimeWorkspaceBinding
 → run() resolves current Runtime Binding
 → run() internally calls Runtime Adapter.openExecution(launchSpec)
 → activeRuns[AttemptId] = AgentRunHandle
@@ -494,7 +465,8 @@ Human publishes a Message containing @Agent
 - 已有 active handle 时返回同一 handle；
 - 已有终止恢复记录时返回一个可读取该确定结果的 completed handle，不重启 Runtime；
 - binding revision、Lease fence 或权限过期时拒绝；
-- Standing Context 无法校验时拒绝；
+- Project Repository 无匹配 Local Working Copy、identity 不一致或 Attempt worktree 无法建立时拒绝；
+- Initial Snapshot 或其 Document source 无法校验时拒绝；
 - 并发容量已满时保持该 dispatch 在 Workspace 可发现状态，不创建本地影子任务；
 - 任一步失败都释放预占 slot，并持久化足以恢复的确定状态。
 
@@ -509,7 +481,7 @@ type RuntimeLaunchSpec = {
   objective: string;
   contextManifest: ImmutableContextManifest;
   inputDir: AbsolutePath;
-  workDir: AbsolutePath;
+  workDir: AbsolutePath; // isolated Workspace scratch or Project Attempt worktree
   workspaceAccess: RuntimeWorkspaceBinding;
   budget: ExecutionBudget;
   deadline: Instant | null;
@@ -558,8 +530,8 @@ V1 只实现 `DirectWorkspaceAccess`：它从 Local Custody 解析 Agent-scoped 
 | Workspace 暂时离线 | 不取得新 Lease；已授权 Attempt 只可按 Offline Continuation 做有界本地计算，结果保持 candidate。 |
 | Execution Lease 到期 | 旧 Local Execution 被 fence，不能继续提交当前权威结果；Agent Instance 本身不停止。 |
 | Runtime Binding 失效 | 不启动新 Attempt；现有 Attempt 按绑定版本和政策 drain/cancel；Agent Instance 可等待新 binding。 |
-| Standing Context 校验失败 | Agent Instance `faulted`，禁止用空上下文继续。 |
-| 长期上下文并发更新冲突 | 按 base version 拒绝或进入显式合并，不做最后写入者覆盖。 |
+| Workspace Document 校验失败 | 对应 Attempt 启动失败，禁止省略该来源继续。 |
+| Workspace Document 并发更新冲突 | 按 expected revision 拒绝，不做最后写入者覆盖。 |
 | candidate 提交结果未知 | 持久保存 payload、幂等键和 expected frontier，先查询 Workspace 再决定重放。 |
 
 恢复时不能从本机 Runtime session、PID 或缓存反推 Agent Claim、Run success、Final Message 或 Workspace 权限。这些共享事实只能从 Workspace Authority 读取。
@@ -567,7 +539,7 @@ V1 只实现 `DirectWorkspaceAccess`：它从 Local Custody 解析 Agent-scoped 
 ## 13. 安全约束
 
 1. Runtime 只能获得 Agent-scoped Workspace credential/profile，不得获得 Human、Owner 或 Device 的 Workspace 凭据；
-2. Agent credential 只能通过 `OpaqueSecretEnvOverlay`、受限凭据文件或 MCP 进程配置注入，不得进入 context manifest、prompt、日志或 recovery 记录；
+2. Runtime 不获得 Computer Token 或 Workspace credential；本机 Runtime 自身凭据只能通过受控环境或凭据文件使用，不得进入 Runtime input、日志或 recovery 记录；
 3. V1 把 Runtime 视为 Agent 的受信执行器；同一 Agent 的并行 Attempt 可能复用同一 credential，因此不宣称存在 Attempt 级 Workspace 安全隔离；
 4. Workspace Authority 仍按 credential 对应的 Agent、当前 Membership 和行为策略重新授权，Runtime 自报的其他 Agent、Owner 或额外 scope 不生效；
 5. `runId` 和 `attemptId` 由 Local Agent Module 注入并作为 V1 审计关联，但不当作防御恶意 Runtime 伪造的密码学证据；
@@ -637,7 +609,7 @@ interface AgentInstanceHandle {
 }
 ```
 
-`wake()` 只安排一次幂等的 Workspace 对账；它不把 hint 当成 prompt，也不确认 Agent Request。`reconcileWorkspaceState()` 统一刷新 Agent 状态、Binding、Standing Context、Inbox、Lease 和 pending candidate；不再对外暴露一个可能绕过其他状态检查的 `refreshAssignedRequests()`。
+`wake()` 只安排一次幂等的 Workspace 对账；它不把 hint 当成 prompt，也不确认 Agent Request。`reconcileWorkspaceState()` 统一刷新 Agent 状态、Binding、Inbox、Lease 和 pending candidate；不再对外暴露一个可能绕过其他状态检查的 `refreshAssignedRequests()`。
 
 `run()` 是主要执行入口。容量接纳、Attempt 幂等、上下文冻结和 `RuntimeIntegration.openExecution()` 都是它的内部步骤，不再作为上层需要自行编排的浅接口。
 
@@ -658,13 +630,15 @@ interface AgentRunHandle {
     reason: AuthorizedCancelReason
   ): Promise<CancelResult>;
 
-  waitForCandidate(): Promise<CandidateResult>;
+  returnAndFinish(
+    output: RuntimeReturnEnvelope
+  ): Promise<ReturnResult>;
 }
 ```
 
-`sendInput()` 只用于已经明确关联当前 Run 的交互，例如回答 Agent 主动提出的问题，或 Publication Hold 后的显式 reconciliation。普通新消息、新的 `@Agent` 或新任务必须创建新的 Agent Request，不能借 `sendInput()` 静默改变当前 Run Context Snapshot。
+`sendInput()` 只发送首次 developer instructions 或轻量 `Agent Inbox changed` wake，不发送用户正文。Runtime 使用 `teamctl` 主动领取消息；Human–Agent DM 中的每条 Human Message 仍建立 Inbox Item/Agent Request，但同一 Scope 的 pending 请求可加入同一活动 Run。`returnAndFinish()` 只回传一次并终止 Runtime。
 
-`cancel()`、`sendInput()` 和 Runtime 退出处理都只作用于该 handle 对应的 Attempt。Runtime 不支持原生 steer 时，`sendInput()` 返回明确的 `unsupported`，或由下一层 Adapter 规范定义可审计的取消并恢复策略，不能静默丢弃输入。
+`cancel()`、`sendInput()` 和 Runtime 退出处理都只作用于该 handle 对应的 Attempt。新的 wake 在 work cycle 活跃时只设置 `wakePending`，等当前输入到达安全边界后再发送；不能并行启动第二个 Agent 进程。
 
 职责对应：
 
@@ -672,11 +646,12 @@ interface AgentRunHandle {
 |---|---|
 | AgentInstanceManager | 按 `(Workspace, Agent, Device)` 幂等创建、查找、恢复和停止 Agent Instance。 |
 | AgentInstance | 保存该本地 Agent 的长期状态，通过 `run()` 驱动已有 Workspace Run，并编排多个 AgentRunHandle。 |
-| AgentRunHandle | 把输入、取消、状态和候选结果限定到一个 Run / Attempt，并封装具体 Local Execution。 |
-| LocalStateStore | 事务保存 cursor、版本、recovery 和 pending candidate 索引。 |
-| ContextStore / ContextMaterializer | 版本化 Standing Context，并生成每个 Attempt 的只读文件视图。 |
-| AssignedRequestReader | 从 Workspace 的可重建 Inbox 拉取请求；wake 只是触发它。 |
+| AgentRunHandle | 把输入、取消、claim receipt、一次回传和终止限定到一个 Run / Attempt。 |
+| LocalStateStore | 事务保存 session、wakePending、recovery 和 pending candidate 索引。 |
+| WorkspaceReturnBinding | 提供 Agent 级双向 `teamctl` IPC，并把 receipt 绑定到当前 Run/Attempt。 |
+| AgentInboxReader | 从 Workspace 的可重建 Inbox 拉取请求；wake 只是触发它。 |
 | RuntimeBindingResolver | 把当前绑定解析成具体 Runtime Adapter 与能力，不启动任务。 |
+| ProjectWorkingCopyManager | 在 Local Custody 中维护 Repository 到本机 checkout 的映射，校验 identity，并为 Project Attempt 建立、恢复与回收隔离 worktree。 |
 | WorkspaceAccess | 把 Agent-scoped credential/profile 与 CLI/MCP 配置组装成 RuntimeWorkspaceBinding；V1 为直连 Workspace 的受信 Runtime 模式。 |
 | RuntimeIntegration | 供 `AgentInstance.run()` 和 AgentRunHandle 内部使用，创建、观察、交互和取消一次 Local Execution。 |
 
@@ -690,23 +665,23 @@ interface AgentRunHandle {
 
 ### S-AGENT-INSTANCE-NO-RUNTIME-01
 
-有效 Agent/Device Binding 被激活后，`ensureAgentInstance` 成功，Agent Home 和 Standing Context 已就绪，但系统中没有 Runtime process/session。
+有效 Agent/Device Binding 被激活后，`ensureAgentInstance` 成功，Agent Home 与 Runtime Binding 已就绪，但系统中没有 Runtime process/session。
 
 ### S-AGENT-INSTANCE-RUNTIME-REPLACEMENT-01
 
-同一 Agent Instance 先用 Codex 完成 Attempt-A，随后 Runtime Binding 改为 Claude。Attempt-B 使用相同 Agent 身份和新 Standing Context version 规则启动；历史作者仍是同一 Agent，Attempt-A 的 Runtime 事实不被改写。
+同一 Agent Instance 先用 Codex 完成 Attempt-A，随后 Runtime Binding 改为 Claude。Attempt-B 使用相同 Agent 身份、新 Binding revision 与当时的 Workspace Document versions 启动；历史作者仍是同一 Agent，Attempt-A 的 Runtime 事实不被改写。
 
 ### S-AGENT-INSTANCE-PARALLEL-01
 
-容量为 2 时，同一 Agent Instance 通过两次 `run()` 同时启动 Attempt-A 和 Attempt-B，并返回两个 AgentRunHandle。二者可读取同一 Standing Context version，但有不同 workdir、RuntimeWorkspaceBinding 对象、Runtime handle、取消句柄和候选结果；取消 A 不影响 B。V1 可复用同一 Agent credential，不宣称远程 Workspace 权限已按 Attempt 隔离。
+容量为 2 时，同一 Agent Instance 通过两次 `run()` 同时启动 Attempt-A 和 Attempt-B，并返回两个 AgentRunHandle。二者可以引用相同的 Workspace Document versions，但有不同 workdir、RuntimeWorkspaceBinding 对象、Runtime handle、取消句柄和候选结果；取消 A 不影响 B。V1 可复用同一 Agent credential，不宣称远程 Workspace 权限已按 Attempt 隔离。
 
-### S-AGENT-INSTANCE-CONTEXT-VERSION-01
+### S-AGENT-INSTANCE-INBOX-DELTA-01
 
-Attempt-A 使用 Standing Context V3 运行期间，长期上下文更新为 V4。A 继续使用 V3，新启动的 Attempt-B 使用 V4；系统不会向 A 静默注入 V4。
+Agent-A 上次成功处理 Scope position 3；Human 先发送普通 Channel Message position 4，再发送明确 mention position 5。一次 `message check` 返回 position 4–5，attention 只引用 position 5；重复 receipt 返回相同结果。
 
 ### S-AGENT-INSTANCE-CONTEXT-CONFLICT-01
 
-Attempt-A 和 B 都基于 V3 提交长期记忆修改。A 成功产生 V4；B 的 base version 冲突，进入拒绝或显式合并，不覆盖 V4。
+Attempt-A 和 B 都基于 revision 3 更新同一 Workspace Document。A 成功产生不可变内容 V4；B 的 expected revision 冲突并被拒绝，不覆盖 V4。
 
 ### S-AGENT-INSTANCE-RUNTIME-CRASH-01
 
@@ -714,7 +689,7 @@ Attempt-A 的 Runtime 崩溃后，A 进入失败/重试流程，Agent Instance �
 
 ### S-AGENT-INSTANCE-RESTART-01
 
-Local Node 重启后，实例从 Workspace、Agent Home 和本地事务状态恢复 inbox cursor、Standing Context version 和 pending candidate；不把缓存误认为共享权威结果。
+Local Node 重启后，实例从 Workspace、Agent Home 和本地事务状态恢复 inbox cursor、Snapshot refs 和 pending candidate；不把缓存误认为共享权威结果。
 
 ### S-AGENT-INSTANCE-NOTIFICATION-LOSS-01
 
@@ -722,11 +697,19 @@ Workspace 已提交 Agent Request，但实时 wake 丢失。实例下一次恢�
 
 ### S-AGENT-INSTANCE-FAIL-CLOSED-01
 
-Shared Standing Context 的 manifest/hash 无法校验时，实例进入 `faulted`，不会以空白指令启动 Runtime。
+Attempt 的 Manifest 或任一 Workspace Document digest 无法校验时，该 Attempt 启动失败，不会省略来源后启动 Runtime。
 
 ### S-AGENT-INSTANCE-CREDENTIAL-SCOPE-01
 
 检查 shared-context、Attempt input、日志、instance summary 和 recovery JSON，均不存在 Workspace credential 或 secret 值。RuntimeWorkspaceBinding 只注入 Agent-scoped credential/profile，不注入 Human、Owner 或 Device credential；Runtime 退出后 binding 被 dispose。
+
+### S-PROJECT-WORKING-COPY-01
+
+同一个 Project 在 Computer-A 与 Computer-B 分别绑定 `/local/a/repo` 与 `/different/b/repo`。Workspace 只观察到两台 Computer 对同一 Repository identity 的 availability 与安全状态，不得到任何绝对路径；其中一台目录的 remote identity 不匹配时，只拒绝该 Computer 上的 Project Attempt。
+
+### S-PROJECT-ATTEMPT-WORKTREE-01
+
+Project Attempt 获得 Lease 后，Local Agent Module 从匹配 Working Copy 建立只属于该 Attempt 的 worktree，并把其绝对路径传给 ACP `session/new(cwd)`。并行 Attempt 使用不同 worktree；没有 Working Copy 时不启动 Runtime；Runtime 写入文件后也不会自动生成 Conversation Message。
 
 ## 16. Runtime 如何操作 Workspace
 
@@ -918,18 +901,18 @@ WorkItem 只有在 Human 或 Agent 显式调用该能力组时才产生；`messa
 
 `message.send --attachment` 不会自动把 Attachment 提升为 Artifact。
 
-#### Mem
+#### Documents
 
-Buzz 的 `mem` 映射到 Agent 的 Standing Agent Context，但不暴露一个可被并发覆盖的共享 `MEMORY.md`：
+团队规则与共享知识统一映射到 Workspace Document Library，不暴露一个可被并发覆盖的共享 `MEMORY.md`：
 
 | 能力 | 语义 |
 |---|---|
-| `mem.list/get/hash` | 按 slug 读取有权访问的 memory entry 与 hash |
-| `mem.set` | 以 `expectedVersion/baseHash` 创建或替换 entry |
-| `mem.patch` | 对旧 version/hash 应用 patch；冲突时拒绝 |
-| `mem.remove` | 产生 tombstone 和新的 Standing Context version |
+| `document.list/get` | 读取有权访问的 Document 与精确不可变版本 |
+| `document.create` | 创建稳定 Document identity 与内容 V1 |
+| `document.update` | 以 `expectedRevision` 产生新内容版本；冲突时拒绝 |
+| `document.archive` | 显式归档 Document；不删除被历史 Snapshot 引用的版本 |
 
-Memory entry 保存 `slug`、scope、version/hash、source refs 和更新者。shared scope 由 Workspace policy 决定直接接受还是进入 review；local-private scope 由 Local Custody 提交，不自动上传。
+Document 保存稳定 ID、title、revision、不可变 content version、digest、source refs 和更新者。Local Private Context 仍由 Local Custody 管理，不自动上传或伪装为 Workspace Document。
 
 #### Workflow
 
@@ -1028,7 +1011,7 @@ RuntimeExecutionController in background
 
 | 对象 | 生命周期 | 负责什么 | 不负责什么 |
 |---|---|---|---|
-| Agent Instance | 跨任务、跨 Runtime execution | Agent Home、Standing Context、Inbox cursor、容量、0..N handle | 不等于 ACP process 或 Session |
+| Agent Instance | 跨任务、跨 Runtime execution | Agent Home、Inbox cursor、容量、0..N handle | 不等于 ACP process、Session 或共享知识库 |
 | AgentRunHandle | 一个 Workspace Run / Attempt | 状态、输入、取消、候选结果等待 | 不解析 ACP wire message |
 | Local Execution | 一个 Attempt | workdir、binding、Runtime descriptor、protocol handle | 不是 Workspace Run |
 | AcpRuntimeAdapter | 可替换 Adapter | 把公共执行语义翻译成 ACP | 不决定任务归属、权限或 Run success |
@@ -1054,10 +1037,20 @@ V1 采用最小可验证隔离：
 
 V1 不做 process multiplex 或 Session 复用。未来只有在 Runtime 明确支持、每 Attempt 仍有独立 Session、工作目录与 binding 不串线、取消与事件能隔离时才允许复用；`RuntimeIntegration` 上层接口保持不变。
 
-### 17.4 Runtime Binding 与接口
+### 17.4 Runtime Catalog、Binding 与接口
 
 ```ts
-type AcpRuntimeBinding = {
+type WorkspaceRuntimeBinding = {
+  computerId: ComputerId;
+  runtimeId: string;
+  requestedModel: string | null;
+  requestedReasoningEffort: ReasoningEffort | null;
+  requestedMode: string | null;
+  validatedRuntimeCatalogRevision: number;
+  bindingRevision: number;
+};
+
+type LocalRuntimeLaunchDescriptor = {
   kind: "acp-stdio";
   runtimeId: string;
   command: AbsolutePath;
@@ -1071,6 +1064,7 @@ type AcpRuntimeBinding = {
 };
 
 interface RuntimeIntegration {
+  inspectRuntime(spec: RuntimeInspectionSpec): Promise<RuntimeInspectionResult>;
   openExecution(spec: RuntimeLaunchSpec): Promise<LocalExecution>;
 }
 
@@ -1083,7 +1077,11 @@ interface RuntimeExecutionController {
 }
 ```
 
-`RuntimeBindingResolver` 只解析当前 binding revision，不启动任务。进程环境由 Supervisor 合成：
+Local Agent 启动时扫描本机 Runtime/ACP Adapter，形成 Local Runtime Catalog。内置 preset 覆盖 Codex、Claude、Gemini、Goose 与 Hermes；发现范围包含进程 `PATH` 以及用户级常见安装目录（`~/.local/bin`、`~/bin`、`/opt/homebrew/bin`、`/usr/local/bin`），避免桌面启动环境遗漏已经安装的 Hermes。额外 harness 必须由操作者显式提供 `runtimeId/command/args`。对 launchable Runtime，Local Agent 通过独立短生命周期进程执行 ACP `initialize` 与 `session/new`，归一化 Runtime 版本、模型 selector、reasoning-effort selector、mode 及其当前默认值；探测未完成则不能把 Runtime 上报为 `ready`。稳定 `runtimeId`、安全 availability、检测版本、结构化不可用原因和配置选项可由 Computer 主动上报 Workspace；绝对 command、args、凭据、stderr 与配置路径只保留在 Local Custody。`generic-acp` 与自定义 harness 都不能根据 command 名称猜 Profile。
+
+Runtime Binding 同时固定可选的 `model`、`reasoningEffort` 与 `mode`。Local Agent 必须在 `session/new` 或 `session/load` 返回真实能力后应用这些值：优先使用稳定 `session/set_config_option` / `session/set_mode`，模型仅在 Runtime 没有稳定 model option 时使用其 `session/set_model` 扩展。请求值不在 Runtime 返回的 option 中时 fail closed，不能静默使用默认值。
+
+Workspace 创建或替换 Binding 时，只能选择目标 Computer 最新上报为 `ready` 的 `runtimeId`，并校验所选 model、reasoning effort、mode 和已声明的组合约束。显式选择保存在 Runtime Binding，`null` 表示跟随 Runtime 默认值；这些字段只属于 Runtime Binding。替换操作用 binding revision 做 first-commit-wins，并保留校验时使用的 Runtime Catalog revision。`RuntimeBindingResolver` 用固定 binding revision 在本机 Catalog 中取得 `LocalRuntimeLaunchDescriptor`，但不启动任务。进程环境由 Supervisor 合成：
 
 ```text
 sanitized host environment
@@ -1092,7 +1090,7 @@ sanitized host environment
 + non-secret correlation values
 ```
 
-Secret 只能存在于受控环境或凭据存储，不进入 prompt、context manifest、stdout 日志、recovery JSON 或长期记忆。
+Secret 只能存在于受控环境或凭据存储，不进入 Runtime input、stdout 日志、recovery JSON 或长期记忆。
 
 ### 17.5 `openExecution()` 的确定顺序
 
@@ -1133,7 +1131,7 @@ ACP authentication 与 Workspace identity 是两套凭据：Runtime auth profile
 初始 prompt 只包含：
 
 1. 当前 Attempt objective；
-2. Standing Context 与 Run Context 的只读 manifest/文件入口；
+2. Run Context、Workspace Document 与获授权 Private Context 的只读 Manifest/文件入口；
 3. 可写 `workDir`；
 4. `teamctl` 或 MCP 的使用方法；
 5. 完成必须显式调用 `message.send --purpose final`；
@@ -1260,11 +1258,13 @@ ACP stdio 必须满足：
 
 | 场景 | 预期结果 |
 |---|---|
-| `S-AGENT-INSTANCE-NO-RUNTIME-01` | `ensureAgentInstance` 成功后 Agent Home 和 Standing Context 已就绪，但不存在 Runtime process/session |
+| `S-AGENT-INSTANCE-NO-RUNTIME-01` | `ensureAgentInstance` 成功后 Agent Home 与 Runtime Binding 已就绪，但不存在 Runtime process/session |
 | `S-AGENT-INSTANCE-RUN-DISPATCH-01` | 重复 wake 只触发幂等 reconciliation；同一 Attempt 只启动一次并返回同一 handle |
 | `S-AGENT-INSTANCE-PARALLEL-01` | 容量为 2 时两个 Attempt 的 process、Session、workdir、binding 和取消相互隔离 |
 | `S-AGENT-INSTANCE-CONTEXT-CONFLICT-01` | 两个 Attempt 基于同一旧版本更新 memory 时，后提交者得到冲突而非覆盖 |
 | `S-AGENT-INSTANCE-RESTART-01` | 重启从 Workspace 与本地事务记录恢复，不把缓存当共享事实 |
+| `S-PROJECT-WORKING-COPY-01` | 同一 Repository 可在不同 Computer 使用不同本机路径；绝对路径不进入共享层，identity 不匹配时 fail closed |
+| `S-PROJECT-ATTEMPT-WORKTREE-01` | Project Attempt 以隔离 worktree 为 ACP `cwd`；无 Working Copy 不启动，文件写入不自动成为共享事实 |
 | `S-WORKSPACE-CAPABILITY-01` | progress/blocked/final 都通过 `message.send`；Mem、Workflow、Artifact 保持独立资源语义 |
 | `S-WORKSPACE-REAUTHORIZATION-01` | Runtime 自报其他 Agent/Owner/scope 不扩权；每个 command 按 credential Agent 重新授权 |
 | `S-FINAL-PUBLICATION-HOLD-01` | frontier 过期时 `message.send(purpose=final)` 返回 hold，不创建 Final Message 或 Run success |
@@ -1273,7 +1273,7 @@ ACP stdio 必须满足：
 | `S-ACP-CANCEL-ISOLATED-01` | 取消 Attempt-A 不影响同 Agent 的 Attempt-B |
 | `S-ACP-CAPABILITY-FAIL-CLOSED-01` | 必需 capability 缺失时不试探调用或静默降级 |
 | `S-ACP-PROTOCOL-CORRUPT-01` | 非法 stdout frame 只失败对应 Local Execution，Agent Instance 仍可工作 |
-| `S-ACP-SESSION-NOT-IDENTITY-01` | 替换 Runtime/Session 不改变 Agent、Owner、Standing Context 或历史 |
+| `S-ACP-SESSION-NOT-IDENTITY-01` | 替换 Runtime/Session 不改变 Agent、Owner、Workspace Document 历史或既有执行历史 |
 | `S-ACP-REPLAY-NOT-NEW-OUTPUT-01` | load replay 不重复发布 Message、Artifact 或其他 Workspace 事实 |
 
 ## 20. 本文暂不定义
@@ -1348,7 +1348,7 @@ package "Workspace Authority" as Workspace {
 }
 
 package "Local Node" as LocalNode {
-  component "AgentInstance\nStanding Context · Inbox Cursor · Capacity" as AgentInstance #D5E8D4
+  component "AgentInstance\nInbox Cursor · Capacity" as AgentInstance #D5E8D4
   component "AgentRunHandle\n«one Run / Attempt»" as RunHandle #D5E8D4
   component "RuntimeBindingResolver" as Resolver
   component "«interface»\nRuntimeIntegration" as RuntimePort #F5F5F5
@@ -1446,7 +1446,7 @@ end
 
 Adapter -> Runtime : session/new(cwd, mcpServers)
 Runtime --> Adapter : sessionId
-Adapter ->> Runtime : session/prompt(objective + context manifest)
+Adapter ->> Runtime : session/prompt(developer instructions + lightweight Inbox wake)
 Adapter --> Agent : LocalExecution(controller)
 deactivate Adapter
 create Handle

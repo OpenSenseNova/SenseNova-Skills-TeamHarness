@@ -1,3 +1,0 @@
-# Snapshot shared context when an Agent Request is triggered
-
-An Agent Request's shared context consists of its stable trigger, the preceding visible content and Discussion Frontier of the triggering Discussion Scope, and explicitly referenced shared resources or WorkItem. Later Messages do not silently rewrite an active Run's snapshot; Agent Message freshness review may supply intervening content for an explicit publication decision without rewriting that snapshot, which records stable source identities and versions rather than treating a Runtime Prompt, model Session, or entire live Conversation as the shared fact.

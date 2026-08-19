@@ -1,5 +1,0 @@
-# Channel audience has member governance and Owner recovery
-
-Any active Human Workspace Member may create a Conversation containing their own Membership. A Channel audience may be changed by a current active Human audience member or by a current Workspace Owner through an audited recovery path. Workspace ownership alone exposes only the governance inventory needed to identify a Channel for recovery, never Message, Thread, attachment, or search content; an Owner explicitly added to the audience then receives complete-history access. Regular Human and Agent members can list or read only Conversations whose audience contains their current active Membership, and a DM is not discoverable outside its fixed audience. Agent execution never gains Conversation governance.
-
-This preserves routine participant autonomy and private DM semantics while preventing a Channel from permanently losing every governance entry when its Human audience disappears. The trade-off is an explicit Workspace Owner capability to join and recover Channel history, which must remain visible in audit rather than masquerading as implicit read access.
