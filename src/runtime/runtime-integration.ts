@@ -12,8 +12,15 @@ export type RuntimeContextEventType =
 
 export interface RuntimeContextEvent {
   type: RuntimeContextEventType;
-  attemptId: string;
+  executionId: string;
   details: Record<string, unknown>;
+  createdAt: number;
+}
+
+export interface RuntimeActivityEvent {
+  type: 'thought' | 'tool' | 'plan' | 'message';
+  title: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
   createdAt: number;
 }
 
@@ -32,10 +39,10 @@ export interface RuntimeLaunchSpec {
   command: string;
   args: string[];
   env?: Record<string, string>;
-  attemptId: string;
-  attemptRoot: string;
+  executionId: string;
+  executionRoot: string;
   workingDirectory: string;
-  executionKind: 'workspace_scratch' | 'project_repository';
+  executionKind: 'agent_session' | 'workspace_scratch' | 'project_scratch';
   runtimeConfiguration: {
     model: string | null;
     reasoningEffort: ReasoningEffort | null;
@@ -45,6 +52,7 @@ export interface RuntimeLaunchSpec {
   developerInstructions?: string;
   mcpServers?: Array<{ name: string; command: string; args: string[]; env?: Array<{ name: string; value: string }> }>;
   onEvent?: (event: RuntimeContextEvent) => void;
+  onActivity?: (event: RuntimeActivityEvent) => void;
   requestPermission?: (request: unknown) => Promise<'allow_once' | 'allow_always' | 'reject' | 'cancelled'>;
 }
 
@@ -80,5 +88,5 @@ export interface RuntimeIntegration {
 export interface RuntimeContextProfile {
   readonly runtimeId: string;
   readonly capabilities: Pick<RuntimeContextCapabilities, 'compaction' | 'invariantContinuity'>;
-  normalizeUpdate(attemptId: string, update: unknown): RuntimeContextEvent[];
+  normalizeUpdate(executionId: string, update: unknown): RuntimeContextEvent[];
 }

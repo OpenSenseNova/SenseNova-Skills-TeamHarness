@@ -4,10 +4,10 @@ abstract class BaseProfile implements RuntimeContextProfile {
   abstract readonly runtimeId: string;
   abstract readonly capabilities: RuntimeContextProfile['capabilities'];
 
-  normalizeUpdate(attemptId: string, update: unknown): RuntimeContextEvent[] {
+  normalizeUpdate(executionId: string, update: unknown): RuntimeContextEvent[] {
     const value = update as Record<string, unknown> | null;
     if (value?.sessionUpdate === 'usage_update') {
-      return [{ type: 'context_usage', attemptId, details: value, createdAt: Date.now() }];
+      return [{ type: 'context_usage', executionId, details: value, createdAt: Date.now() }];
     }
     const metadata = value?._meta as Record<string, unknown> | undefined;
     const observed = metadata?.aiNativeContextEvent;
@@ -16,7 +16,7 @@ abstract class BaseProfile implements RuntimeContextProfile {
       || observed === 'context_compaction_completed'
       || observed === 'context_reloaded'
     ) {
-      return [{ type: observed, attemptId, details: value ?? {}, createdAt: Date.now() }];
+      return [{ type: observed, executionId, details: value ?? {}, createdAt: Date.now() }];
     }
     return [];
   }

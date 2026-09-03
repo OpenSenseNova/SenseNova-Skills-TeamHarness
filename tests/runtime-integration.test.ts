@@ -25,8 +25,8 @@ describe('runtime integration', () => {
       });
       const controller = await integration.openExecution({
         runtimeId: 'hermes', command, args, env,
-        attemptId: 'attempt-legacy-model',
-        attemptRoot: root,
+        executionId: 'attempt-legacy-model',
+        executionRoot: root,
         workingDirectory: root,
         executionKind: 'workspace_scratch',
         runtimeConfiguration: { model: 'fake-legacy-pro', reasoningEffort: null, mode: null },
@@ -55,11 +55,11 @@ describe('runtime integration', () => {
           models: [
             {
               id: 'fake-default', label: 'Fake default', description: null,
-              supportedReasoningEfforts: null,
+              supportedReasoningEfforts: ['low', 'medium'],
             },
             {
               id: 'fake-pro', label: 'Fake pro', description: null,
-              supportedReasoningEfforts: null,
+              supportedReasoningEfforts: ['high'],
             },
           ],
           defaultModelId: 'fake-default',
@@ -91,8 +91,8 @@ describe('runtime integration', () => {
         command: process.execPath,
         args: ['--import', import.meta.resolve('tsx'), fixture],
         env: { FAKE_ACP_ECHO_CONFIG: '1' },
-        attemptId: 'attempt-config',
-        attemptRoot: root,
+        executionId: 'attempt-config',
+        executionRoot: root,
         workingDirectory: root,
         executionKind: 'workspace_scratch',
         runtimeConfiguration: { model: 'fake-pro', reasoningEffort: 'high', mode: 'autonomous' },
@@ -116,8 +116,8 @@ describe('runtime integration', () => {
         runtimeId: 'generic-acp',
         command: process.execPath,
         args: ['--import', import.meta.resolve('tsx'), fixture],
-        attemptId: 'attempt-1',
-        attemptRoot: root,
+        executionId: 'attempt-1',
+        executionRoot: root,
         workingDirectory: root,
         executionKind: 'workspace_scratch',
         runtimeConfiguration: { model: null, reasoningEffort: null, mode: null },
@@ -135,6 +135,39 @@ describe('runtime integration', () => {
     }
   });
 
+  it('projects ACP plans and tool calls into safe human-visible activity', async () => {
+    const root = mkdtempSync(resolve(tmpdir(), 'anc-acp-activity-'));
+    const fixture = resolve(process.cwd(), 'tests/fixtures/fake-acp-agent.ts');
+    const activities: Array<{ type: string; title: string; status: string }> = [];
+    const integration = new AcpRuntimeIntegration();
+    try {
+      const controller = await integration.openExecution({
+        runtimeId: 'generic-acp',
+        command: process.execPath,
+        args: ['--import', import.meta.resolve('tsx'), fixture],
+        env: { FAKE_ACP_EMIT_ACTIVITY: '1' },
+        executionId: 'agent-session-activity',
+        executionRoot: root,
+        workingDirectory: root,
+        executionKind: 'agent_session',
+        runtimeConfiguration: { model: null, reasoningEffort: null, mode: null },
+        onActivity: (event) => activities.push(event),
+      });
+      await controller.sendInput('show activity');
+      expect(activities.map(({ type, title, status }) => ({ type, title, status }))).toEqual([
+        { type: 'plan', title: '计划：检查项目文件', status: 'in_progress' },
+        { type: 'thought', title: '正在分析', status: 'in_progress' },
+        { type: 'tool', title: '读取项目文件', status: 'in_progress' },
+        { type: 'tool', title: '读取项目文件', status: 'completed' },
+        { type: 'message', title: '正在组织回复', status: 'in_progress' },
+      ]);
+      expect(JSON.stringify(activities)).not.toMatch(/private reasoning|private tool output|private\/example/iu);
+      await controller.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('loads a prior session as a local replay without publishing Workspace facts', async () => {
     const root = mkdtempSync(resolve(tmpdir(), 'anc-acp-load-'));
     const events: string[] = [];
@@ -145,8 +178,8 @@ describe('runtime integration', () => {
         runtimeId: 'generic-acp',
         command: process.execPath,
         args: ['--import', import.meta.resolve('tsx'), fixture],
-        attemptId: 'attempt-load',
-        attemptRoot: root,
+        executionId: 'attempt-load',
+        executionRoot: root,
         workingDirectory: root,
         executionKind: 'workspace_scratch',
         priorSessionId: 'fake-session-1',
@@ -173,8 +206,8 @@ describe('runtime integration', () => {
         command: process.execPath,
         args: ['--import', import.meta.resolve('tsx'), fixture],
         env: { FAKE_ACP_WAIT_FOR_CANCEL: '1' },
-        attemptId: 'attempt-cancel',
-        attemptRoot: root,
+        executionId: 'attempt-cancel',
+        executionRoot: root,
         workingDirectory: root,
         executionKind: 'workspace_scratch',
         runtimeConfiguration: { model: null, reasoningEffort: null, mode: null },
@@ -202,8 +235,8 @@ describe('runtime integration', () => {
         runtimeId: 'generic-acp',
         command: process.execPath,
         args: ['--import', import.meta.resolve('tsx'), fixture],
-        attemptId: 'attempt-corrupt',
-        attemptRoot: root,
+        executionId: 'attempt-corrupt',
+        executionRoot: root,
         workingDirectory: root,
         executionKind: 'workspace_scratch',
         runtimeConfiguration: { model: null, reasoningEffort: null, mode: null },

@@ -1,4 +1,6 @@
-export type LocalAttemptPermissionDecision = 'allow_once' | 'reject';
+export type LocalAgentPermissionDecision = 'allow_once' | 'reject';
+
+const TEAMCTL_COMMAND = /^(?:teamctl(?:\.cmd)?|\.\.[\\/]bin[\\/]teamctl(?:\.cmd)?)(?:\s|$)/u;
 
 function commandText(request: unknown): string | null {
   if (typeof request !== 'object' || request === null) return null;
@@ -8,7 +10,18 @@ function commandText(request: unknown): string | null {
   const rawInput = (toolCall as { rawInput?: unknown }).rawInput;
   if (typeof rawInput !== 'object' || rawInput === null) return null;
   const command = (rawInput as { command?: unknown }).command;
-  return typeof command === 'string' ? command.trim() : null;
+  if (typeof command !== 'string') return null;
+  const trimmed = command.trim();
+  if (!trimmed.startsWith('"')) return trimmed;
+  if (trimmed.length < 2 || !trimmed.endsWith('"')) return null;
+  for (let index = 1; index < trimmed.length - 1; index += 1) {
+    if (trimmed[index] === '\\') {
+      index += 1;
+      continue;
+    }
+    if (trimmed[index] === '"') return null;
+  }
+  return trimmed.slice(1, -1).trim();
 }
 
 function containsUnquotedShellControl(command: string): boolean {
@@ -34,12 +47,11 @@ function containsUnquotedShellControl(command: string): boolean {
 }
 
 /**
- * An unattended Local Computer may authorize only the Attempt-scoped return
- * bridge. Repository commands, network access, and writes outside the Runtime
- * sandbox remain rejected until a Human-facing permission flow exists.
+ * An unattended Local Computer may authorize only the Agent-scoped teamctl
+ * bridge. Arbitrary shell composition remains rejected.
  */
-export function localAttemptPermissionDecision(request: unknown): LocalAttemptPermissionDecision {
+export function localAgentPermissionDecision(request: unknown): LocalAgentPermissionDecision {
   const command = commandText(request);
-  if (!command || !/^teamctl(?:\.cmd)?(?:\s|$)/u.test(command)) return 'reject';
+  if (!command || !TEAMCTL_COMMAND.test(command)) return 'reject';
   return containsUnquotedShellControl(command) ? 'reject' : 'allow_once';
 }

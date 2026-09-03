@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { mkdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,15 +23,8 @@ const packedFilePaths = new Set((packed[0]?.files ?? []).map((file) => file.path
 if (!packedFilePaths.has('schema/manifest.json')) {
   throw new Error('Local Computer package is missing schema/manifest.json');
 }
-const migrationRoot = resolve(packageDirectory, '..', 'schema', 'migrations', 'local-node');
-const requiredMigrationPaths = readdirSync(migrationRoot, { withFileTypes: true })
-  .filter((entry) => entry.isDirectory())
-  .flatMap((entry) => readdirSync(resolve(migrationRoot, entry.name))
-    .filter((name) => name.endsWith('.sql'))
-    .map((name) => `schema/migrations/local-node/${entry.name}/${name}`));
-const missingMigrationPaths = requiredMigrationPaths.filter((path) => !packedFilePaths.has(path));
-if (missingMigrationPaths.length > 0) {
-  throw new Error(`Local Computer package is missing schema migrations: ${missingMigrationPaths.join(', ')}`);
+if (!packedFilePaths.has('schema/local-node.sql')) {
+  throw new Error('Local Computer package is missing schema/local-node.sql');
 }
 const stablePackagePath = resolve(downloadsDirectory, 'anc-local-computer.tgz');
 rmSync(stablePackagePath, { force: true });

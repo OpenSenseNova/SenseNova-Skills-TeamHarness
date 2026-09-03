@@ -13,8 +13,10 @@ import {
   type SessionConfigOption,
   type SessionId,
   type SessionModeState,
+  type SetSessionConfigOptionResponse,
 } from '@agentclientprotocol/sdk';
 import { invariant } from '../lib/errors.js';
+import { AcpActivityProjector } from './acp-activity-projector.js';
 import { runtimeContextProfile } from './runtime-profiles.js';
 import type {
   RuntimeContextCapabilities,
@@ -30,6 +32,7 @@ interface PromptState {
   active: boolean;
   cancelled: boolean;
   output: string;
+  activity: AcpActivityProjector;
 }
 
 interface RuntimeSessionState {
@@ -46,6 +49,9 @@ interface RuntimeSessionState {
 }
 
 const MAX_ACP_FRAME_BYTES = 16 * 1024 * 1024;
+const REASONING_EFFORT_IDS = new Set<ReasoningEffort>([
+  'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra',
+]);
 
 function acpFrameGuard(): Transform {
   let pending = Buffer.alloc(0);
@@ -111,8 +117,8 @@ export class AcpRuntimeIntegration implements RuntimeIntegration {
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-16_384); });
     const timeoutMs = spec.timeoutMs ?? 15_000;
-    const timeout = <T>(operation: Promise<T>, label: string): Promise<T> => new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms.`)), timeoutMs);
+    const timeout = <T>(operation: Promise<T>, label: string, operationTimeoutMs = timeoutMs): Promise<T> => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`${label} timed out after ${operationTimeoutMs}ms.`)), operationTimeoutMs);
       operation.then(
         (value) => { clearTimeout(timer); resolve(value); },
         (error: unknown) => { clearTimeout(timer); reject(error); },
@@ -127,14 +133,19 @@ export class AcpRuntimeIntegration implements RuntimeIntegration {
       invariant(initialized.protocolVersion === PROTOCOL_VERSION, 'ACP_PROTOCOL_VERSION_UNSUPPORTED',
         `ACP Agent negotiated unsupported protocol version ${initialized.protocolVersion}.`, 409);
       invariant(initialized.agentCapabilities?.loadSession === true, 'ACP_LOAD_SESSION_UNAVAILABLE',
-        'ACP Runtime cannot preserve one persistent session per Agent because it does not advertise session/load.', 409);
+          'ACP Runtime cannot preserve a Logical Session because it does not advertise session/load.', 409);
       const session = await timeout(context.request<NewSessionResponse & RuntimeSessionState>(
         methods.agent.session.new,
         { cwd: spec.workingDirectory, mcpServers: [] },
       ), 'ACP session/new');
       return {
         detectedVersion: initialized.agentInfo?.version ?? null,
-        configuration: this.configurationCapabilities(session),
+        configuration: await this.inspectConfigurationCapabilities(
+          context,
+          session.sessionId,
+          session,
+          timeout,
+        ),
       };
     } catch (error) {
       throw new Error(`ACP Runtime capability inspection failed${stderr ? `: ${stderr}` : ''}`, { cause: error });
@@ -156,11 +167,21 @@ export class AcpRuntimeIntegration implements RuntimeIntegration {
       Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
       Readable.toWeb(guardedStdout) as ReadableStream<Uint8Array>,
     );
-    const promptState: PromptState = { active: false, cancelled: false, output: '' };
+    const promptState: PromptState = {
+      active: false,
+      cancelled: false,
+      output: '',
+      activity: new AcpActivityProjector(),
+    };
     let replaying = false;
     const app = client({ name: 'ai-native-collaboration-local-agent' })
       .onRequest(methods.client.session.requestPermission, async ({ params }) => {
         if (promptState.cancelled) return { outcome: { outcome: 'cancelled' } };
+        if (promptState.active) {
+          for (const event of promptState.activity.projectPermission(params.toolCall)) {
+            spec.onActivity?.(event);
+          }
+        }
         const decision = await spec.requestPermission?.(params) ?? 'reject';
         if (decision === 'cancelled') return { outcome: { outcome: 'cancelled' } };
         const requestedKind = decision === 'reject' ? 'reject_once' : decision;
@@ -180,13 +201,18 @@ export class AcpRuntimeIntegration implements RuntimeIntegration {
         ) {
           promptState.output += content.text;
         }
-        for (const event of profile.normalizeUpdate(spec.attemptId, params.update)) {
+        for (const event of profile.normalizeUpdate(spec.executionId, params.update)) {
           spec.onEvent?.(event);
+        }
+        if (promptState.active && !replaying) {
+          for (const event of promptState.activity.project(params.update)) {
+            spec.onActivity?.(event);
+          }
         }
         if (replaying) {
           spec.onEvent?.({
             type: 'context_reloaded',
-            attemptId: spec.attemptId,
+            executionId: spec.executionId,
             details: { sessionId: params.sessionId, localViewOnly: true },
             createdAt: Date.now(),
           });
@@ -237,7 +263,7 @@ export class AcpRuntimeIntegration implements RuntimeIntegration {
       };
       if (capabilities.invariantContinuity === 'opaque') {
         spec.onEvent?.({
-          type: 'context_continuity_unknown', attemptId: spec.attemptId,
+          type: 'context_continuity_unknown', executionId: spec.executionId,
           details: { runtimeId: spec.runtimeId }, createdAt: Date.now(),
         });
       }
@@ -257,13 +283,15 @@ export class AcpRuntimeIntegration implements RuntimeIntegration {
     state: RuntimeSessionState,
     configuration: RuntimeLaunchSpec['runtimeConfiguration'],
   ): Promise<void> {
+    let configOptions = state.configOptions;
     if (configuration.model !== null) {
-      const option = this.findConfigOption(state.configOptions, ['model'], 'model');
+      const option = this.findConfigOption(configOptions, ['model'], 'model');
       if (option) {
         this.requireSelectValue(option, configuration.model);
-        await context.request(methods.agent.session.setConfigOption, {
+        const updated = await context.request<SetSessionConfigOptionResponse>(methods.agent.session.setConfigOption, {
           sessionId, configId: option.id, value: configuration.model,
         });
+        configOptions = updated.configOptions;
       } else {
         invariant(
           state.models?.availableModels.some((model) => model.modelId === configuration.model),
@@ -276,7 +304,7 @@ export class AcpRuntimeIntegration implements RuntimeIntegration {
     }
     if (configuration.reasoningEffort !== null) {
       const option = this.findConfigOption(
-        state.configOptions,
+        configOptions,
         ['reasoning_effort', 'reasoningEffort', 'thinking_effort', 'thinkingEffort'],
         'thought_level',
       );
@@ -332,11 +360,7 @@ export class AcpRuntimeIntegration implements RuntimeIntegration {
       supportedReasoningEfforts: null,
     }));
     const models = stableModels.length > 0 ? stableModels : legacyModels;
-    const validEfforts = new Set<ReasoningEffort>([
-      'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra',
-    ]);
-    const reasoningEfforts = this.selectOptions(reasoningOption)
-      .filter((option): option is RuntimeConfigurationOption & { id: ReasoningEffort } => validEfforts.has(option.id as ReasoningEffort));
+    const reasoningEfforts = this.reasoningOptions(reasoningOption);
     const modes = (state.modes?.availableModes ?? []).map((mode) => ({
       id: mode.id,
       label: mode.name,
@@ -349,7 +373,7 @@ export class AcpRuntimeIntegration implements RuntimeIntegration {
         ? state.models.currentModelId
         : null;
     const defaultReasoningEffort = reasoningOption?.type === 'select'
-      && validEfforts.has(reasoningOption.currentValue as ReasoningEffort)
+      && REASONING_EFFORT_IDS.has(reasoningOption.currentValue as ReasoningEffort)
       && reasoningEfforts.some((option) => option.id === reasoningOption.currentValue)
       ? reasoningOption.currentValue as ReasoningEffort
       : null;
@@ -365,6 +389,90 @@ export class AcpRuntimeIntegration implements RuntimeIntegration {
       modes,
       defaultModeId,
     };
+  }
+
+  private async inspectConfigurationCapabilities(
+    context: ClientContext,
+    sessionId: SessionId,
+    state: RuntimeSessionState,
+    timeout: <T>(operation: Promise<T>, label: string, operationTimeoutMs?: number) => Promise<T>,
+  ) {
+    const capabilities = this.configurationCapabilities(state);
+    const reasoningOption = this.findConfigOption(
+      state.configOptions,
+      ['reasoning_effort', 'reasoningEffort', 'thinking_effort', 'thinkingEffort'],
+      'thought_level',
+    );
+    if (!reasoningOption) {
+      return {
+        ...capabilities,
+        models: capabilities.models.map((model) => ({ ...model, supportedReasoningEfforts: [] })),
+      };
+    }
+
+    const supportedByModel = new Map<string, ReasoningEffort[]>();
+    if (capabilities.defaultModelId !== null) {
+      supportedByModel.set(
+        capabilities.defaultModelId,
+        capabilities.reasoningEfforts.map((effort) => effort.id as ReasoningEffort),
+      );
+    }
+    const modelOption = this.findConfigOption(state.configOptions, ['model'], 'model');
+    if (!modelOption || modelOption.type !== 'select') {
+      return {
+        ...capabilities,
+        models: capabilities.models.map((model) => ({
+          ...model,
+          supportedReasoningEfforts: supportedByModel.get(model.id) ?? null,
+        })),
+      };
+    }
+
+    const allReasoningOptions = new Map(capabilities.reasoningEfforts.map((option) => [option.id, option]));
+    for (const model of capabilities.models) {
+      try {
+        const updated = await timeout(
+          context.request<SetSessionConfigOptionResponse>(methods.agent.session.setConfigOption, {
+            sessionId,
+            configId: modelOption.id,
+            value: model.id,
+          }),
+          `ACP reasoning capability probe for model ${model.id}`,
+          2_000,
+        );
+        const updatedReasoningOption = this.findConfigOption(
+          updated.configOptions,
+          ['reasoning_effort', 'reasoningEffort', 'thinking_effort', 'thinkingEffort'],
+          'thought_level',
+        );
+        const modelReasoningOptions = this.reasoningOptions(updatedReasoningOption);
+        supportedByModel.set(
+          model.id,
+          modelReasoningOptions.map((option) => option.id as ReasoningEffort),
+        );
+        for (const option of modelReasoningOptions) allReasoningOptions.set(option.id, option);
+      } catch {
+        break;
+      }
+    }
+
+    return {
+      ...capabilities,
+      models: capabilities.models.map((model) => ({
+        ...model,
+        supportedReasoningEfforts: supportedByModel.get(model.id) ?? null,
+      })),
+      reasoningEfforts: [...allReasoningOptions.values()],
+    };
+  }
+
+  private reasoningOptions(
+    option: SessionConfigOption | undefined,
+  ): Array<RuntimeConfigurationOption & { id: ReasoningEffort }> {
+    return this.selectOptions(option)
+      .filter((candidate): candidate is RuntimeConfigurationOption & { id: ReasoningEffort } => (
+        REASONING_EFFORT_IDS.has(candidate.id as ReasoningEffort)
+      ));
   }
 
   private selectOptions(option: SessionConfigOption | undefined): RuntimeConfigurationOption[] {
@@ -404,6 +512,7 @@ class AcpExecutionController implements RuntimeExecutionController {
       this.promptState.active = true;
       this.promptState.cancelled = false;
       this.promptState.output = '';
+      this.promptState.activity.resetTurn();
       try {
         const response = await this.context.request(methods.agent.session.prompt, {
           sessionId: this.sessionId,
