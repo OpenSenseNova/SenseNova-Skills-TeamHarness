@@ -55,15 +55,15 @@
 
 Step 4 之前可以编写探索性代码或测试技术可行性，但不得将其当作产品实现主干。
 
-### Project 与 Artifact 0.6 纵向链
+### Project、WorkItem 与 Artifact 纵向链
 
-ADR-0044 当前定义已经实现且不保留旧的 Repository-required 合同：
+当前 MVP 已经落地一条不依赖 Repository 的 Project 协作链：
 
-1. Project 只要求名称，Repository 为零或一个 active 关联；挂载、默认分支更新、解除和历史 provenance 由同一权威模型管理；
-2. Repository-backed Attempt 使用匹配 Working Copy 的隔离 worktree，repository-less Project 使用隔离 scratch；
-3. Resource Link 与 Workspace Artifact 是两个独立资源模型；Artifact 通过多对多关联进入 Project；
-4. Markdown Yjs 当前状态、File 可替换 current blob、UUID 历史快照、消息固定引用、Agent staged publication 和回收清理形成完整纵向链；
-5. OpenAPI、生成 Web 类型、Human Web、变化流、审计和自动化测试使用同一合同。
+1. Project 只要求名称，可选 description；创建时原子建立 Project Owner 和主群；
+2. WorkItem 可以从看板或 Conversation Message 创建，支持直接分配、重新分配、阻塞/解除阻塞、独立评论、Agent Result Submission，以及 Human 完成/取消；开放认领、委派、Review 和 Completion Policy 延后；
+3. Project Resource 负责项目内文件夹与文件，Artifact v2 负责不可变版本、下载、回收站和 lineage；外部资料统一为 URL Artifact；
+4. Markdown、File 与 URL 使用统一 Workspace Artifact identity 和多对多 Project Association；URL locator 不可修改且没有 Current State 或 Snapshot；
+5. OpenAPI、生成 Web 类型、Human Web、变化流、审计和自动化测试使用同一合同；Repository、Working Copy 和 Attempt Worktree 不属于当前 MVP。
 
 ## 3. Step 0：关闭总体架构基线
 
@@ -189,18 +189,22 @@ ADR-0044 当前定义已经实现且不保留旧的 Repository-required 合同�
 - 定义 `not_requested` 与 Request intake 的边界：请求无权成立才不创建；合法请求的临时条件进入 `waiting / blocked` 投影，不可恢复拒绝进入 Request `rejected`。
 - 定义权限或访问变化不追溯激活 `not_requested`；新的显式 mention 才能创建 Request，而已有 pending Request 可随临时条件变化重新求值。
 
-#### 5.3 后续显式工作层（不属于 MVP 或当前 Step 2 关闭条件）
+#### 5.3 显式工作层（当前实现了有边界的 Project WorkItem 切片）
 
-- 定义 WorkItem、Child WorkItem、关系和依赖；
-- 定义 source Message 和 Primary Discussion Scope；
-- 定义无讨论位置时 Conversation、初始 Message 和 WorkItem 的原子创建；
-- 定义 Direct Assignment 与 Claimable WorkItem；
-- 定义 Work Assignee 的唯一性；
-- 定义 Agent Claim、释放、撤销和重分配；
-- 定义 Result Submission、独立 Review、Completion Policy、拒绝和返工；
-- 定义取消和阻塞，并明确当前没有 WorkItem 归档或重新打开。
+当前 MVP 已实现：
 
-这些事实继续保留在领域设计中，等显式工作层进入产品范围时再完成剩余确认和实现；MVP 不创建对应 schema、命令、投影或 UI。
+- Project WorkItem 的创建、固定来源引用和独立评论；描述仅在未分配的 open 状态可编辑；
+- Human 直接分配、重新分配、阻塞、解除阻塞、完成和取消；
+- Agent Result Submission，以及分配 revision fencing；
+- 看板和会话入口中的 WorkItem 展示。
+
+仍延后的部分：
+
+- Claimable WorkItem、Agent Claim、释放和自动认领；
+- Agent 委派、Child WorkItem、关系和依赖；
+- Completion Policy、独立 Review、拒绝和返工。
+
+后续设计必须在这条已工作的切片上递增，不得重新引入第二套 WorkItem 或把 Agent Mention 隐式升级为任务。
 
 #### 5.4 状态转换
 
@@ -211,7 +215,7 @@ Agent Request lifecycle
 Conversation / Thread lifecycle and Discussion Scope frontier
 ```
 
-WorkItem、Agent Claim、Result Submission、Review 和 Completion Policy 的状态转换属于后续显式工作层。
+WorkItem、Result Submission 和 Human 关闭操作已经有独立状态转换；Agent Claim、Review 和 Completion Policy 的状态转换属于后续显式工作层。
 
 每个转换必须说明：
 
@@ -238,18 +242,18 @@ WorkItem、Agent Claim、Result Submission、Review 和 Completion Policy 的状
 - `not_requested` 也永久不变，原因消失不自动补建 Request，避免权限变化触发历史 Message 执行；
 - Agent Request 和 Run 可以完成而不存在 WorkItem；
 - Run terminal outcome 与 Message 发布相互独立，Run 可以产生零到多条普通 Message；
-- Run terminal 关闭该 Run 首次发布新 Agent Message 的共享写入权；发布与 terminal 必须形成唯一 Workspace 提交顺序，terminal 后只能幂等返回 terminal 前已提交发布的原结果；
+- Runtime Session 生命周期与普通 Agent Message 发布彼此独立；Message 的发布权由当前 Agent、Binding、Conversation 权限、claim receipt 与 Discussion freshness 决定；
 - Conversation 可以没有 Thread，顶层 Message 不依赖隐式默认 Thread；
-- 任一 active Human scope Member 可创建 Workspace 或 Project Channel；Channel 不保存成员关系，当前参与者自动等于所属 Workspace/Project 的 active Membership；
-- MVP 不引入 Conversation Owner/Administrator、Channel 成员治理或 Owner 恢复；creator 只用于审计，Workspace DM 固定两个 direct participants；
-- 当前 scope Membership 控制完整 Channel 历史：加入 scope 可读全部历史，移除后不能读取新旧内容；不引入加入时间窗口或 Message ACL；
-- Workspace Membership 移除立即关闭 Workspace Channel、DM 与相关执行；重新加入恢复 Workspace Channel 但不恢复固定 DM 或旧 Run 权限；
+- 只有 active Human Workspace Owner 或 Project Manager 可创建对应 scope 的 Channel；public 参与者动态投影 active scope Membership，private 保存精确 Workspace/Project Membership audience；
+- 不引入 Conversation Owner/Administrator 或 Channel Admin；现有 scope 管理员治理 private audience，creator 只用于审计，Workspace DM 始终 private 并固定两个精确 participants；
+- 当前 public scope 或 private audience 授权控制完整 Conversation 历史：授予后可读全部历史，移除后不能读取新旧内容；不引入加入时间窗口或 Message ACL；
+- Workspace/Project Membership 移除立即关闭 public、private、DM 与相关执行；新 Membership 只自动恢复 public Channel，不恢复 private Channel、固定 DM 或旧 Run 权限；
 - Human/Agent identity 与 Workspace Membership 分离；Membership 是不可复活的连续参与期，同一 actor 在同一 Workspace 至多一个 active，Human 可在多个 Workspace 同时拥有独立 active Membership，重新加入同一 Workspace 创建新的 Membership，历史行为记录 membership-at-time；
 - Agent identity 永久归属一个 Workspace，不能跨 Workspace 加入或迁移；相似配置在另一 Workspace 创建新的 Agent，权限、Owner、上下文和历史不合并；
-- 任一 active Human Workspace Member 可创建 Agent；Workspace 原子建立 Agent identity、active `member` Membership 与 creator 作为唯一 Agent Owner。Agent 立即参与 Workspace Channel，但不自动进入 Project、DM 或本地执行资源；
+- 任一 active Human Workspace Member 可创建 Agent；Workspace 原子建立 Agent identity、active `member` Membership 与 creator 作为唯一 Agent Owner。Agent 立即参与 public Workspace Channel，但不自动进入 private Channel、Project、DM 或本地执行资源；
 - 产品必须支持从顶层 Message 的第一条 reply 原子创建 Thread，且 Thread 内 `@Agent` 的结果目标仍是该 Thread；
-- Agent Message 发布校验 active Run/Attempt、claim receipt、Binding revision 与当前权限；不存在单独的 freshness review 阶段；
-- 每条 Agent-authored Message 必须由 Workspace 绑定到同一 Agent 的唯一 producing Run；Human-authored Message 没有 producing Run，关联不参与 Run outcome；
+- Agent Message 发布在同一 Workspace 事务中校验 claim receipt、Binding revision、当前权限与精确 Discussion frontier；frontier 变化时返回 `held`，不发布 Message、不完成 receipt；
+- 普通 Agent-authored Message 不绑定 Run/Attempt provenance；其发布 provenance 是 Agent、Membership、Computer、Binding revision、receipt 与 freshness decision；
 - Conversation 支持 expected-revision 归档/恢复；归档保留历史、从默认列表隐藏并阻止新写入，存在 pending Agent Request 或 active Run 时拒绝归档；
 - WorkItem 不是当前 Step 2、Step 3 或 MVP 的关闭条件。
 
@@ -286,21 +290,21 @@ Interface 至少表达三类行为：
 - RemoveWorkspaceMember；
 - Suspend/ResumeAgent。
 
-`CreateConversation` 与 Workspace/Project Membership 变更属于 Human governance Interface，不得因 Agent 已有 `PostAgentMessage` 权限而向 Runtime 或 Local Node 暴露。任一 active Human scope Member 可创建 Channel；Channel 没有参与者变更意图，DM 不提供 direct participant 变更。上述行为与内容发布不是同一种授权能力。
+`CreateConversation` 与 private audience 变更属于 Human governance Interface，不得因 Agent 已有 `PostAgentMessage` 权限而向 Runtime 或 Local Node 暴露。只有 Workspace Owner 或 Project Manager 可创建对应 Channel 并治理 private audience；public 和 DM 不提供 participant 变更。上述行为与内容发布不是同一种授权能力。
 
 Interface 不提供 Conversation ownership 查询、转移或管理员维护命令。读取结果可以暴露 creator provenance，但调用者不得用 creator 身份推导当前治理权限。
 
-Conversation 快照必须返回当前 scope Membership 推导的只读参与者投影；Workspace join 或 Project member add 不拼装 Conversation-local 变更，所有 Channel 读取直接依据最新 scope Membership。
+Conversation 快照必须返回 visibility 与 `content | governance` access mode。Public 参与者是当前 scope Membership 的只读投影；private 参与者是精确 Membership audience，并通过 expected-revision 命令增删。
 
-所有读取 Interface——快照、变化跟随、搜索与缓存回源——在读取时按当前 Workspace/Project Membership 或固定 DM participants 重新授权。scope 成员加入后返回完整 Channel 历史；移除后不再返回旧内容。
+所有读取 Interface——快照、变化跟随、搜索与缓存回源——在读取时按当前 public scope、private 精确 audience 或固定 DM participants 重新授权。内容授权后返回完整 Conversation 历史；移除后不再返回旧内容。
 
-`RemoveWorkspaceMember` 是一个闭合治理意图：Workspace Membership 撤销、全部 Channel/DM 访问关闭，以及相关 pending Request 取消和 active Run fencing 必须作为一个权威结果生效。投影或物理清理可随后收敛；以后重新加入仅恢复 scope-derived Channel。
+`RemoveWorkspaceMember` 是一个闭合治理意图：Workspace Membership 撤销、全部 public/private Channel 和 DM 访问关闭，以及相关 pending Request 取消和 active Run fencing 必须作为一个权威结果生效。投影或物理清理可随后收敛；以后重新加入仅自动恢复 public Channel。
 
 Human Membership 仍拥有 Agent 时不能终止。只有当前 Workspace Owner 可转移 ownership、终止或重新准入 Agent Membership；当前 Agent Owner 治理暂停/恢复与约束，Agent Host 的本地停止不能冒充任何共享治理权。
 
 加入或重新加入 Workspace 返回新的 Workspace Membership；Interface 不能接受调用者指定要复活的 Membership。Actor 身份由认证上下文绑定，所有治理、Conversation 与执行命令再绑定其当前 active Membership；审计结果同时保留 actor 与 membership-at-time。
 
-Workspace Invitation 允许在 Human 注册前以 normalized verified email 建立 pending 邀请，但邀请链接不是 bearer authority。接受 Interface 从认证 seam 获得 stable Human identity 与 verified-email claims，只有完全匹配才原子提交 Invitation `accepted` 与新的 `member` Membership；调用者不能自报 email 已验证或 accepted Human identity。
+Workspace Join Link 由当前 owner 创建，不要求 owner 预先知道或填写任何人的注册邮箱。所有 active Human Workspace Member 可查看/复制有效链接，但不能替 Owner 创建或停用。接受 Interface 从认证 seam 获得 stable Human identity，并以链接 token digest 定位 active capability；授权列表从独立数据目录密钥保护的 AES-256-GCM 密文恢复 token，停用时删除密文。确认后原子创建新的 `member` Membership；链接可被多个 authenticated Human 使用，且永不直接授予 `owner`。
 
 Agent 创建 Interface 原子产生新的 Workspace-local Agent identity、active `member` Membership 与 creator 作为唯一 Agent Owner。该 Membership 立即授予 Workspace Channel participation，但不建立 Project Membership、固定 DM、私有上下文、凭据、Runtime Binding 或本地资源。
 
@@ -339,20 +343,20 @@ WorkItem、Result Submission 和 Review 的 Interface 意图在后续显式工�
 - Interface 只向当前 Workspace Owner 或目标 Agent 的当前 Owner 投影精确 `not_requested` 治理原因，其他观察者仅得安全概括；Web、Local Node、缓存与变化流不得越权泄露原始明细；
 - 第一条 Thread reply 原子创建 Thread 与 reply Message；
 - Agent Inbox claim 幂等且可重放；claim 后崩溃不得丢失 Message 或重复创建 Run；
-- Agent Message 的作者和 producing Run 由 Workspace 从受信执行凭证绑定，Interface 不接受 Runtime 自报的 Agent 或 Run 作为权威；
-- Agent Message 首次发布和 producing Run terminal 使用同一并发裁决点；Interface 明确区分新发布失败与已提交发布的幂等重放结果；
-- Conversation 创建和 scope Membership 变更只接受受信 Human actor；Agent 发布凭证不能调用或拼装这些治理意图；
+- Persistent Agent Message 的作者、Membership、Binding revision 与 receipt 由 Workspace 从受信 Computer 绑定；Runtime 不能自报 Agent、frontier 或 Run 权威；
+- Persistent Agent Message 在 Workspace 原子区分 `published | held`，精确幂等重试优先返回已提交结果；显式 task execution 若携带 producing Run，则另受该 Run 的 fencing；
+- Channel 创建和 private audience 变更只接受对应范围的 active Human Owner/Manager；Agent 发布凭证不能调用或拼装这些治理意图；
 - creator 离开或失权不触发 Conversation ownership transfer；Interface 始终按当前 Workspace Human 权限与 preset 求值治理资格；
-- 新 Workspace/Project Member 自动成为该 scope 全部 Channel 的当前参与者；DM direct participants 不可变；
-- scope 成员添加授予完整 Channel 历史读取，移除立即阻止所有后续读取；所有投影一致执行当前授权；
-- Workspace Member 移除后撤权立即成立，相关请求/运行被取消或 fenced；重新加入恢复 Channel但不恢复 DM/Run；
+- 新 Workspace/Project Member 自动成为该 scope 全部 public Channel 的当前参与者；private 需管理员显式添加，DM participants 不可变；
+- public scope 或 private audience 添加授予完整 Channel 历史读取，移除立即阻止所有后续读取；所有投影一致执行当前授权；
+- Workspace Member 移除后撤权立即成立，相关请求/运行被取消或 fenced；重新加入仅自动恢复 public Channel，不恢复 private Channel/DM/Run；
 - Agent identity、Membership、Request、Run 与 Message provenance 始终同属一个 Workspace；不存在 Agent 迁移、共享或跨 Workspace 调用路径；
 - Interface 不暴露数据库、事件存储或策略求值器；
 - 所有 Conversation MVP 场景都能通过 Interface 驱动和观察。
 
 ### 实施状态
 
-**Conversation / Thread / Mention Outcome / Agent Request 部分已实现。** 当前 Interface 已覆盖 scope-derived Channel access、结构化 mention 的原子发布、权限化原因投影、准确 Thread 结果目标、pending Request 取消、变化流与可靠投递。
+**Conversation / Thread / Mention Outcome / Agent Request 部分已实现。** 当前 Interface 已覆盖 public scope 投影、private 精确 audience 与 governance access、结构化 mention 的原子发布、权限化原因投影、准确 Thread 结果目标、pending Request 取消、变化流与可靠投递。
 
 ## 7. Step 4：确定工程基础与第一纵向切片
 
@@ -452,9 +456,9 @@ Human login
 - 定义 Lease 获取、续期、到期和防旧执行；
 - 定义何时创建新 Agent Request、Run 和 Attempt；
 - 定义 Runtime Adapter outcome 如何独立形成 Run terminal state；
-- 定义 Runtime 本地结束与 Workspace Run terminal 的边界：正常收尾先解决本地 pending Message 发布意图，再请求 terminal；取消、授权撤销、超时等强制 terminal 可以先关闭后续首次发布；
-- 定义 Agent Message 首次发布与 producing Run terminal 的统一提交顺序，不引入独立 `RunWritePermission` 状态；
-- 定义 `PostAgentMessage(expectedDiscussionFrontier)` 的原子校验、published/freshness-review 结果和幂等重放；
+- 定义持久 Runtime Session 与 Workspace receipt 的独立生命周期，并在 Binding revision 变化时 fenced 旧 receipt 与本地草稿；
+- 定义 Message 与 Persistent Agent Artifact 各自 Local Held Draft 在发布前的耐久写入、崩溃恢复与候选不成为共享事实的边界；
+- 定义 `PostAgentMessage(expectedDiscussionFrontier)` 与 Artifact publish/update 的原子校验、`published | held` 结果和幂等重放；
 - 定义准确增量、Held Draft、Agent 四种复核选择和有界恢复；
 - 定义取消、Owner 暂停、授权撤销和 Runtime 失败；
 - 定义断网候选结果的重连校验；
@@ -475,13 +479,13 @@ Human login
 - 旧 Attempt 不能覆盖当前结果；
 - 没有 Message 的 Run 仍按执行层 outcome 结束，且不产生隐式回复状态；
 - Discussion Scope 推进后，旧 frontier 的候选 Message 不能首次发布，Run 保持不变；
-- producing Run terminal 后不能首次发布新 Agent Message；terminal 前已提交发布的幂等重放返回原结果且不新增 Message；
+- Persistent Agent Session 的普通 Message 不依赖 Run terminal；显式 task execution 若携带 producing Run，则 terminal 后不能首次发布该 Run 的新 Message；
 - 所有执行失败都得到确定的共享状态；
 - Local Node 无需依赖实时通知保证工作可发现。
 
 ### 实施状态
 
-Context/Privacy Gate 1–4 已实现：schema v5、accept/Run/Attempt/return 纵向链、Standing/Policy/Private Grant、Immutable Manifest、通用 ACP v1 Adapter、四类 Runtime Profile 与 fake ACP 门禁均已落地。真实 Runtime 登录态冒烟仍是 opt-in 发布前 Gate 5。
+Context/Privacy Gate 1–4 已实现：schema v1、accept/Run/Attempt/return 纵向链、Standing/Policy/Private Grant、Immutable Manifest、通用 ACP v1 Adapter、四类 Runtime Profile 与 fake ACP 门禁均已落地。真实 Runtime 登录态冒烟仍是 opt-in 发布前 Gate 5。
 
 ## 9. Step 6：设计 Local Agent、Runtime Integration 与 Workspace Interaction
 
@@ -501,7 +505,7 @@ Context/Privacy Gate 1–4 已实现：schema v5、accept/Run/Attempt/return 纵
 - 定义 Agent Inbox、Discussion Scope position、claim receipt 和 staged publication intent 的本地持久恢复；
 - 定义本地工作目录和 Credential 使用；
 - 定义 Offline Continuation；
-- 定义 pending ordinary Message、Held Draft decision 和重连提交。
+- 定义 pending ordinary Message、pending Artifact publication、Held Draft decision 和重连提交。
 
 #### 9.2 Runtime Integration seam
 
@@ -522,7 +526,7 @@ Context/Privacy Gate 1–4 已实现：schema v5、accept/Run/Attempt/return 纵
 
 - 查询授权共享上下文；
 - 发布进度、问题和阻塞；
-- 向结果 Discussion Scope 提交带已观察 frontier 的普通候选 Message，并处理 published/freshness-review 结果；
+- 向结果 Discussion Scope 提交带已观察 frontier 的普通候选 Message，并处理 `published | held` 结果；
 - 通过 mention 请求其他 Agent 参与。
 
 明确 Agent、Owner、Workspace、Agent Request、Run 和权限由 Local Agent Module 绑定，并由 Workspace Authority 重新验证，Runtime 不得自报。
@@ -681,7 +685,7 @@ Run Context Snapshot 与 Artifact 纵向链已经落地；后续只在出现明�
 - 设计 snapshot/follow 不丢变化的读取方式；
 - 设计 Execution Lease 和防旧执行机制；
 - 设计 Local Node pending command/result；
-- 设计 Artifact 流式上传、内容寻址去重和 Resource Link 引用确认；
+- 设计 Artifact 流式上传、内容寻址去重，以及托管 Snapshot 或发送时 URL locator 的引用确认；
 - 设计外部副作用 operation identity、确认和对账；
 - 设计备份、恢复和投影重建。
 
@@ -759,7 +763,7 @@ Outbox、fencing、Cursor、Dead Letter 和 Checkpoint 可以在此确定，但�
 
 ### 实施状态
 
-**0.6 Human Web 已实现。** 当前界面覆盖注册/登录、Workspace 恢复、可选 Repository 的 Project 创建与成员治理、Workspace/Project 双 Conversation scope、Conversation / Thread、结构化 `@Agent`、Agent Request、Workspace 成员/邀请、Agent 治理、Project Resource Link，以及 Workspace/Project Artifacts 面板、Markdown 实时编辑与预览、File 上传下载、版本历史、Project 关联和回收站。Execution Timeline、WorkItem、Submission 与 Review 仍在对应领域模块后续范围。
+**0.6 Human Web 已实现。** 当前界面覆盖注册/登录、Workspace 恢复、可选 Repository 的 Project 创建与成员治理、Workspace/Project 双 Conversation scope、Conversation / Thread、结构化 `@Agent`、Agent Request、Workspace 成员/分享式 Join Link、Agent 治理、Project WorkItem 看板与评论，以及 Workspace/Project 统一 Artifacts 面板、单一 Artifact 上传入口、既有 Artifact 引用、内容自适应展示、版本历史、Project 关联和回收站。Human 不在创建前选择 Markdown、File 或 URL 类型。Execution Timeline、Agent Claim、委派、Submission Review 与 Completion Policy 仍在对应领域模块后续范围。
 
 ## 14. Step 11：设计 Threat Model 与运行保障
 
@@ -894,6 +898,6 @@ Human @Agent
 
 ## 18. 下一步
 
-Step 0 架构基线、Step 1 核心场景与 Step 2 领域设计均已关闭。显式 WorkItem 设计已整体延后，不属于 MVP；下一步进入 Step 3，基于已稳定的 Workspace 授权与 Conversation 领域 seam 设计 MVP Workspace Collaboration Module Interface。
+Step 0 架构基线、Step 1 核心场景与 Step 2 领域设计均已关闭。Project WorkItem 的基础切片已经纳入 MVP；下一步应在不破坏现有 Conversation/WorkItem 边界的前提下，继续收敛运行可靠性与发布准备，并将 Agent Claim、委派、Review 和 Completion Policy 作为独立后续层。
 
 在 Step 4 之前，团队的主要产出是场景、领域状态机、Workspace Interface 和工程基础决定；完成 Step 4 后可以开始工程骨架与 Workspace 核心编码，但直到 Step 6 完成后才进入基本产品纵向链的实现，不等待所有专题文档完成。

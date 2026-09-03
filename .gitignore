@@ -6,6 +6,7 @@ web/dist/
 .env
 .env.*
 !.env.example
+!.env.example.local
 *.log
 coverage/
 .data/
@@ -15,3 +16,5 @@ coverage/
 artifacts/runtime-smoke/
 local-computer/schema/
 web/public/downloads/*.tgz
+.local-data/
+.tmp/

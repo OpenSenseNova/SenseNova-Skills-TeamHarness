@@ -1,16 +1,20 @@
 # Conversation MVP and Deferred Work Domain Model
 
-> Status: Completed — Workspace authorization prerequisites and Conversation MVP facts are closed; explicit Work is deferred
+> 2026-08-27 模型替换：当前实现只有 Workspace 唯一全员大群、Workspace 一对一 DM、Project 主群与显式成员长期群聊。WorkItem 使用独立评论区，不再创建来源 Message、Primary Discussion Scope、Topic 或专用 Conversation。本文后续仍保留的旧 Channel visibility、WorkItem Discussion Scope 与 Session 推演仅是历史设计材料；以 `docs/design/11-workspace-project-vfs-boundaries.md`、schema、OpenAPI 和当前测试为实现基线。Agent Session 重构未纳入本轮。
+
+> Status: Active — Conversation MVP and the Project-bound top-level WorkItem foundation are implemented
 >
-> MVP scope: Workspace identity/Membership/Invitation/role and Agent-creation facts required by authorization; Conversation, Conversation Timeline, Thread, Message, Discussion Scope, Agent Mention Outcome, Agent Request, and their command boundaries
+> MVP scope: Workspace identity/Membership/Join Link/role and Agent-creation facts required by authorization; Conversation, Conversation Timeline, Thread, Message, Discussion Scope, Agent Mention Outcome, Agent Request, and their command boundaries
 >
-> Deferred scope: WorkItem, assignment, claim, delegation, Result Submission, Completion Policy, and Review. Confirmed facts remain recorded below but do not gate the MVP.
+> Implemented Work slice: Human-created Project WorkItem, optional source references, description edits while unassigned, direct assignment and reassignment, blocking/unblocking, Agent Result Submission, Human completion/cancellation, and assignment revision fencing
+>
+> Deferred Work scope: claimability, Agent delegation/Child WorkItem, Completion Policy, and Review. Confirmed facts remain recorded below as the target model.
 >
 > Out of scope: Run/Attempt execution details (Step 5), storage schema (Step 4), wire protocol and error codes (Step 3)
 
 ## 1. Design boundary
 
-The full model keeps four kinds of fact independent. The MVP implements only discussion and the Agent Request handoff into execution; work and review facts are later product layers.
+The full model keeps four kinds of fact independent. The current product implements discussion, Agent Request handoff, and the bounded Project WorkItem slice above; claim/delegation and review remain later product layers. The relationship tree below retains the deferred target model where noted; current runtime and API behavior is defined by the MVP scope above, schema, OpenAPI, and tests.
 
 ```text
 discussion facts       Message in a Discussion Scope
@@ -43,11 +47,11 @@ Product Deployment
     │   ├── active | terminal; exactly one base role: owner | member
     │   ├── at most one active per actor in this Workspace
     │   └── one or more active Human Memberships hold owner role
-    ├── Workspace Invitation 0..N
-    │   ├── exactly one normalized verified email target
-    │   ├── pending | accepted | revoked | expired
-    │   ├── at most one pending per Workspace + normalized email
-    │   └── accepted → stable Human identity + exactly one new active `member` Membership
+    ├── Workspace Join Link 0..N
+    │   ├── high-entropy token digest; no invitee identity or email
+    │   ├── active | revoked
+    │   ├── reusable by authenticated holders while active
+    │   └── confirmation → exactly one active `member` Membership per Human
     ├── Conversation
     │   ├── Conversation Timeline (one Discussion Scope)
     │   │   ├── top-level Message 0..N
@@ -69,7 +73,7 @@ Product Deployment
     │   └── Run 0..1
     └── WorkItem 0..N
         ├── immutable source Message
-        ├── immutable Goal
+        ├── immutable description
         ├── immutable Primary Discussion Scope
         ├── current Work Assignee 0..1
         ├── current assignment kind 0..1: direct_assignment | agent_claim
@@ -85,7 +89,7 @@ Product Deployment
 
 Every Agent-authored Message has exactly one `produced_by_run_id`, and that Run names the same Agent as the Message author. A Human-authored Message has no `produced_by_run_id`. Workspace binds this relationship from trusted execution authority at commit time; Runtime, Web, and Local Node callers cannot self-report an authoritative author or Run. The relationship grants no special Message type and neither Message presence nor provenance determines Run outcome.
 
-A producing Run may first-publish a new Agent Message only while it is non-terminal and its current shared-write authority remains valid. Run terminal is the authoritative closing fact; there is no parallel `RunWritePermission` object or independently mutable publication-open flag. First publication and terminal transition share one Workspace commit order. If publication commits first, the Message remains valid and terminal may follow; if terminal commits first, the new publication creates nothing. A recognized idempotent retry of a publication committed before terminal returns the prior logical result without creating another Message. Runtime process exit is only a local signal: normal shutdown settles locally pending publication intents before requesting terminal, while forced terminal caused by cancellation, revocation, or timeout may fence those intents first.
+An explicit task execution that publishes with producing-Run provenance may first-publish that Run's Message only while the Run is non-terminal and its current shared-write authority remains valid. Run terminal fences only that explicit execution path. Persistent Agent Session chat publication is independent of Run/Attempt and instead uses the current Binding, claim receipt, exact Discussion frontier and Local Held Draft contract.
 
 In the full model, the trigger source is a mandatory tagged alternative, not three nullable associations that may be combined arbitrarily. The MVP implements only the `requested` Agent Mention Outcome alternative and does not create unused WorkItem or Review associations. Other related facts are causation/provenance only. When the explicit-work layer is introduced, an Agent delegation Request is directly triggered by the Child WorkItem assignment action; the delegation Message is its causation, so the Request cannot also be interpreted as an ordinary mention request. WorkItem stores its current assignee and whether that responsibility came from Direct Assignment or Agent Claim. Every assignment change advances `assignment_revision`; structured assignee commands must match it, preventing delayed commands from an earlier assignment—including an earlier assignment to the same Agent—from gaining authority. Responsibility history is retained as audit facts rather than a separate tenure object.
 
@@ -93,8 +97,8 @@ In the full model, the trigger source is a mandatory tagged alternative, not thr
 
 ### 3.1 Creation and permanence
 
-- Any active Human Workspace Member may create a Workspace Channel, and any active Human Project Member may create a Project Channel. Creation fixes the scope and records creator provenance but creates no participant facts. An Agent execution cannot create one.
-- Conversation records its creator as immutable provenance rather than transferable ownership. Creator, Workspace Owner, Project Manager, or either DM participant may operate its explicit lifecycle within their current access scope.
+- Only an active Human Workspace Owner may create a Workspace Channel, and only an active Human Project Manager may create a Project Channel. Creation fixes the scope, immutable `public | private` visibility, and creator provenance. Public creates no audience rows; private atomically creates its exact audience and includes the creator. An Agent execution cannot create one.
+- Conversation records its creator as immutable provenance rather than transferable ownership. The matching Workspace Owner or Project Manager, or either DM participant, may operate its explicit lifecycle within their current access scope.
 - A Conversation is durable and has an `active | archived` lifecycle. Archive preserves all Messages, Threads, provenance, and source relationships, removes it from the default active list, and makes it read-only; restore makes it writable again. Hard delete is not supported.
 - Archive uses expected revision and is rejected while the Conversation has pending Agent Requests or active Runs; callers must cancel or finish them first.
 - A published Message cannot be edited or deleted. Corrections and retractions are new Messages.
@@ -122,18 +126,20 @@ Each Discussion Scope has a Workspace-authoritative total order and its own Disc
 ### 3.4 Membership
 
 - Threads never have independent membership.
-- A Channel stores only its fixed Workspace or Project scope. Workspace Channel participants are all active Workspace Memberships. Project Channel participants are all active Project Memberships backed by active Workspace Memberships. DM exists only at Workspace scope and stores exactly two fixed direct Membership references.
-- Channel participants are a read-only projection. There is no Conversation-local add/remove or Owner recovery path. A new scope member can read full Channel history; a removed member loses current and future access, while authored Messages remain.
+- A Channel stores a fixed Workspace or Project scope and immutable visibility. Public Workspace participants are all active Workspace Memberships; public Project participants are all active Project Memberships backed by active Workspace Memberships. Private Workspace Channels store exact Workspace Membership audience rows; private Project Channels store exact Project Membership audience rows. DM exists only at Workspace scope, is always private, and stores exactly two fixed Workspace Membership references in the same audience model.
+- Public participants are a read-only current-scope projection and have no join/leave mutation. Private Channel audience is revisioned Conversation state: the matching Workspace Owner or Project Manager may add or remove current Human or Agent Memberships, including self and the last participant. DM rejects all participant changes.
 - A Workspace DM preset has fixed participants. A different participant set creates a new Conversation; Project scope does not expose or create DM.
-- Joining a Workspace or Project immediately changes access to every Channel in that scope without writing per-Conversation membership rows. The complete active Membership chain remains necessary for Project access.
-- Removing an Agent prevents future requests and publication by active execution. It does not erase Messages. In the deferred work layer it also does not silently cancel a WorkItem or rewrite assignee history.
-- A Channel creator who leaves its scope has no residual authority and causes no ownership transfer. Scope Membership governance continues independently. DM participants remain fixed regardless of creator status; a different pair is a new Conversation.
+- Joining a Workspace or Project immediately grants every public Channel in that scope without writing per-Conversation audience rows. Private access requires an explicit exact Membership row, and the complete active Membership chain remains necessary for Project access.
+- Removing an Agent prevents future requests and publication by active execution. It does not erase Messages or cancel WorkItems. Removing its Project Membership releases any current non-terminal WorkItem assignment, advances both revisions, and preserves the prior responsibility in audit history.
+- A Channel creator who leaves its scope has no residual content authority and causes no ownership transfer. Scope administrator governance continues independently. DM participants remain fixed regardless of creator status; a different pair is a new Conversation.
 
-Conversation creation and scope Membership change are governance intents; Message publication is a content intent inside an already governed scope. Every active Human scope Member may create a Channel in that scope. Channel visibility changes only through Workspace or Project Membership commands. Workspace DM has no participant-change intent and cannot be created under a Project. A Run that may post to one Timeline or Thread cannot create another Conversation or govern scope Membership.
+Conversation creation and audience change are governance intents; Message publication is a content intent inside an already governed scope. Only the matching active Human Workspace Owner or Project Manager may create a Channel and govern a private audience. Visibility never changes after creation; a different disclosure boundary requires a new Conversation. Workspace DM has no participant-change intent and cannot be created under a Project. A Run that may post to one Timeline or Thread cannot create another Conversation or govern audience.
 
-Current scope Membership grants access to the whole Channel, including its Timeline, Thread roots, all replies, and visible request outcomes. There is no join-time cutoff, leave-time historical window, or per-Message reader list. Adding a Workspace or Project member therefore discloses complete Channel history; removing a member blocks all subsequent reads without deleting authored Messages.
+Current public scope Membership or an explicit current private audience Membership grants access to the whole Channel, including its Timeline, Thread roots, all replies, and visible request outcomes. There is no join-time cutoff, leave-time historical window, or per-Message reader list. Adding a scope member to public or adding a private participant therefore discloses complete Channel history; removal blocks all subsequent reads without deleting authored Messages.
 
-Workspace Membership is one continuous participation of a stable Human or Agent identity in one Workspace. Removal is terminal and re-entry creates another Membership. Channel authorization evaluates the current Membership; every shared action retains stable actor plus membership-at-time. Removing a Membership immediately closes Channel and DM access, cancels affected pending Agent Requests, and fences active Runs. Re-entry restores scope-derived Channel access, but a new Membership satisfies none of an old DM's fixed references or execution grants.
+Workspace Membership is one continuous participation of a stable Human or Agent identity in one Workspace. Removal is terminal and re-entry creates another Membership. Channel authorization evaluates the current exact Membership; every shared action retains stable actor plus membership-at-time. Removing a Membership immediately closes public, private, and DM access, cancels affected pending Agent Requests, and fences active Runs. Re-entry restores public scope-derived access only; a new Membership satisfies none of an old private audience, DM reference, or execution grant.
+
+A scope administrator who is not in a private audience receives `governance`, not content access. Governance permits basic Conversation metadata, participant projection, and audience mutation, but forbids Message and search reads, Conversation changes, mentions, requests, Runs, and Agent inbox claims. Adding that administrator's current exact Membership changes later reads to content access; removing it returns to governance without exposing content through the management projection.
 
 Human identity is stable across all Workspaces in one product deployment. Creating or joining another Workspace adds a distinct Membership and selects another isolated collaboration context; it does not copy or expose Conversations, Messages, Agent Requests, Runs, Agents, or permissions. A client or Local Node installation is only an access/execution mechanism, not a Workspace.
 
@@ -147,9 +153,11 @@ Only a current Workspace Owner may terminate or readmit an Agent Membership or t
 
 Only a current Workspace Owner may permanently delete an Agent. Deletion first terminates any active Agent Membership and task authority, then removes the Agent from discovery and direct access with no readmission path. Existing Channel and DM messages remain readable under the original display name and carry a deleted-author marker.
 
-A Human joins or rejoins only by accepting a durable Workspace Invitation created by a current Owner. A pending Invitation grants no Membership, role, Conversation, or other access. Acceptance atomically makes it terminal `accepted` and creates a new active `member` Membership, which immediately participates in Workspace Channels.
+A Human joins or rejoins only by opening an active Workspace Join Link created by a current Owner and explicitly confirming. The link targets no email or preselected identity and grants no access before confirmation. Confirmation atomically creates a new active `member` Membership, which immediately participates in Workspace Channels.
 
-There is at most one pending Invitation for the same Workspace and normalized target email. Repeating the same invitation intent returns the existing pending Invitation without extending expiry; replacing its targeting or expiry requires revoking it and creating a new Invitation identity. After accepted, revoked, or expired, a new Invitation may be created only when the accepted Human has no active Membership in that Workspace. This makes revocation close the sole current join capability for that email.
+An active Join Link is reusable by multiple authenticated Humans until an Owner revokes it. Links are independently revocable, always grant `member`, and never collect invitee email. A Human with an active Membership gets that existing Membership rather than a duplicate; a removed Human who confirms again receives a new participation tenure without restoring old private access.
+
+Every active Human Workspace Member may list and copy active Join Links. Only a current Workspace Owner may create or revoke one. The token digest remains the acceptance lookup key; an authenticated ciphertext protected by a separate data-directory key makes authorized listing possible and is deleted on revocation.
 
 An Agent identity is created in and permanently scoped to exactly one Workspace. Its Memberships and accountable Owner can only be in that Workspace, and every mention target, Agent Request, Run, Message provenance link, ownership relation, and audit chain must remain there. Another Workspace creates another Agent identity even if it copies an equivalent configuration; Agent history and authority never transfer or merge.
 
@@ -158,7 +166,7 @@ An Agent identity is created in and permanently scoped to exactly one Workspace.
 Agent DM Message 或明确 `@Agent` 的 Message 会创建 durable Inbox Item。Workspace wake 不含正文，Runtime 必须主动读取：
 
 ```text
-agent.inbox_changed { agentId, highestSequence }
+agent.inbox_changed { agentId, wakeSequence }
 → teamctl inbox check
 → teamctl message check --target <scope>
 → atomically claim pending attention for that Scope
@@ -167,7 +175,7 @@ agent.inbox_changed { agentId, highestSequence }
 → send ordinary Message or return no-output
 ```
 
-`@` only selects attention; it does not filter Conversation context. An ordinary Channel Message does not wake the Agent, but a later mention causes the full Discussion Scope delta to be returned. Claim receipts are replayable until Run terminal, while structured state commands retain their own object revisions and fencing rules.
+`@` selects the current Mention Session and does not make Project or unrelated Conversation context implicit. An ordinary Channel Message does not wake the Agent, but a later mention creates a new `agentRequestId` Session whose JSONL contains the bounded Discussion Scope context up to that trigger. Agent Inbox claim receipts are independent of Run/Attempt and remain replayable until that logical Session explicitly completes the request; structured state commands retain their own object revisions and fencing rules.
 
 ## 5. Agent Request
 
@@ -212,17 +220,19 @@ The following creation paths are deferred beyond MVP:
 - Once accepted, a stop intent may come from the Human requestor, a capability-granted initiating Agent, the target Agent's current Owner, a current Workspace Owner, or an enclosing authority fence. It targets the Run, not the request.
 - Cancellation is a shared, audited Workspace command. It does not delete its trigger Message or change WorkItem assignment.
 - Concurrent accept and cancel are serialized by Workspace commit order; the first valid transition wins.
-- If target or result-scope authority is revoked before acceptance, a pending request is cancelled with reason `authority_revoked`. If already accepted, the request remains accepted while the Run loses further shared-write authority, is fenced, and receives a stop/cancel intent. Suspension instead changes the pending request's derived intake disposition and does not cancel it. Neither path automatically releases or reassigns an associated WorkItem.
+- If target or result-scope authority is revoked before acceptance, a pending request is cancelled with reason `authority_revoked`. If already accepted, the request remains accepted while the Run loses further shared-write authority, is fenced, and receives a stop/cancel intent. Suspension instead changes the pending request's derived intake disposition and does not cancel it. Request cancellation alone does not release or reassign an associated WorkItem; Project Membership removal separately releases that member's current assignment.
 
 There is no `ContinueWorkWithAgent`. When a temporary condition clears, an existing pending Request is reevaluated automatically. A prior `not_requested` Outcome is not reevaluated because no Request exists; a new explicit `@Agent` Message is required to create a new Outcome and possible Request. Ordinary Messages and later permission changes never start execution by inference.
 
-## 6. WorkItem — deferred beyond MVP
+## 6. WorkItem — foundation active, advanced model deferred
+
+The current implementation covers top-level Project WorkItems with direct Human assignment, a dedicated Project Conversation, blocking, immutable Agent Result Submissions, Human terminal decisions, and revision fencing. The claimability, Child/delegation, Completion Policy, and Review rules below remain target-model requirements until their commands and storage are added.
 
 ### 6.1 Identity and immutable intent
 
 - Only an authorized Human creates a top-level WorkItem.
 - An authorized Agent may create a Child WorkItem using the parent's Primary Discussion Scope or another existing scope it may access; no Agent-created hidden Conversation or Thread is allowed.
-- Goal is the explicit outcome statement managed by the WorkItem; Goal, source Message, and Primary Discussion Scope are immutable. There is no generic `UpdateWorkItem`.
+- Description is the explicit outcome statement managed by the WorkItem. In the current slice it can be edited only while the WorkItem is open and unassigned; source references are fixed when present. The full target model treats the intent as immutable and uses a new WorkItem for materially changed requirements.
 - Materially changed requirements use a new Message and a new related or Child WorkItem; the old WorkItem may be explicitly cancelled when appropriate.
 - The same source Message may support several explicitly created WorkItems.
 
@@ -376,7 +386,7 @@ State changes appear as structured Workspace activity and audit facts. They do n
 
 ## 10. Atomic command boundaries
 
-MVP implements the Message/per-target-mention-outcome, first-Thread-reply, Agent-Request-acceptance, and Agent-Message-freshness boundaries below. All WorkItem, assignment, Submission, and Review boundaries are retained requirements for the deferred explicit-work layer and must not cause MVP schema or command placeholders.
+MVP implements the Message/per-target-mention-outcome, first-Thread-reply, Agent-Request-acceptance, Agent-Message-freshness, and bounded Project WorkItem boundaries below. Claimability, Agent delegation, and Review remain deferred and must not cause placeholder commands or a second execution model.
 
 The Workspace Authority must protect at least these all-or-nothing changes:
 
@@ -393,19 +403,19 @@ The Workspace Authority must protect at least these all-or-nothing changes:
 11. Review accept/reject feedback Message + decision + any Message-triggered Agent Requests.
 12. WorkItem cancellation and its assignment/request/run/review consequences.
 13. Assignment release, revocation, or reassignment + revision advance + old-assignee/reviewer fences + optional Agent Request.
-14. Agent message/return + trusted author, Run, Attempt, claim receipt and Binding revision provenance + zero-to-many Message append or `no_output`.
-15. Agent Message first publication and its producing Run terminal transition share one Workspace concurrency decision and commit order; terminal closes later first publications without creating a second permission fact.
+14. Persistent Agent Message publication or return uses trusted author, claim receipt, Binding revision and Discussion frontier; Artifact publication independently uses Agent, Binding revision, Artifact identity and base state hash. Either can return `held` and start an explicit same-Session review turn. Artifact success emits Workspace change history but no Agent Inbox Item or wake; explicit task returns may additionally carry Run/Attempt provenance.
+15. Persistent chat Message publication and Run terminal are independent. If an explicit task return carries producing-Run provenance, only that path is fenced by the Run's terminal state.
 16. Workspace Membership terminal + immediate closure of all effective Conversation access + affected pending Request cancellation + active Run fencing; historical actor and membership-at-time remain.
-17. Active Human Member Agent creation + new Workspace-local Agent identity + active `member` Membership + creator as sole Agent Owner. Creation grants Workspace Channel participation but no Project, DM, private context, credential, Runtime Binding, or local resource.
+17. Active Human Member Agent creation + new Workspace-local Agent identity + active `member` Membership + creator as sole Agent Owner. Creation grants public Workspace Channel participation but no private Channel, Project, DM, private context, credential, Runtime Binding, or local resource.
 18. Human creates or joins a Workspace + a distinct Membership for that Human in that Workspace; no existing Membership, authority, Conversation, Message, Agent Request, Run, or Agent crosses the Workspace seam.
 19. Workspace creation + creator's active Human Membership + owner role; any later owner, Membership, or exit mutation preserves at least one active Human owner.
 20. Workspace-Owner-authorized Human Membership role change + the affected Membership fact and audit; ordinary Member self-exit cannot bypass last-owner continuity.
-21. Matching Human acceptance of one pending Workspace Invitation + terminal `accepted` Invitation + exactly one new active `member` Membership; failure creates neither Membership nor partial acceptance.
-22. Invitation creation serializes by Workspace + normalized verified email: the first valid pending Invitation wins, duplicate intent returns it unchanged, and replacement requires terminal old Invitation + new Invitation identity.
-23. Channel creation + fixed scope + creator provenance; scope Membership changes automatically update Channel access and participant projections. DM has exactly two fixed direct participants and no mutation boundary.
+21. Authenticated Human confirmation of one active Workspace Join Link + exactly one new active `member` Membership; failure creates neither Membership nor partial acceptance.
+22. Join Link creation stores only the high-entropy token digest; active links may be used by multiple Humans and independently revoked, while replay by an already-active Human cannot create a duplicate Membership.
+23. Channel creation + fixed scope + immutable visibility + creator provenance; public access dynamically follows scope Membership, while private creation includes an exact audience and private audience mutations atomically advance Conversation revision/context version. DM has exactly two fixed participants and no mutation boundary.
 24. Workspace Owner Agent-Membership termination/readmission or Agent-ownership transfer + all affected request/run fences and audit; Human Membership exit is rejected while it still owns an Agent.
 
-Idempotency makes a retried intent return the same logical result. Expected object versions, assignment revisions, reviewer revisions, the claim receipt, and the producing Run's concurrency guard serialize structured state races. Context Version does not replace Run-state or structured-state fencing.
+Idempotency makes a retried intent return the same logical result. Expected object versions, assignment revisions, reviewer revisions, claim receipts, exact Discussion frontiers and, for explicit task returns, the producing Run's concurrency guard serialize structured state races. Context Version does not replace these scope-specific fences.
 
 ## 11. Transition and authority matrices
 
@@ -416,11 +426,11 @@ These matrices are normative domain transitions. Command names remain provisiona
 | Intent | Actor | Preconditions | Atomic result | Conflict result |
 |---|---|---|---|---|
 | Create Workspace | authenticated Human identity | valid creation intent in the current deployment | Workspace + creator's active `owner` Human Membership | duplicate/idempotent retry returns the prior result; partial Workspace or ownerless Workspace is impossible |
-| Create Agent | any active Human Workspace Member | creator Membership and target Workspace are current | Agent identity + active `member` Membership + creator as Owner; Workspace Channel access follows that Membership, while Project, DM, context, credential and Runtime authority do not | invalid or partial creation commits nothing |
-| Create Human invitation | current active Workspace Owner | authentication seam supplies a valid normalized email and expiry; no active Membership is already known for the resolved Human and no pending Invitation uses that Workspace/email | new `pending` Workspace Invitation; no Membership or access | exact duplicate returns existing pending Invitation unchanged; ordinary Member authority, invalid target, known active Membership, non-identical concurrent pending invitation, or stale owner authority creates nothing |
-| Accept Human invitation | authenticated Human with matching verified email | Invitation is `pending`, unexpired, belongs to target Workspace, verified email matches exactly, and Human has no active Membership there | Invitation becomes `accepted` and creates one active `member` Membership with Workspace Channel access | invalid or concurrent acceptance creates no duplicate Membership |
-| Revoke Human invitation | current active Workspace Owner | Invitation is `pending` in the same Workspace | Invitation becomes terminal `revoked`; no Membership exists from it | terminal Invitation, ordinary Member authority, stale owner authority, or acceptance winning first changes nothing |
-| Expire Human invitation | Workspace Authority | Invitation is `pending` and its expiry has been reached | Invitation becomes terminal `expired`; no Membership exists from it | acceptance committed before expiry remains accepted; any later acceptance creates nothing |
+| Create Agent | any active Human Workspace Member | creator Membership and target Workspace are current | Agent identity + active `member` Membership + creator as Owner; public Workspace Channel access follows that Membership, while private Channel, Project, DM, context, credential and Runtime authority do not | invalid or partial creation commits nothing |
+| Create Workspace Join Link | current active Workspace Owner | creator has current owner authority | new `active` high-entropy Join Link; digest and authenticated ciphertext are stored | ordinary Member authority or invalid Workspace creates nothing |
+| List Workspace Join Links | current active Human Workspace Member | caller has current Workspace Membership | active links include the recoverable token; revoked links include metadata with a null token | inactive or non-member authority returns no link metadata or token |
+| Confirm Workspace Join Link | authenticated Human holding the complete token | Join Link is `active` and belongs to an existing Workspace | exactly one active `member` Membership with public Workspace Channel access; aggregate use count advances | invalid/revoked token creates nothing; existing active Membership is returned without duplication |
+| Revoke Workspace Join Link | current active Workspace Owner | Join Link is `active` in the same Workspace and revision is current | Join Link becomes terminal `revoked`; existing Memberships remain intact | revoked link, ordinary Member authority, or stale revision changes nothing |
 | Change member to owner or owner to member | current Workspace Owner | target is an active Human Membership in the same Workspace; another owner remains when demoting the last owner | same Membership continues with its new base role | ordinary Member authority, stale/cross-Workspace target, or removal of the last owner changes nothing |
 | Remove another Human Member | current Workspace Owner | target is another active Human Membership in the same Workspace; another active owner remains if target is owner; target owns no Agent | target Membership becomes terminal and its effective access closes | ordinary Member authority, stale/cross-Workspace target, ownerless Agent, or removal of the last owner changes nothing |
 | Transfer Agent ownership | current Workspace Owner | Agent belongs to this Workspace; target is a different active Human Membership in it | Agent retains identity and Membership; accountable Owner changes with immutable old/new responsibility history | ordinary Member, Agent Owner, Host, inactive or cross-Workspace target, or stale Agent revision changes nothing |
@@ -430,19 +440,22 @@ These matrices are normative domain transitions. Command names remain provisiona
 
 | Intent | Actor | Preconditions | Atomic result | Conflict result |
 |---|---|---|---|---|
-| Create Conversation | any active Human Member of the target scope | valid preset; Project scope accepts Channel only; Workspace DM supplies one other active Workspace Membership | Conversation + fixed nullable Project scope + Timeline at frontier zero + creator provenance; Channel creates no member facts, DM creates two fixed direct references | Agent actor, inactive creator, Project DM, invalid direct participant, or failed authorization creates nothing |
-| Publish top-level Message | authorized Human or Agent execution | current membership and Timeline write permission; Agent publication has one active Run/Attempt, matching claim receipt and Binding revision | append immutable Message; Agent Message records producing Run/Attempt while Human Message records neither; advance Conversation context version; record per-target outcomes, Requests and Inbox Items | missing/fenced/forged/terminal Agent Run authority appends nothing; target-level refusal does not block other targets; exact retry returns the prior result |
-| Publish first Thread reply | authorized Human or Agent execution | root is a top-level Message; current Conversation access; Agent publication has matching active Run/Attempt/receipt | Thread + first immutable reply + producing Run/Attempt only for Agent author + per-target outcomes, Requests and Inbox Items; advance Conversation context version | missing/fenced/forged/terminal authority or invalid root creates nothing; concurrent replies converge on one Thread and are ordered by commit; target-level refusals do not block the reply |
-| Publish later Thread reply | authorized Human or Agent execution | Thread exists; current Conversation access; Agent publication has matching active Run/Attempt/receipt | append immutable reply + producing Run/Attempt only for Agent author + per-target outcomes, Requests and Inbox Items; advance Conversation context version | missing/fenced/forged/terminal authority appends no Message; target-level refusals do not block the reply; exact retry returns prior result |
-| Change scope Membership | Workspace Owner or Project Manager according to the scope contract | target Membership is valid for that scope | every Channel in the scope immediately reflects the new participant set; removal cancels affected pending requests and fences accepted Runs | no Conversation-local participant command exists |
+| Create Channel | active Human Workspace Owner or active Human Project Manager for the target scope | valid immutable visibility; public supplies no audience; private supplies only current Memberships of the exact scope and includes creator | Conversation + fixed nullable Project scope + Timeline at frontier zero + creator provenance; public creates no audience rows, private creates exact audience rows | ordinary Member/Agent actor, inactive creator, explicit public audience, cross-scope or inactive Membership, or failed authorization creates nothing |
+| Create DM | active Human Workspace Member | exactly one other active Workspace Membership; visibility is private | Workspace Conversation + fixed two-Membership audience + Timeline at frontier zero | Project scope, public visibility, invalid participant, or failed authorization creates nothing |
+| Publish top-level Message | authorized Human or bound Agent | current membership and Timeline write permission; persistent Agent publication has matching claim receipt, Binding revision and expected Timeline frontier | Human append, or Agent `published { message }`; persistent Agent Message has no Run/Attempt provenance; advance Conversation context version; record per-target outcomes, Requests and Inbox Items; complete the receipt atomically | stale Agent frontier returns `held` and an exact delta without a Message or receipt completion; missing/fenced/forged authority appends nothing; exact retry returns the prior result |
+| Publish first Thread reply | authorized Human or bound Agent | root is a top-level Message; current Conversation access; persistent Agent publication has matching receipt, Binding revision and expected Thread frontier | Thread + first immutable reply + per-target outcomes, Requests and Inbox Items; persistent Agent reply has no Run/Attempt provenance | stale Agent frontier returns `held`; invalid root or missing/fenced authority creates nothing; concurrent replies converge on one Thread and are ordered by commit |
+| Publish later Thread reply | authorized Human or bound Agent | Thread exists; current Conversation access; persistent Agent publication has matching receipt, Binding revision and expected Thread frontier | append immutable reply + per-target outcomes, Requests and Inbox Items; persistent Agent reply has no Run/Attempt provenance | stale Agent frontier returns `held`; missing/fenced authority appends no Message; exact retry returns the prior result |
+| Change scope Membership | Workspace Owner or Project Manager according to the scope contract | target Membership is valid for that scope | every public Channel in the scope immediately reflects the new participant set; all effective private/DM access through the terminal Membership closes; affected pending Requests and active Runs are cancelled/fenced | stale, inactive, or cross-scope target changes nothing |
+| Add private Channel participant | active Human Workspace Owner or Project Manager for the Channel scope | private active Channel; exact current scope Membership; expected Conversation revision | audience row + Conversation revision/context version advance; full-history content access begins | public/DM, ordinary Member/Agent, stale revision, inactive/cross-scope Membership, or duplicate participant changes nothing |
+| Remove private Channel participant | active Human Workspace Owner or Project Manager for the Channel scope | private Channel; exact audience row; expected Conversation revision | delete audience row + Conversation revision/context version advance + pending Request cancellation + active Run/Attempt and Agent inbox fence | public/DM, ordinary Member/Agent, stale revision, or absent participant changes nothing; removing self or last participant is valid |
 | Remove Agent Workspace Member | current Workspace Owner | target is this Workspace's Agent with a current active Membership; expected Agent revision | make Membership terminal; close effective access; cancel affected Requests and fence active Runs; retain Agent identity, accountable Owner and history | Agent Owner/Host/ordinary Member authority, stale version or wrong Workspace changes nothing |
-| Readmit Workspace Agent | current Workspace Owner | Agent identity belongs to this Workspace and has no active Membership | create a new active `member` Membership with Workspace Channel access but no inherited DM or execution authority | invalid authority or attempted old-Membership reuse creates nothing |
+| Readmit Workspace Agent | current Workspace Owner | Agent identity belongs to this Workspace and has no active Membership | create a new active `member` Membership with public Workspace Channel access but no inherited private Channel, DM, or execution authority | invalid authority or attempted old-Membership reuse creates nothing |
 
 DM participant changes are not transitions: a different participant set creates another Conversation. Message correction and retraction publish new Messages rather than mutating old ones.
 
-Conversation ownership, administrator transitions and Channel participant governance do not exist. Creator provenance never participates in later authorization. Workspace and Project Membership are the only Channel access authorities. Workspace DM has no mutation path, and Project has no DM path.
+Conversation ownership and administrator roles do not exist. Creator provenance never participates in later authorization. Existing Workspace Owner and Project Manager roles govern private Channel audience, including when the administrator lacks content access. Workspace DM has no mutation path, and Project has no DM path.
 
-Channel access is the current scope Membership fact. Active Workspace Membership grants Workspace Channel access; Project Channel additionally requires active Project Membership. Regular Human and Agent members list and read all Channels in their current scopes. Workspace DM remains undiscoverable without one of its fixed direct Membership references.
+Public Channel content access is the current scope Membership fact. Private Channel content access additionally requires the exact current scope Membership in its audience; a new tenure never matches an old row. Regular Human and Agent members list and read public Channels plus private Channels in whose audience they appear. A scope administrator may additionally list a private Channel in governance mode without any content endpoint. Workspace DM remains undiscoverable without one of its fixed Membership references.
 
 Stable actor identity is not an authorization reference. A Membership is the participation fence: current scope access belongs to it, while audit uses both actor and membership-at-time. This avoids a separate permission generation and prevents an old fixed DM or execution reference from matching a later participation by the same actor.
 
@@ -469,7 +482,7 @@ The Step 5 Run transition table must place first publication of an Agent Message
 
 | Intent | Actor | Preconditions | Atomic result | Conflict result |
 |---|---|---|---|---|
-| Create top-level WorkItem | authorized Human | valid Goal, source Message, and Primary Discussion Scope | `open + unassigned + closed`; optional direct assignment follows in the same use case | invalid reference or authorization creates nothing |
+| Create top-level WorkItem | authorized Human | valid description, source Message, and Primary Discussion Scope | `open + unassigned + closed`; optional direct assignment follows in the same use case | invalid reference or authorization creates nothing |
 | Create standalone WorkItem | authorized Human | no existing discussion location selected | Conversation + initial Human Message + `open + unassigned + closed` WorkItem | any failure creates none of the three facts |
 | Publish / retract claimability | authorized Human; delegation-authorized Agent only for its Child | `open + unassigned`; expected WorkItem version | toggle `closed` / `claimable` | assignment or lifecycle race wins by first commit |
 | Claim | eligible Agent | `open + unassigned + claimable`; expected version | close claimability; set assignee and `agent_claim` kind; advance assignment revision; create assignment request | one concurrent claimant wins; all others get conflict and no request |
@@ -502,15 +515,15 @@ There is at most one WorkItem reference in the Current Submission role, so compl
 
 | Step 1 scenario group | Deterministic Step 2 mapping |
 |---|---|
-| `S-MENTION-CHANNEL-01`, `S-MENTION-DM-01`, `S-MENTION-PER-TARGET-OUTCOME-01`, `S-RUN-NO-MESSAGE-01`, `S-RUN-TERMINAL-MESSAGE-RACE-01` | Message + complete per-target Mention Outcomes + valid Requests are atomic; target establishment failures are isolated and durable. Outcome status follows Message visibility while exact refusal reasons use authority-filtered projections over one fact. Legally established Requests alone express waiting, blocking, rejection, acceptance, and cancellation; these never rewrite Outcome. Existing pending Requests may be reevaluated, but `not_requested` never activates retroactively and requires a new mention. Request acceptance creates one Run; Run outcome and zero-to-many Messages remain independent, while Run terminal and new Message publication share one Workspace commit order. Conversation preset changes membership policy only. |
-| `S-WORK-FROM-MESSAGE-01`, `S-WORK-STANDALONE-ATOMIC-01` | Explicit WorkItem creation fixes Goal, source, and Primary Scope; standalone creation is the three-fact atomic boundary; assignment sets current assignment facts and creates an optional request. |
+| `S-MENTION-CHANNEL-01`, `S-MENTION-DM-01`, `S-MENTION-PER-TARGET-OUTCOME-01`, `S-RUN-NO-MESSAGE-01`, `S-AGENT-MESSAGE-FRESHNESS-01` | Message + complete per-target Mention Outcomes + valid Requests are atomic; target establishment failures are isolated and durable. Outcome status follows Message visibility while exact refusal reasons use authority-filtered projections over one fact. Legally established Requests alone express waiting, blocking, rejection, acceptance, and cancellation; these never rewrite Outcome. Existing pending Requests may be reevaluated, but `not_requested` never activates retroactively and requires a new mention. Persistent Agent chat publication is independent of Run terminal and uses atomic Discussion freshness. Conversation preset changes membership policy only. |
+| `S-WORK-FROM-MESSAGE-01`, `S-WORK-STANDALONE-ATOMIC-01` | Explicit WorkItem creation fixes description, source, and Primary Scope; standalone creation is the three-fact atomic boundary; assignment sets current assignment facts and creates an optional request. |
 | `S-MENTION-VS-DELEGATION-01`, `S-AGENT-DELEGATION-01` | Mention trigger and assignment-action trigger are disjoint; only the Child command creates relation, current assignment, and WorkItem-associated request. |
 | `S-CLAIM-RACE-01`, `S-WORK-RELEASE-REASSIGN-01` | Claim is a compare-and-commit acquisition; assignment kind and revision make release, revocation, reassignment, and ABA fencing deterministic without a tenure object. |
 | `S-WORK-REVIEW-01` | Current Submission, independent Review, reviewer revision, atomic feedback decision, and explicit feedback mention request preserve one WorkItem responsibility chain without implicit execution. |
 | `S-CONVERSATION-WITHOUT-THREAD-01` | Timeline is a complete Discussion Scope; Thread exists only after the first reply and has no work lifecycle. |
-| `S-CONVERSATION-SCOPE-MEMBERSHIP-01`, `S-CONVERSATION-NO-OWNER-01`, `S-WORKSPACE-MEMBERSHIP-INCARNATION-01` | Channel access and participants derive from current scope Membership; creator is provenance only; DM direct participants and execution grants still reference exact Memberships. Membership terminal immediately revokes access and execution authority, while re-entry restores only scope-derived Channel access. |
-| `S-HUMAN-MEMBERSHIP-GOVERNANCE-01`, `S-AGENT-WORKSPACE-OWNERSHIP-01`, `S-AGENT-CREATION-01`, `S-AGENT-MEMBERSHIP-GOVERNANCE-01` | Workspace Owner governs the Human trust boundary and Agent Membership lifecycle. Any active Human Member may create an Agent; its active Membership grants Workspace Channel participation but no Project, DM, private context, credential, Runtime Binding, or local resource. |
-| `S-AGENT-MESSAGE-FRESHNESS-01`, `S-AGENT-MESSAGE-FRESHNESS-DECISION-01` | Workspace/Conversation version comparison locates exact changes; the Local Agent Module injects relevant ordered Addenda into the same Runtime Session and returns at the acknowledged cursor. |
+| `S-CONVERSATION-SCOPE-MEMBERSHIP-01`, `S-CONVERSATION-NO-OWNER-01`, `S-WORKSPACE-MEMBERSHIP-INCARNATION-01` | Public Channel access derives from current scope Membership; private Channel and DM content access reference exact Memberships; creator is provenance only. Membership terminal immediately revokes access and execution authority, while re-entry restores only public Channel access until a scope administrator explicitly adds the new tenure to a private audience. |
+| `S-HUMAN-MEMBERSHIP-GOVERNANCE-01`, `S-AGENT-WORKSPACE-OWNERSHIP-01`, `S-AGENT-CREATION-01`, `S-AGENT-MEMBERSHIP-GOVERNANCE-01` | Workspace Owner governs the Human trust boundary, Agent Membership lifecycle, Workspace Channel creation, and private Workspace audience. Any active Human Member may create an Agent; its active Membership grants public Workspace Channel participation but no private Channel, Project, DM, private context, credential, Runtime Binding, or local resource. |
+| `S-AGENT-MESSAGE-FRESHNESS-01`, `S-AGENT-MESSAGE-FRESHNESS-DECISION-01` | Workspace/Conversation version comparison locates exact changes; the current Mention Logical Session reviews the exact Discussion delta and returns at the acknowledged cursor. |
 | `S-OWNER-SUSPEND-01`, `S-OFFLINE-RECONCILIATION-01` | Suspension blocks intake; assignment survives. Authority loss and assignment revisions fence shared writes while Step 5 owns Attempt recovery and terminal outcomes. |
 | `S-WORK-CONVERSATION-LIFECYCLE-01`, `S-RUNTIME-REPLACEMENT-01`, `S-RUNTIME-CANNOT-FORGE-AUTHORITY-01`, `S-WORKSPACE-SINGLE-AUTHORITY-01`, `S-AUDIT-CHAIN-01` | Independent lifecycles, server-bound actor/Run/revisions, one commit order, and retained trigger/assignment/reviewer audit history preserve the supplemental architecture scenarios. |
 

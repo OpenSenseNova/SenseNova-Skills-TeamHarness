@@ -1,0 +1,7 @@
+# Persistent Agent Inbox is independent of Run and Attempt
+
+Conversation Messages are processed by an isolated Logical Session per Mention `agentRequestId` or WorkItem `workItemId`. A DM Message or explicit `@Agent` creates a durable Agent Request, Inbox Item, and wake; ordinary visible Messages create silent Inbox Items. Workspace Changes are not Agent Inbox work. Inbox claim, Conversation history reads, ordinary Agent Message publication, and Logical-Session Artifact operations do not create or require a Run/Attempt. The ACP process/session is only a disposable local cache rebuilt from authoritative Workspace JSONL and `contextHash`. Discussion claim receipts are fenced by Agent, target, Logical Session and Runtime Binding revision and remain replayable until explicitly completed; Artifact held drafts use independent state-hash custody.
+
+Run/Attempt remain optional execution facts for explicit work that needs a fixed objective, budget, policy, Repository base commit, isolated worktree, cancellation, retry, private-context grant or independent execution audit. They are not ACP prompt turns and are not the transport for Agent context.
+
+This decision supersedes ADR-0001, ADR-0023, ADR-0028 and ADR-0029 wherever those records require conversational Agent Requests or every Agent-authored Message to be Run/Attempt-scoped. Their explicit-work constraints remain historical input, not the current Conversation execution contract.

@@ -4,9 +4,9 @@ This context defines the shared language for humans and agents collaborating in 
 
 ## Current delivery scope
 
-The MVP first establishes the Workspace identity, Membership, Invitation, role, Agent-creation, and governance facts required for authorization, then implements Conversation, Conversation Timeline, Thread, Discussion Scope, immutable Message, Agent Mention Outcome, Agent Request, and the Run/Attempt execution path needed for an Agent to publish ordinary Messages back to the exact source scope. Thread support is required even though an individual Conversation may contain zero Threads.
+The MVP first establishes the Workspace identity, Membership, Workspace Join Link, role, Agent-creation, and governance facts required for authorization, then implements Conversation, Conversation Timeline, Thread, Discussion Scope, immutable Message, Agent Mention Outcome, Agent Request, the persistent Agent Inbox, isolated Logical Sessions (one per Mention `agentRequestId` or WorkItem `workItemId`) and a bounded Project WorkItem slice backed by disposable local ACP caches. Conversation replies and Workspace-change handling do not create Run/Attempt. Thread support is required even though an individual Conversation may contain zero Threads.
 
-WorkItem, assignment, claim, delegation, Result Submission, Completion Policy, and Review are accepted vocabulary for a later explicit-work layer. They are not MVP objects, storage structures, commands, projections, or release gates.
+The current WorkItem slice includes Human-created Project WorkItems, direct assignment and reassignment, blocking/unblocking, independent comments, Agent Result Submission, and Human completion/cancellation. Claimability, Agent delegation/Child WorkItem, Completion Policy, and Review remain later layers; they are not MVP objects, commands, projections, or release gates.
 
 ## Language
 
@@ -27,7 +27,7 @@ The durable per-target result of resolving one Agent Mention when its Message co
 _Avoid_: Agent Request lifecycle, transient API response, all-or-nothing target batch, duplicate public/private reason facts
 
 **Agent Request**:
-A durable, legally established request for a named Agent to respond or advance explicitly associated work. It has exactly one direct trigger—a `requested` Agent Mention Outcome, WorkItem assignment action, or Agent Review designation—plus a target Agent and result Discussion Scope, and may exist without a WorkItem or Run. Temporary execution conditions are derived intake dispositions; an irrecoverable intake refusal becomes `rejected`. Neither outcome changes its trigger back to `not_requested`.
+A durable, legally established request for a named Agent to attend to a Message or advance explicitly associated work. A conversational Request has one `requested` Agent Mention Outcome, target Agent and result Discussion Scope; its isolated Mention Logical Session accepts it through Inbox claim without creating Run/Attempt. Future explicit WorkItem assignment or Review triggers may use a Run when independent execution facts are required. Temporary availability is derived and an irrecoverable intake refusal becomes `rejected`; neither outcome changes its trigger back to `not_requested`.
 _Avoid_: WorkItem, Run, notification
 
 **Direct Assignment**:
@@ -59,7 +59,7 @@ The exact message stream in which context is read and Messages are published: ei
 _Avoid_: Conversation, Message stream entity, implicit Thread
 
 **Message**:
-An authored, immutable statement published in one Discussion Scope. A top-level Message belongs to a Conversation Timeline and a reply belongs to one Thread. Every Agent-authored Message is produced by exactly one Run and Attempt for that same Agent; a Human-authored Message has none of those provenance fields. Agent publication also requires the active claim receipt and Runtime Binding revision at command time. This provenance proves execution authority and attribution, but never makes Message into execution, work, submission, or review state.
+An authored, immutable statement published in one Discussion Scope. A top-level Message belongs to a Conversation Timeline and a reply belongs to one Thread. A Mention Logical Session publishes with an active Inbox claim receipt and Runtime Binding revision but no producing Run/Attempt. A separate explicit task execution may record producing Run/Attempt provenance. A Human-authored Message has no execution provenance. These facts prove authority and attribution but never make Message into execution, work, submission, or review state.
 _Avoid_: Final Message, Run Result Message, Agent Request, Result Submission, task record
 
 **Discussion Frontier**:
@@ -71,7 +71,7 @@ A monotonically increasing Workspace or Conversation counter used to detect whet
 _Avoid_: Discussion Frontier, permission epoch, cancellation flag
 
 **Workspace Document**:
-A shared team rule, process, guide, or knowledge document with one stable Workspace identity and immutable content versions. It does not belong to an Agent and does not define an Agent persona. A Runtime reads a Document version only through an authorized explicit context read; V1 does not push Document changes into an active Runtime.
+A shared team rule, process, guide, or knowledge document with one stable Workspace identity and immutable content versions. It does not belong to an Agent and does not define an Agent persona. Document changes remain in Workspace change history and do not create Agent Inbox Items; an Agent receives a Message reference when it must inspect a Document.
 _Avoid_: Agent role prompt, mutable shared file, Runtime Session, Run objective
 
 **Run Context Snapshot**:
@@ -79,24 +79,24 @@ The exactly-one immutable execution provenance accepted with a Run, including ob
 _Avoid_: Prompt, live Conversation history, Inbox payload
 
 **Agent Inbox Item**:
-A durable attention record for one Agent DM Message or explicit structured `@Agent` mention. It references the Message, Discussion Scope, Agent Request and monotonically increasing Agent sequence without copying Message body. Ordinary Channel/Thread Messages do not create Inbox Items.
-_Avoid_: Message copy, unread counter for every Conversation, Workspace event broadcast
+A durable delivery record for one ordinary Message visible to an Agent. Human-Agent DM and explicit structured `@Agent` Messages additionally carry attention and create a separate wake entry. It stores a stable Message reference and a monotonically increasing Agent sequence without copying the Message body.
+_Avoid_: Workspace Change, Message copy, Runtime prompt payload, wake event
 
 **Agent Inbox Claim Receipt**:
-A replayable capability proving that one Agent Run/Attempt claimed the pending attention items for one Discussion Scope under one Runtime Binding revision. It records the exact discussion position range returned by `message check` and remains replayable until the Run is terminal.
-_Avoid_: Message, Runtime credential, global Workspace cursor
+A replayable capability proving that one Mention Logical Session (identified by `agentRequestId`) claimed its pending Message item and preceding Discussion changes under one Runtime Binding revision. It records the exact position range returned by `message check` and remains replayable until that request is explicitly completed. It contains no Run/Attempt identity.
+_Avoid_: Message, Runtime credential, Run lease, global Workspace cursor
 
 **Held Draft**:
-An unpublished Agent candidate retained locally across interruption or before the return phase completes. It is not a Message or shared Workspace fact and may be revised, discarded or replaced before publication.
-_Avoid_: Message, Final Message, Result Submission, shared draft
+An unpublished persistent-Agent Message or Artifact-operation candidate durably retained only on its Local Computer. A Message draft is bound to a Discussion receipt and exact frontier. An Artifact draft is independently bound to Agent, Runtime Binding revision, Artifact identity, observed base state hash, proposed hash, and optional frozen managed bytes. Workspace stores only idempotent results and content-free freshness audit. Either draft may be revised, retried unchanged, discarded, or knowingly published after at least one hold. Artifact success writes Workspace change history but no Agent Inbox Item.
+_Avoid_: Message, Artifact, Final Message, Result Submission, shared draft
 
 **Workspace**:
 A single team's highest shared collaboration, authorization, and data-isolation context, containing Workspace-level collaboration and optional Projects. One deployment may contain multiple isolated Workspaces, and one Human may create or join several without merging their authority or data; the current product has no separate Organization domain entity.
 _Avoid_: Organization, Customer Account, Project
 
-**Workspace Invitation**:
-A durable, Workspace-scoped offer created by a current Workspace Owner for the Human who proves control of one normalized verified email to join as `member`. At most one Invitation is `pending` for the same Workspace and normalized email; while pending neither it nor its link grants Membership or access, and only an authenticated Human with that verified email may accept it, atomically producing its terminal `accepted` state, one new active Membership, and an immutable accepted Human reference. `revoked` and `expired` are the other terminal states, after which a new Invitation may be created.
-_Avoid_: Workspace Membership, direct member creation, access grant, owner offer
+**Workspace Join Link**:
+A revocable, Workspace-scoped bearer capability created by a current Workspace Owner. It targets no email or preselected Human and is reusable while `active`; every active Human Workspace Member may view and copy it, and any authenticated Human holding the complete high-entropy URL may explicitly confirm and join as `member`. Acceptance creates a new active Membership only when that Human has no active Membership in the Workspace. The server retains the digest for lookup and an authenticated encryption of the token for authorized listing; revocation deletes the ciphertext and the link can never be used again.
+_Avoid_: Workspace Membership, email invitation, direct member creation, owner-role grant
 
 **Workspace Membership**:
 One durable, continuous participation of a Human or Agent identity in exactly one Workspace, carrying the closed base role `owner | member`. Only Human Memberships may be `owner`; Agent Memberships are fixed to `member`. At most one Membership is active for the same actor in the same Workspace; removal is terminal and later re-entry creates a new Membership.
@@ -111,16 +111,12 @@ The single logical authority that authenticates and commits shared collaboration
 _Avoid_: Local replica authority, Runtime state, multi-master Workspace
 
 **Project**:
-A Workspace collaboration scope for one sustained body of work, with its own participation, Conversations, Resource Links, Artifact associations, and zero or one active Primary Git Repository. It is optional and is not any Computer's absolute path; a Conversation may belong to one Project or remain Workspace-level, while an Artifact may be explicitly associated with several Projects without changing ownership.
+A Workspace collaboration scope for one sustained body of work, with its own participation, Conversations, Artifact associations, and zero or one active Primary Git Repository. It is optional and is not any Computer's absolute path; a Conversation may belong to one Project or remain Workspace-level, while an Artifact may be explicitly associated with several Projects without changing ownership.
 _Avoid_: Workspace, mandatory parent, OS path, arbitrary folder label
 
 **Primary Git Repository**:
 The optional current Git source attached to a Project across Computers, identified independently of any local checkout path and carrying the clone source and default branch needed to resolve the same work elsewhere. A Project has at most one active association; identity replacement is detach then attach, and detached history remains for Run provenance. It never contains Human credentials or local Git configuration.
 _Avoid_: Project identity, Local Working Copy, absolute directory, Attempt Worktree, Artifact
-
-**Resource Link**:
-A Project-scoped, revisioned title and `http/https` URL for external reference material. It has no uploaded content, Artifact Snapshot, Agent lineage, or Workspace ownership semantics.
-_Avoid_: Artifact, file upload, versioned document, Repository
 
 **Local Working Copy**:
 One Computer's active local checkout of a Project's Primary Git Repository. Its absolute path, credentials, file permissions, and uncommitted contents remain under Local Custody; another Computer may bind the same Project at a different path.
@@ -143,11 +139,11 @@ The single member currently responsible for advancing a WorkItem. Parallel colla
 _Avoid_: Co-assignee, Reviewer, Execution Lease holder
 
 **Run**:
-The logical execution by a named Agent of one accepted Agent Request under a stable objective, Run Context Snapshot, policy, and budget. Its outcome is reported by the execution layer independently of any Messages, WorkItem state, Result Submission, or Review. A terminal Run has no authority to publish a new shared Message; a recognized retry of a Message publication already committed before terminal returns that prior result and is not a new publication.
-_Avoid_: Agent Request, Attempt, Runtime Session, WorkItem, conversation response
+The optional logical execution by a named Agent for explicit work that requires a stable objective, Run Context Snapshot, policy, budget, cancellation or Repository execution scope. Conversation attention and Workspace Change processing do not create a Run. Its outcome is reported independently of Message, WorkItem, Result Submission or Review state.
+_Avoid_: Agent Request receipt, Attempt, persistent Agent Runtime Session, conversation response
 
 **Attempt**:
-One concrete execution of a Run by a Device through a Runtime. Technical retry creates another Attempt for the same Run rather than another Agent Request or WorkItem.
+One concrete execution of an explicit Run by a Device through a Runtime. Technical retry creates another Attempt for the same Run. Inbox wake or ACP prompt turn is never an Attempt.
 _Avoid_: Run, Agent Claim, WorkItem retry
 
 **Attempt Worktree**:
@@ -219,7 +215,7 @@ The protocol-neutral boundary through which a Local Node starts, observes, inter
 _Avoid_: ACP domain model, Workspace protocol, Runtime-specific core interface
 
 **Workspace Interaction Gateway**:
-The mediated capability through which a Runtime acts in the Workspace as the current Agent while executing a Run. It may be exposed through CLI, MCP, or another adapter, but it always binds calls to server-verified Agent and execution authority rather than trusting identity or permissions supplied by the Runtime.
+The mediated capability through which a Runtime acts in the Workspace as the current Agent. For persistent messaging it binds calls to Agent identity, Membership, Computer, Runtime Binding revision and Inbox receipt; for explicit task execution it may additionally bind Run/Attempt authority. It may be exposed through CLI, MCP, or another adapter and never trusts identity or permissions supplied by the Runtime.
 _Avoid_: Direct Workspace credential, Runtime-owned API, protocol-specific domain interface
 
 **Agent Delegation**:
@@ -243,8 +239,8 @@ An explicit evaluation of one Result Submission by one designated Human or Agent
 _Avoid_: Result Submission status, Runtime success, implicit approval, multi-reviewer vote
 
 **Artifact**:
-A Workspace-level stable identity for a Markdown collaborative document or uploaded file. It owns one autosaved Current State, zero or more UUID-addressed Artifact Snapshots, deletion lifecycle, and explicit Project associations. Editing or replacing Current State does not itself add history; Messages and Run Context pin exact snapshots.
-_Avoid_: Every Project file, Resource Link, version-suffixed filename, staged blob, execution log
+A Workspace-level stable identity for a Markdown collaborative document, uploaded file, or external URL. Markdown/File own one autosaved Current State and zero or more UUID-addressed Artifact Snapshots; URL owns one immutable `http/https` locator and editable description without Workspace-managed content. All types share permissions, lineage, deletion lifecycle, and explicit Project associations. Messages pin either an exact managed-content Snapshot or the URL name, locator, and description at send time.
+_Avoid_: Every Project file, arbitrary external locator, version-suffixed filename, staged blob, execution log
 
 **Artifact Snapshot**:
 An immutable content snapshot with a stable UUID, content digest, media type, byte length, creator, creation time, and mutable optional display label. Hashes deduplicate content but never replace snapshot identity. Rename, restore, and soft delete preserve the UUID.

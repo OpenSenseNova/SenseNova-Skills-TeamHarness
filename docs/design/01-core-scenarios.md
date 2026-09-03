@@ -30,10 +30,10 @@
 - **参与者与身份**：Human-H 是 Conversation 成员；Agent-A 是可被提及的 Workspace Agent；Node-A 可执行 Agent-A。
 - **初始共享状态**：存在一个 Channel 风格 Conversation，其顶层 Conversation Timeline 对 Human-H 和 Agent-A 可见；不存在相关 WorkItem。
 - **意图**：Human-H 发布一条顶层 Message，并显式 `@Agent-A` 请求响应。
-- **正常流程**：Workspace 原子提交 Human-authored Message、Agent-A 的 `requested` Mention Outcome 和持久 Agent Request；Human Message 没有 producing Run。请求被接受后形成 Run；Agent-A 基于触发时可见内容执行，可以在同一 Timeline 发布普通 Message；Workspace 从受信执行凭证把每条 Agent-authored Message 绑定到该 Run，执行层独立记录 Run terminal outcome。
+- **正常流程**：Workspace 原子提交 Human-authored Message、Agent-A 的 `requested` Mention Outcome 和持久 Agent Request；Human Message 没有执行 provenance。对应 Mention Logical Session 接受 Inbox Request，Agent-A 基于领取的 Discussion delta 执行，并通过当前 Binding、claim receipt 与精确 frontier 在同一 Timeline 发布普通 Message；该聊天 Message 不创建或绑定 Run/Attempt。
 - **失败与恢复**：若 Human-H 无权发消息，Message、Outcome 和 Request 均不提交；若 Human-H 可发消息但 Agent-A 不是合法请求目标，则提交 Message 与 `not_requested(reason)`，不创建 Request；若请求合法成立但受临时接单、暂停、Node、调度或并发条件影响，Outcome 保持 `requested` 且 Request 投影为 `waiting / blocked`；不可恢复的 intake 拒绝使 Request 进入 `rejected`；若实时通知丢失，Agent Request 仍可由 Node-A 恢复发现。
-- **最终共享状态**：正常路径有原始 Human Message、一个 `requested` Outcome、一个不关联 WorkItem 的 Agent Request、一个具有独立 outcome 的 Run，以及零到多条必须关联该 Run 的 Agent Message；目标拒绝路径有 Message 和 `not_requested` Outcome 而没有 Request。始终没有隐式 WorkItem、Direct Assignment 或 Review。
-- **可观察结果**：UI 分别显示消息和请求/运行结果；Node-A 可从稳定位置发现请求；审计从 Agent Message 的 producing Run 串联 Agent-A、请求、Attempt 和实际 Device/Runtime。
+- **最终共享状态**：正常路径有原始 Human Message、一个 `requested` Outcome、一个不关联 WorkItem 的 Agent Request，以及零到多条由对应 Logical Session 发布、无 Run/Attempt provenance 的普通 Agent Message；目标拒绝路径有 Message 和 `not_requested` Outcome 而没有 Request。始终没有隐式 WorkItem、Direct Assignment 或 Review。
+- **可观察结果**：UI 分别显示消息和请求状态；Node-A 可从稳定位置发现请求；审计从 Agent Message 串联 Agent-A、Membership、Computer、Binding revision、receipt 与 freshness decision。
 - **验证不变量**：I-01、I-03、I-04、I-05、I-16、I-23、I-25、I-27、I-30、I-32、I-34。
 
 ### S-MENTION-DM-01：在 DM 风格 Conversation 中请求 Agent
@@ -217,12 +217,12 @@
 ### S-ARTIFACT-DELETE-PURGE-01：Artifact 删除、恢复与到期清理
 
 - **参与者与身份**：Artifact creator-H、Workspace Owner-O、后续 Message 读者-R。
-- **初始共享状态**：Workspace 已保存 Artifact 当前状态、历史快照、Project 关联，以及固定其中一个 Snapshot UUID 的 Message reference。
+- **初始共享状态**：Workspace 已保存一个 Markdown/File Artifact 及 Snapshot reference，或一个 URL Artifact 及发送时固定 locator 的 Message reference；两者都可有关联 Project。
 - **意图**：H 删除 Artifact；保留期内可能恢复，或等待 7 天到期。
-- **正常流程**：删除后 Artifact 立即从普通列表、编辑器和 Project 面板隐藏。7 天内恢复会重新显示原关联；到期则清除当前状态、关联和无人引用 blob。单个历史快照软删除后立即禁止内容访问，7 天后在无其他引用时回收 blob。
-- **失败与恢复**：非 creator 且非 Workspace Owner 的删除/恢复被拒绝；过期 revision 不覆盖；清理后不能恢复正文或伪造可下载内容。
-- **最终共享状态**：Message 与 Run 保留 Snapshot UUID 和最小展示元数据，内容不可用状态明确；audit 保留删除与清理事实而不保留正文。
-- **可观察结果**：回收站显示到期时间和清理状态；历史 Message 显示“该历史内容已删除”。
+- **正常流程**：删除后 Artifact 立即从普通列表、页面和 Project 面板隐藏。7 天内恢复会重新显示原关联。Markdown/File 到期清除 Current State、Snapshot、Association 和无人引用 blob；URL 到期移除 Association 并进入不可恢复的 `purged` tombstone，但保留 locator、描述、creator 和 Agent/Run provenance。
+- **失败与恢复**：非 creator 且非 Workspace Owner 的删除/恢复被拒绝；过期 revision 不覆盖；到期后不能恢复。URL 不执行 blob 清理，Markdown/File 清理后不能伪造可下载内容。
+- **最终共享状态**：Message 与 Run 保留 Snapshot metadata 或发送时 URL locator，当前 Artifact 状态明确；audit 保留删除和到期处理事实。
+- **可观察结果**：回收站对托管内容显示清理时间，对 URL 显示封存时间；历史 Message 显示内容已删除或 URL Artifact 已删除/封存，但仍保留发送时链接。
 - **验证不变量**：I-63、I-66、I-68。
 
 ## 5. Discussion Scope 与并发发布
@@ -240,17 +240,17 @@
 - **可观察结果**：UI 不显示伪造 Thread；Node-A 观察到 Timeline frontier；审计中的结果 Scope 明确为 Conversation Timeline。
 - **验证不变量**：I-01、I-02、I-03、I-04、I-05、I-25。
 
-### S-CONVERSATION-SCOPE-MEMBERSHIP-01：Channel 与所属协作范围自动对齐
+### S-CONVERSATION-SCOPE-MEMBERSHIP-01：Channel visibility 与精确 audience
 
 覆盖：`S-CONVERSATION-NO-OWNER-01`、`S-CONVERSATION-CURRENT-SCOPE-ACCESS-01`
 
-- **参与者与身份**：Human-H 与 Agent-A 是 active Workspace Members；Project-P 另有 active Project Members；Agent-A 的 Run 仅获准向已有 Thread-1 发布。
-- **初始共享状态**：Workspace Channel-CW、Project Channel-CP 和 Workspace DM-D 已存在；Channel 不保存参与者记录，DM 固定两个 direct Membership。
-- **意图**：Human-H 创建 Channel；治理者随后增加/移除 Workspace 或 Project Member；Agent-A 尝试创建 Conversation 或治理成员。
-- **正常流程**：Workspace 原子建立 Channel、Timeline、fixed scope 与 creator provenance。CW 的参与者立即等于 Workspace active Membership，CP 等于 Project active Membership。新成员无需 Conversation 写入即可读取完整 Channel 历史并成为结构化 `@Agent` 候选；移除立即撤权并取消/fence 相关执行。DM 参与者保持固定。
-- **失败与恢复**：Agent-A 创建 Conversation、Agent 发布凭证治理 Membership、创建 Project DM 或修改 DM participants 时整体拒绝。Channel 不存在 add/remove participant API。
-- **最终共享状态**：creator provenance 保留但不存在 Conversation Owner/Administrator 或 Channel member facts；所有 Channel 权限只由当前 scope Membership 决定。
-- **可观察结果**：参与者列表、Conversation discovery 和 `@Agent` picker 与 Workspace/Project member 列表自动对齐；审计记录 Membership 治理与 Agent content intent，而不是 Conversation-local participant events。
+- **参与者与身份**：Human-H 是 active Workspace Owner 和 Project-P Manager；Human-M 与 Agent-A 持有当前 scope Membership；Agent-A 的 Run 仅获准向已有 Thread-1 发布。
+- **初始共享状态**：Workspace Public Channel-CW、Project Private Channel-CP 和 Workspace DM-D 已存在；CW 无 audience 行，CP 保存精确 Project Membership audience，DM 固定两个 Workspace Membership。
+- **意图**：H 创建 public/private Channel，随后为 CP 增加/移除参与者并将自己移出；Agent-A 尝试创建 Conversation 或治理 audience。
+- **正常流程**：CW 参与者动态等于 Workspace active Membership；CP 只允许显式精确 Project Membership。移除参与者原子推进 Conversation revision/context version，撤销完整历史、搜索、变更流与执行权限，并取消/fence 相关 Request/Run。H 移出自己后仍可以 governance mode 查看基本信息和 audience，但不能读消息。
+- **失败与恢复**：普通 Member 或 Agent 创建/治理 Channel、public 携带 audience、Workspace/Project Membership 混用、创建 Project DM、修改 DM participants 或使用 stale revision 时整体拒绝。
+- **最终共享状态**：creator provenance 保留但不存在 Conversation Owner/Administrator；public 权限由当前 scope Membership 决定，private/DM 权限绑定精确 Membership tenure。
+- **可观察结果**：列表和标题区分 public/private；public 参与者面板只读，private 管理员可增删，governance mode 不发起 Message/search/change/Agent 请求。
 - **验证不变量**：I-01、I-02、I-15、I-16、I-20、I-22、I-25、I-36、I-37、I-38、I-39、I-49。
 
 ### S-WORKSPACE-REMOVAL-NO-RESTORE-01：Workspace 移除不会留下或复活 Conversation 权限
@@ -260,9 +260,9 @@
 - **参与者与身份**：Actor-M 是稳定 Human 或 Agent identity，当前 active `Membership-M1` 属于多个 Channel 和一个 DM；Human-G 是当前 Workspace Owner，因此可治理 Human 或 Agent Membership；若 Actor-M 是 Agent，可能还存在相关 Agent Request/Run。
 - **初始共享状态**：Membership-M1 可读取这些 Conversation 的完整历史；相关 pending Agent Request 或 active Run 可能存在；历史 Message 同时记录 Actor-M 和 Membership-M1-at-time。
 - **意图**：Human-G 终止 Membership-M1，之后同一 Actor-M 重新加入 Workspace。
-- **正常流程**：Workspace 使 Membership-M1 永久 terminal，立即关闭 Channel/DM 访问并 fence 相关执行。重新加入创建 Membership-M2，自动恢复 Workspace Channel 访问，但不匹配 DM-D 的固定 participant 或任何旧 Run 授权。
+- **正常流程**：Workspace 使 Membership-M1 永久 terminal，立即关闭 public/private Channel 和 DM 访问并 fence 相关执行。重新加入创建 Membership-M2，仅自动恢复 public Workspace Channel 访问，不匹配 private audience、DM-D 的固定 participant 或任何旧 Run 授权。
 - **失败与恢复**：缓存、搜索索引、变化流订阅或后台清理滞后不能继续授权读取；离线 Node 重连后不能使用 M1 的旧授权；重复移除保持幂等；试图复活 M1 或在 M1 仍 active 时创建 M2 均失败。若 Actor-M 是 Agent creator，Human 退出不删除 Agent 或改写 creator，Host Binding 可独立失效。
-- **最终共享状态**：Actor-M 保持一个稳定身份和两段可区分的历史 Membership；M1 永久 terminal，M2 是唯一 active Membership；Channel access 来自 M2，旧 DM 与执行权限没有复活。
+- **最终共享状态**：Actor-M 保持一个稳定身份和两段可区分的历史 Membership；M1 永久 terminal，M2 是唯一 active Membership；public access 来自 M2，旧 private Channel、DM 与执行权限没有复活。
 - **可观察结果**：所有 Workspace 读取入口一致拒绝 M1；治理者能区分 Actor-M、M1 与 M2；审计保留每条行为的 actor 和 membership-at-time，以及移除、取消/fencing、重新加入和后续显式再授权事实。
 - **验证不变量**：I-15、I-16、I-20、I-22、I-25、I-26、I-27、I-38、I-39、I-40、I-41。
 
@@ -340,8 +340,8 @@
 ### S-HUMAN-MULTI-WORKSPACE-01：同一 Human 通过独立 Membership 参与多个 Workspace
 
 - **参与者与初始状态**：同一产品部署中的稳定 Human-H 已通过 Membership-HA 参与 Workspace-A；隔离的 Workspace-B 存在，或 Human-H 正准备创建它。
-- **意图**：Human-H 创建 Workspace-B，或者接受一个匹配的 pending Workspace Invitation 加入 B，并在 A、B 之间切换协作上下文。
-- **正常结果**：创建 B 时原子建立 owner Membership-HB；加入已有 B 时，Invitation `accepted` 与新的 `member` Membership-HB 原子成立。HA 与 HB 可同时 active，各自承载所在 Workspace 的角色、权限与参与期。客户端切换只改变当前交互上下文，不复制或合并任何共享事实。
+- **意图**：Human-H 创建 Workspace-B，或者持有 active Workspace Join Link 并确认加入 B，再在 A、B 之间切换协作上下文。
+- **正常结果**：创建 B 时原子建立 owner Membership-HB；加入已有 B 时，链接确认与新的 `member` Membership-HB 原子成立。HA 与 HB 可同时 active，各自承载所在 Workspace 的角色、权限与参与期。客户端切换只改变当前交互上下文，不复制或合并任何共享事实。
 - **失败结果**：Membership-HA 不能用于读取或写入 B，Membership-HB 也不能用于 A；Conversation、Message、Agent、Agent Request、Run 或权限的跨 Workspace 引用均不能提交。
 - **可观察性与不变量**：Human-H 可列出并切换有权访问的 Workspace；每个 Workspace 只显示本地成员资格与数据；审计在共享 Human identity 下仍明确记录 Workspace 与 membership-at-time；验证 I-16、I-25、I-27、I-38、I-41、I-42、I-43。
 
@@ -357,18 +357,18 @@
 
 - **参与者与初始状态**：Workspace-A 有 Owner-O、普通 Member-M，以及尚未加入的 Human-N；O 和 M 都有各自 active Membership。
 - **意图**：O 与 M 分别尝试邀请 N、移除对方、改变 Human Membership 角色，并验证 M 主动退出自己的 Workspace Membership。
-- **正常结果**：只有 O 可以创建面向 N 的 pending Workspace Invitation、移除其他 Human Membership 或改变角色；Invitation 本身不授予 N 权限，N 匹配登录并接受后才与新的 `member` Membership 原子成立。M 可以终止自己的 Membership，但不能操作任何其他 Human Membership。所有成功变化都绑定 A 中的准确对象并留下审计。
+- **正常结果**：只有 O 可以创建或停用 Workspace Join Link、移除其他 Human Membership 或改变角色；O 与 M 都可查看和复制 active Link。链接在 N 亲自确认前不授予权限，确认后才与新的 `member` Membership 原子成立。M 可以终止自己的 Membership，但不能操作任何其他 Human Membership。所有成功变化都绑定 A 中的准确对象并留下审计。
 - **失败结果**：M 发出的邀请、移除 O/N 或角色变更意图不产生 Membership 或角色事实；O 也不能以 A 的 owner 权限治理其他 Workspace。若 O 是最后一位 active owner，其自助退出、降级或被移除仍整体失败。
 - **可观察性与不变量**：普通 Member UI 不提供或明确拒绝成员治理动作，但保留退出入口；owner 可观察准确结果；验证 I-15、I-16、I-27、I-41、I-43、I-44、I-45、I-46。
 
-### S-WORKSPACE-INVITATION-ACCEPTANCE-01：接受 Invitation 才建立 Human Membership
+### S-WORKSPACE-JOIN-LINK-ACCEPTANCE-01：确认 Join Link 才建立 Human Membership
 
-- **参与者与初始状态**：Workspace-A 的 Owner-O 创建了面向 normalized email E 的 pending Workspace Invitation；Human-N 在 A 中没有 active Membership 或 Conversation access。
-- **意图**：在 Invitation 仍有效、已被撤销或已过期时，分别由 verified email 匹配的 N、仅持邀请链接但邮箱不匹配的 Human-X 或 Owner-O 尝试接受或直接建立 Membership。
-- **正常结果**：只有 authenticated 且 verified email 完全匹配 E 的 N 能接受 Invitation；Workspace 原子提交新的 active `member` Membership-N。接受后 N 自动参与 Workspace Channel，但不继承旧 DM 或 Run authority。
-- **失败结果**：X 仅凭链接接受、O 代替 N 接受或直接创建 active Membership、撤销/过期后的接受、并发重复接受以及 N 已有 active Membership 时均不产生新 Membership。Owner 可在接受先提交前把 pending Invitation 变为 terminal `revoked`；到期则变为 terminal `expired`。
-- **并发与唯一性**：同一 Workspace 与 normalized email E 同时至多一个 pending Invitation；相同邀请的幂等重试返回原 Invitation 且不延长期限，非相同并发邀请只有一个能成为 pending。更换有效期必须先撤销旧 Invitation，再创建新 identity；旧 Invitation 终态且接受者没有 active Membership 后才允许重新邀请。
-- **可观察性与不变量**：O 与 N 可观察明确的 Invitation 终态；接受幂等重放返回同一 Membership；审计可追溯创建者、normalized email、稳定接受者和 Membership；验证 I-16、I-25、I-27、I-38、I-41、I-43、I-46、I-47、I-48、I-50。
+- **参与者与初始状态**：Workspace-A 的 Owner-O 创建了 active Workspace Join Link；Human-N 与 Human-X 都已认证，但在 A 中没有 active Membership 或 Conversation access。
+- **意图**：O 将同一个 URL 分享给 N 与 X；两人分别确认加入，同时 O 可在任意时刻停用该链接。
+- **正常结果**：N 与 X 只要持有完整 active token，都可各自确认；Workspace 为每人原子提交一个新的 active `member` Membership。确认后他们自动参与 public Workspace Channel，但不继承旧 private Channel、DM 或 Run authority。
+- **失败结果**：O 不能代替他人直接创建 active Membership；普通 Member 不能创建或停用 Join Link；token 无效或已 revoked 时确认不产生 Membership。已有 active Membership 的 Human 再次确认只返回现有 Membership。
+- **并发与唯一性**：同一 active Join Link 可被多个 Human 复用；每个 Human 在同一 Workspace 最多一个 active Membership。接受与撤销按事务序列化，先提交者决定该次确认是否有效；移除后再次确认产生新的 Membership tenure。
+- **可观察性与不变量**：O 与所有 active Human Workspace Member 可查看每个 Link 的 active/revoked 状态与 aggregate use count，并复制 active token，但看不到目标邮箱；接受幂等重放返回同一 Membership；审计可追溯 Link、稳定接受者和 Membership；验证 I-16、I-25、I-27、I-38、I-41、I-43、I-46、I-47、I-48、I-50。
 
 ### S-AGENT-MEMBERSHIP-GOVERNANCE-01：Agent 参与、责任与执行权分离
 
@@ -382,10 +382,10 @@
 
 覆盖：`S-GATEWAY-REAUTHORIZATION-01`
 
-- **参与者与初始状态**：Agent-A 的 Runtime 正在一个权限受限的 Run 中，通过 Workspace Interaction Gateway 发起动作。
-- **正常结果**：合法动作由 Gateway 绑定实际 Agent、Run 和执行权，并由 Workspace 依据当前权限重新授权。
-- **失败结果**：Runtime 在参数中声称其他 Agent、Owner、Workspace、WorkItem、producing Run 或更大 scope 时，伪造值不被信任；缺失有效 Run 发布权、Run 所属 Agent 与作者不一致或执行已被 fencing 时不产生 Message。
-- **可观察性与不变量**：Node 收到明确授权结果，审计保留实际绑定身份、Run 和失败尝试；验证 I-15、I-16、I-20、I-22、I-27、I-34、I-36。
+- **参与者与初始状态**：Agent-A 的 Runtime 在权限受限的 Persistent Agent Session 中，通过 Workspace Interaction Gateway 发起动作。
+- **正常结果**：合法动作由 Gateway 绑定实际 Agent、Computer、Binding revision、target、receipt 与本地 frontier，并由 Workspace 依据当前权限重新授权。
+- **失败结果**：Runtime 在参数中声称其他 Agent、Owner、Workspace、WorkItem、frontier、receipt 或更大 scope 时，伪造值不被信任；缺失有效 Binding/receipt、scope 权限或执行已被 fencing 时不产生 Message。
+- **可观察性与不变量**：Node 收到明确授权结果，审计保留实际绑定身份与 freshness decision；验证 I-15、I-16、I-20、I-22、I-27、I-34、I-36。
 
 ### S-WORKSPACE-SINGLE-AUTHORITY-01：投影和连接故障不产生第二权威
 
@@ -397,33 +397,33 @@
 ### S-AUDIT-CHAIN-01：共享行为可追溯到责任和执行主体
 
 - **参与者与初始状态**：Human-H 请求 Agent-A；Agent-A 关联可选 WorkItem，并由 Node-A/Runtime-R 执行。
-- **正常结果**：每条共享行为保留稳定 actor 与 membership-at-time；每条 Agent-authored Message 还直接关联唯一 producing Run，再从 Run 追到 initiated-by、Owner-at-time、Agent Request、Attempt、Device/Runtime、correlation、causation 和存在时的 WorkItem；Human-authored Message 不伪造 producing Run。
+- **正常结果**：每条共享行为保留稳定 actor 与 membership-at-time；Persistent Agent Message 追到 Computer、Binding revision、receipt 与 freshness decision，显式 task execution 的共享行为可另外追到 Run/Attempt 和存在时的 WorkItem；Human-authored Message 不伪造执行 provenance。
 - **失败结果**：缺少必要身份或执行关联的共享写入不能以“系统”或 Runtime 自报身份提交；Owner 变化不改写旧行为责任。
 - **可观察性与不变量**：授权审计视图能完整遍历责任链、区分同一 actor 的不同 Membership，且不泄漏私有正文；验证 I-14、I-15、I-16、I-20、I-22、I-27、I-34、I-41。
 
 ### S-PROJECT-SCOPE-01：可选 Project Scope 与 Workspace Conversation 并存
 
-- **参与者与初始状态**：Workspace-A 有 Human-H、没有 Repository 的 Project-P 和 P 的 active Project Membership-H；A 中还没有 Conversation。
+- **参与者与初始状态**：Workspace-A 有 Owner Human-H、没有 Repository 的 Project-P 和 H 的 active Project Manager Membership；A 中还没有 Conversation。
 - **意图**：H 分别直接在 A 和在 P 中创建 Channel。
-- **正常结果**：两个 Conversation 共用 Timeline、Thread、Message、Agent Request 与 Run 模型；前者参与者来自 Workspace Membership，后者来自 Project Membership；两个列表和 Web 路由互不混入。
-- **失败结果**：跨 Project Membership、Workspace Membership 与 Project Membership 混用、创建后 move scope 或非 Project Member 创建 P 的 Conversation 均不产生共享事实。
+- **正常结果**：两个 Conversation 共用 Timeline、Thread、Message、Agent Request 与 Run 模型；public 参与者分别投影 Workspace 与 Project Membership，private 参与者分别引用两种精确 Membership；列表和 Web 路由互不混入。
+- **失败结果**：跨 Project Membership、Workspace Membership 与 Project Membership 混用、创建后 move scope/visibility 或非 Project Manager 创建 P 的 Conversation 均不产生共享事实。
 - **可观察性与不变量**：Project 不是所有 Conversation 的必经父级；验证 I-01、I-16、I-38、I-53、I-54、I-57。
 
-### S-PROJECT-GOVERNANCE-01：Project 角色与 Channel 参与统一基于 Membership
+### S-PROJECT-GOVERNANCE-01：Project Manager 治理 private Channel audience
 
 - **参与者与初始状态**：Human-M 是 Project-P 的 Manager，因此也是 active Project Member；Human-O 是 Workspace Owner 但不是 P 的成员。
-- **意图**：M 管理 Project 成员并读取 Channel-C；O 查询 Project 并尝试读取内容。
-- **正常结果**：M 因 Project Membership 读取 C，并因 manager 角色管理成员；O 只能获得安全治理元数据，不能读取 C。
-- **失败结果**：O 的治理投影不返回成员目录、Conversation 列表、Message 或 Run；不存在 Conversation participant self-add 或 Owner recovery。
-- **可观察性与不变量**：Project Membership 决定 Channel access，Project role 只决定管理命令；验证 I-15、I-16、I-56、I-57。
+- **意图**：M 管理 Project 成员、创建 public/private Channel，并在未加入 private audience 时管理参与者；O 查询 Project 并尝试读取内容。
+- **正常结果**：M 因 Project Membership 读取 public Channel，因 manager 角色在 private Channel 获得 governance access，可添加自己后读取完整历史；O 只能获得 Project 安全治理元数据，不能读取任何 Channel。
+- **失败结果**：M 的 governance projection 不返回 Message、search、change 或 Run；O 的 Project 治理投影不返回成员目录、Conversation 列表或内容；普通 Project Member 无法自加 private audience。
+- **可观察性与不变量**：Project Membership 决定 public access，精确 audience 决定 private content，manager 角色决定 audience 治理；验证 I-15、I-16、I-56、I-57。
 
-### S-PROJECT-MEMBERSHIP-REENTRY-01：Project 重入自动恢复 Channel 权限
+### S-PROJECT-MEMBERSHIP-REENTRY-01：Project 重入仅自动恢复 public Channel
 
-- **参与者与初始状态**：Project-P 有两位 Human Manager；Member-H 通过 Project Membership-PH 参与全部 Project Channel，且可能关联 pending Agent Request 或 active Run。
+- **参与者与初始状态**：Project-P 有两位 Human Manager；Member-H 通过 Project Membership-PH 参与 public Channel 和一个 private audience，且可能关联 pending Agent Request 或 active Run。
 - **意图**：Manager 移除 PH，随后把 H 的同一个 active Workspace Membership 重新添加到 P。
-- **正常结果**：PH terminal 立即关闭全部 Project Channel 读取并取消或 fence 相关执行；重新加入产生 Project Membership-PH2，H 自动重新获得现有 Channel 的完整历史访问。
+- **正常结果**：PH terminal 立即关闭全部 public/private Project Channel 读取并取消或 fence 相关执行；重新加入产生 Project Membership-PH2，H 自动重新获得 public Channel 完整历史，但必须由 Manager 显式将 PH2 加入 private audience。
 - **失败结果**：最后一位 Human Manager 的 remove/demote/leave 或导致该结果的 Workspace Membership removal 整体失败；Agent 不能被提升为 Manager。
-- **可观察性与不变量**：历史 provenance 保留 PH，当前权限只接受 PH2；不产生 Conversation-local participant 事实；验证 I-27、I-54、I-55、I-58。
+- **可观察性与不变量**：历史 provenance 保留 PH，public 当前权限接受 PH2，private 旧 audience 仍指向无效 PH；验证 I-27、I-54、I-55、I-58。
 
 ### S-PROJECT-REPOSITORY-LIFECYCLE-01：Project 独立成立并切换 Repository 执行范围
 
@@ -433,13 +433,38 @@
 - **失败结果**：Repository identity 不可原地更换；Project 或 Repository revision 过期、身份无效、权限不足或存在 active Attempt 时，挂载/更新/解除整体失败。
 - **可观察性与不变量**：Project 在三个阶段都可发现、使用 Conversation 和共享资源；绝对路径不进入 Workspace；验证 I-55、I-59、I-60、I-61。
 
-### S-PROJECT-RESOURCE-LINK-01：Project Member 管理外部资料
+### S-ARTIFACT-UPLOAD-01：Human 上传内容形成 Artifact 并关联 Project
 
-- **参与者与初始状态**：Human-H 是 Project-P 的 active Member，Manager-M 管理 P。
-- **意图**：H 创建一个 `https` Resource Link，随后 H 或 M 修改、删除。
-- **正常结果**：Link 保存 title、URL、可选 description、creator 与 revision；creator 或 Manager 可通过 CAS 修改、删除。
-- **失败结果**：非 `http/https` URL、过期 revision、非 creator 的普通 Member 或非成员请求被拒绝。
-- **可观察性与不变量**：Resource Link 不出现 Artifact Current State、ArtifactSnapshot、上传或 Agent 审计语义；验证 I-59。
+- **参与者与初始状态**：Human-H 是 Workspace 的 active Member，也是 Project-P 的 active Member。
+- **意图**：H 从 Workspace、Project 或 Conversation 的统一“上传 Artifact”入口放入任意支持的文件，不先选择 Markdown、File 或 URL 类型。
+- **正常结果**：Workspace 使用上传文件名创建稳定 Artifact identity，并按上传内容的媒体类型选择打开后的展示方式；Project 入口在同一事务建立 Association。
+- **失败结果**：空上传、超限内容、跨 Workspace Project、重复 Project ID 或无权 Project 被原子拒绝，且不留下半成品 Artifact 或 Association。
+- **可观察性与不变量**：三个 Human 入口调用同一个 multipart 上传契约；Workspace 与 Project 看到同一 Artifact；验证 I-24、I-59、I-65。
+
+### S-ARTIFACT-URL-AGENT-PUBLISH-01：Agent 发布和读取 URL Artifact
+
+- **参与者与初始状态**：Agent-A 有 active Workspace Membership；它可能处于 Run/Attempt，或通过当前 Runtime Binding 使用 persistent `teamctl`。
+- **意图**：A 发布 URL Artifact、读取 metadata，并可用 revision 修改名称或描述。
+- **正常结果**：Run return publication 不使用 staged blob、digest 或内容 baseline，并可通过 message index 原子建立引用；persistent publication 记录 Binding revision，先持有 Local Artifact Draft，并以 `artifact read` 返回的 state hash 做资源级 CAS。URL `artifact read` 只返回 locator、描述和 Artifact metadata，不创建本地文件。
+- **失败结果**：URL publication 提交 `artifactId`、`--file`、内容 baseline 或非法协议时拒绝；metadata update 不接受 locator，旧 revision 冲突。
+- **可观察性与不变量**：creator Membership、Run/Attempt 或 Binding provenance、Project Association、change 和 audit 完整；验证 I-24、I-63、I-67。
+
+### S-AGENT-ARTIFACT-FRESHNESS-01：Persistent Agent Artifact 发布前复核
+
+- **参与者与初始状态**：Agent-A 读取了一个 Artifact 及其 state hash，准备更新；Human-H 在真正发布前修改同一个 Artifact。
+- **意图**：A 提交绑定当前 Agent、Binding revision、Artifact identity、base state hash 与 proposed hash 的本地候选。
+- **正常结果**：Workspace 返回 `held` 和 current state hash，不保存新 content revision、也不更新 URL metadata。A 必须读取当前 Artifact 后才能原样重试，也可修订、丢弃，或在至少一次 hold 后知情强发。
+- **成功发布后的历史**：Artifact mutation 与 state-hash compare 在同一事务成功后写 Workspace change history，不创建 Agent Inbox Item；跨 Agent 交接通过 Message reference。
+- **失败与恢复**：响应丢失时相同幂等请求只重放同一个 held/published 结果；Agent Restart fences 旧本地 Artifact Draft；其他 Artifact 或 Discussion 推进不触发当前 candidate hold。
+- **可观察性与不变量**：Workspace freshness audit 不含 URL、metadata 或托管内容；Local Computer 保存候选和冻结文件；验证 I-28、I-35A、I-63、I-67。
+
+### S-ARTIFACT-URL-MESSAGE-REFERENCE-01：消息固定发送时 URL locator
+
+- **参与者与初始状态**：Human-H 或 persistent Agent-A 可读取一个 active URL Artifact。
+- **意图**：actor 将该 Artifact 作为正式 Message reference 发送，随后有人修改名称/描述并删除或等待封存。
+- **正常结果**：Message 保存 Artifact ID、发送时名称、locator 和描述，不创建 Snapshot。后续 metadata 变化不改写引用；删除和封存后仍显示发送时链接，并标记当前 Artifact 状态。
+- **失败结果**：URL 选择 Snapshot、重复引用同一 Artifact 或引用非 active/越权 Artifact 时整条消息提交失败。
+- **可观察性与不变量**：历史引用不受外部站点可用性影响，也不触发网络探测；验证 I-66、I-68。
 
 ### S-PROJECT-WORKING-COPY-01：同一 Project 在不同 Computer 映射不同路径
 
@@ -453,7 +478,7 @@
 
 - **参与者与初始状态**：Agent-A 收到 Project-P Conversation 中的有效 Agent Request；Computer-A 上存在匹配 Repository 的 ready Local Working Copy 和 Runtime。
 - **意图**：Local Agent Module 获取 Attempt Lease 并启动 Runtime。
-- **正常结果**：P 有 Repository 时，Local Agent Module 为该 Attempt 建立隔离 Git worktree，将其绝对路径作为 ACP `session/new(cwd)`；P 无 Repository 时使用隔离 scratch。Runtime 通过受控 return 显式发布需要共享的 Message，并原子更新 Artifact Current State、创建或复用 ArtifactSnapshot。
+- **正常结果**：P 有 Repository 时，Local Agent Module 为该 Attempt 建立隔离 Git worktree，将其绝对路径作为 ACP `session/new(cwd)`；P 无 Repository 时使用隔离 scratch。Runtime 通过受控 return 显式发布需要共享的 Message；托管内容 publication 原子更新 Current State 并创建或复用 Snapshot，URL publication 原子创建不可变 locator 与 lineage 且不使用 staged blob。
 - **失败结果**：P 有 Repository 但没有匹配 Working Copy、identity 不一致或 worktree 无法建立时不启动 Runtime，也不回退到主 checkout、Workspace 根目录或用户 Home。
 - **可观察性与不变量**：Conversation 只出现 Runtime 显式发送的普通 Message；仅发生文件写入不会自动生成 Message、Artifact 或成功事实；验证 I-61、I-62。
 
@@ -466,10 +491,10 @@
 | `S-CONVERSATION-INDEPENDENT-01` | S-CONVERSATION-WITHOUT-THREAD-01 | Conversation 不关联 WorkItem 仍可发布、恢复和读取消息 |
 | `S-CONVERSATION-PRESETS-01` | S-MENTION-DM-01 | Channel 与 DM 预设共享相同请求与执行语义 |
 | `S-CONVERSATION-WITHOUT-THREAD-01` | 同名 | 只有 Timeline 时 Thread 数量为零且消息链可工作 |
-| `S-CONVERSATION-SCOPE-MEMBERSHIP-01` | 同名 | Channel discovery、participants、history access 与 `@Agent` 候选自动跟随 scope Membership |
-| `S-CONVERSATION-NO-OWNER-01` | S-CONVERSATION-SCOPE-MEMBERSHIP-01 | creator 仅为 provenance；不存在 Conversation owner 或 participant governance |
-| `S-CONVERSATION-CURRENT-SCOPE-ACCESS-01` | S-CONVERSATION-SCOPE-MEMBERSHIP-01 | 加入 scope 可读完整 Channel 历史，移除后所有新旧读取被拒绝，Message 不改写 |
-| `S-WORKSPACE-REMOVAL-NO-RESTORE-01` | 同名 | Workspace 移除立即撤销 Channel/DM/Run 权限；重新加入只恢复 Channel |
+| `S-CONVERSATION-SCOPE-MEMBERSHIP-01` | 同名 | public discovery/participants 动态跟随 scope，private 只接受精确 audience，两者都按当前权限投影 `@Agent` 候选 |
+| `S-CONVERSATION-NO-OWNER-01` | S-CONVERSATION-SCOPE-MEMBERSHIP-01 | creator 仅为 provenance；无 Conversation owner/admin，现有 scope 管理员在无内容权时仍可治理 private audience |
+| `S-CONVERSATION-CURRENT-SCOPE-ACCESS-01` | S-CONVERSATION-SCOPE-MEMBERSHIP-01 | public scope 或 private audience 授权可读完整历史，移除后所有新旧读取被拒绝，Message 不改写 |
+| `S-WORKSPACE-REMOVAL-NO-RESTORE-01` | 同名 | Workspace 移除立即撤销 public/private Channel、DM 与 Run 权限；重新加入只自动恢复 public Channel |
 | `S-WORKSPACE-MEMBERSHIP-INCARNATION-01` | S-WORKSPACE-REMOVAL-NO-RESTORE-01 | 稳定 actor 的旧 Membership 不可复活；重新加入创建唯一新 active Membership，历史保留 membership-at-time |
 | `S-THREAD-OPTIONAL-BRANCH-01` | S-CONVERSATION-WITHOUT-THREAD-01 | 只有显式聚焦回复才创建 Thread |
 | `S-THREAD-NO-WORK-STATE-01` | S-CONVERSATION-WITHOUT-THREAD-01 | Thread 创建或推进不改变 WorkItem 状态，且不存在 Thread 归档 |
@@ -500,11 +525,12 @@
 | `S-CONTEXT-SNAPSHOT-STABLE-01` | S-AGENT-MESSAGE-FRESHNESS-01 | 后续 Message 和 freshness decision 不改写原始 Snapshot |
 | `S-PRIVATE-CONTEXT-GRANT-01` | S-PRIVATE-CONTEXT-01 | 未授权时团队请求不能读取 Owner 私有内容 |
 | `S-PRIVATE-DISCLOSURE-DENIED-01` | S-PRIVATE-CONTEXT-01 | 读取授权不自动允许共享披露 |
-| `S-ARTIFACT-DELETE-PURGE-01` | 同名 | 7 天内可恢复原关联，到期清内容且历史保留最小删除占位 |
+| `S-ARTIFACT-DELETE-PURGE-01` | 同名 | 7 天内可恢复原关联；托管内容到期清理，URL 到期封存且历史引用仍可解释 |
 | `S-OFFLINE-RECONCILIATION-01` | 同名 | 离线候选经重连再验证后才可能成为共享事实 |
 | `S-LOCAL-RESTART-01` | S-OFFLINE-RECONCILIATION-01 | Node 重启可恢复请求、执行和待提交候选且不猜测成功 |
 | `S-AGENT-MESSAGE-FRESHNESS-01` | 同名 | 同一 Scope 推进时不发布候选并返回准确增量 |
 | `S-AGENT-MESSAGE-FRESHNESS-DECISION-01` | 同名 | Agent 复核后可修订、丢弃、确认不变或 informed override |
+| `S-AGENT-ARTIFACT-FRESHNESS-01` | 同名 | Persistent Agent Artifact 更新 base hash 过期时不成为共享事实，发布后只写 Workspace change history |
 | `S-AGENT-MESSAGE-UNRELATED-SCOPE-01` | 同名 | 无关 Thread 推进不阻塞目标 Scope 发布 |
 | `S-RUNTIME-REPLACEMENT-01` | 同名 | 替换 Runtime 后 Agent 身份、Owner、权限和历史不变 |
 | `S-AGENT-WORKSPACE-OWNERSHIP-01` | 同名 | Agent 永久属于一个 Workspace；跨 Workspace 引用失败，相似 Agent 是新 identity |
@@ -512,13 +538,12 @@
 | `S-HUMAN-MULTI-WORKSPACE-01` | 同名 | 同一 Human 可拥有多个隔离 Workspace Membership；身份复用不产生跨 Workspace 对象或权限 |
 | `S-WORKSPACE-OWNER-CONTINUITY-01` | 同名 | Workspace 创建即有首位 Human owner；可有多个 owner 且最后一位不能退出、被移除或失去角色 |
 | `S-HUMAN-MEMBERSHIP-GOVERNANCE-01` | 同名 | 只有 owner 可邀请、移除其他 Human 或改变角色；普通 Member 只能退出自己的 Membership |
-| `S-WORKSPACE-INVITATION-ACCEPTANCE-01` | 同名 | pending Invitation 不授权；匹配 Human 接受时与新的 member Membership 原子成立 |
+| `S-WORKSPACE-JOIN-LINK-ACCEPTANCE-01` | 同名 | active Join Link 可由多个 authenticated Human 确认；每次有效确认与新的 member Membership 原子成立 |
 | `S-AGENT-MEMBERSHIP-GOVERNANCE-01` | 同名 | Workspace Owner 可转移 ownership、终止/重新准入 Agent Membership；Agent Owner 退出前必须先转移全部 Agent |
-| `S-PROJECT-SCOPE-01` | 同名 | Workspace/Project Conversation 并存且 scope、derived participants、列表与路由不混用 |
-| `S-PROJECT-GOVERNANCE-01` | 同名 | Project Membership 自动授予 Channel access，manager 角色另行授予治理命令 |
-| `S-PROJECT-MEMBERSHIP-REENTRY-01` | 同名 | Project Membership 终止立即撤权并 fence 执行；重新加入自动恢复 Channel access |
+| `S-PROJECT-SCOPE-01` | 同名 | Workspace/Project Conversation 并存，且 scope-specific public projection、private Membership audience、列表与路由不混用 |
+| `S-PROJECT-GOVERNANCE-01` | 同名 | Project Membership 自动授予 public access，private 需精确 audience，manager 在无内容权时仍有 audience governance |
+| `S-PROJECT-MEMBERSHIP-REENTRY-01` | 同名 | Project Membership 终止立即撤权并 fence 执行；重新加入只自动恢复 public Channel access |
 | `S-PROJECT-REPOSITORY-LIFECYCLE-01` | 同名 | Project 可无 Repository 成立；挂载/解除只改变新 Run，active Attempt 阻止解除，历史 provenance 保留 |
-| `S-PROJECT-RESOURCE-LINK-01` | 同名 | URL、revision 与 creator-or-manager 权限受控，Resource Link 不产生 Artifact 语义 |
 | `S-PROJECT-WORKING-COPY-01` | 同名 | 同一 Repository 在不同 Computer 可使用不同本机路径，绝对路径与凭据不进入共享层 |
 | `S-PROJECT-ATTEMPT-WORKTREE-01` | 同名 | Repository-backed Project 使用隔离 worktree；repository-less Project 使用隔离 scratch |
 | `S-ARTIFACT-REALTIME-DRAFT-01` | Artifact Workspace | 双客户端同步与重连/重启恢复 Yjs 当前状态，编辑不产生历史快照 |
@@ -526,9 +551,12 @@
 | `S-ARTIFACT-PROJECT-ASSOCIATION-01` | Artifact Workspace | 同一 Workspace Artifact 显式关联多个 Project 且不复制或转移所有权 |
 | `S-ARTIFACT-MESSAGE-REFERENCE-01` | Artifact Workspace | Message 固定发送时 Snapshot UUID，后续当前状态变化与清理不改写引用 |
 | `S-ARTIFACT-AGENT-PUBLISH-01` | Artifact Workspace | staged blob 不提前共享，成功 return 原子更新当前状态并固定 Snapshot，失败不留 Snapshot 或 Message |
+| `S-ARTIFACT-URL-CREATE-01` | 同名 | Human 创建无内容状态的 http/https URL Artifact，并在同一事务建立可选 Project Association |
+| `S-ARTIFACT-URL-AGENT-PUBLISH-01` | 同名 | Run 与 persistent Agent 无 staged blob 发布、读取和 CAS 更新 URL metadata，且 provenance 完整 |
+| `S-ARTIFACT-URL-MESSAGE-REFERENCE-01` | 同名 | Message 固定发送时 URL locator；metadata 变化、删除和封存不改写历史引用 |
 | `S-RUNTIME-ADAPTER-CONTRACT-01` | S-RUNTIME-REPLACEMENT-01 | 不同 Adapter 保持公共执行语义和相同领域结果 |
 | `S-RUNTIME-CANNOT-FORGE-AUTHORITY-01` | 同名 | Runtime 自报身份或 scope 不产生权限 |
-| `S-AGENT-MESSAGE-PRODUCING-RUN-01` | S-RUNTIME-CANNOT-FORGE-AUTHORITY-01 | Agent Message 必须由 Workspace 绑定同一 Agent 的唯一 producing Run，Human Message 无此关联 |
+| `S-AGENT-MESSAGE-BINDING-PROVENANCE-01` | S-RUNTIME-CANNOT-FORGE-AUTHORITY-01 | Persistent Agent Message 由 Workspace 绑定 Agent、Membership、Computer、Binding revision 与 receipt，且不关联 Run/Attempt |
 | `S-GATEWAY-REAUTHORIZATION-01` | S-RUNTIME-CANNOT-FORGE-AUTHORITY-01 | 每个 Runtime Workspace 动作绑定并重新授权 |
 | `S-WORKSPACE-SINGLE-AUTHORITY-01` | 同名 | 缓存、连接和本地副本不能确认共享事实 |
 | `S-NOTIFICATION-LOSS-01` | S-MENTION-CHANNEL-01 | 通知丢失后已提交 Agent Request 仍可恢复发现 |

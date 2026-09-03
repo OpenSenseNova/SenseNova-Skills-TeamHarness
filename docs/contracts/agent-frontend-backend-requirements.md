@@ -141,8 +141,10 @@ Local Computer 先通过 ACP `initialize` 和 `session/new` 探测 Runtime，再
 - `configuration.modes[]`、`defaultModeId`
 - 不可用时的 `unavailableReason.code` 与 `unavailableReason.message`
 
-每个模型还包含 `supportedReasoningEfforts`。值为 `null` 表示 ACP Runtime 只暴露了全局
-reasoning-effort selector，没有声明模型与推理强度之间更细的组合约束；后端不会把未知约束伪造成空列表。
+每个模型还包含 `supportedReasoningEfforts`。Local Computer 会在隔离的探测 Session 中切换
+ACP model config，并从每次返回的完整 `configOptions` 读取该模型的 reasoning-effort 选项。
+值为 `null` 表示 Runtime 没有返回这个模型的细粒度约束；后端不会把未知约束伪造成空列表，
+Human Web 也不会在这种情况下提供显式推理强度选择。空数组表示该模型明确不提供推理强度配置。
 
 Human 通过 `GET /v1/computers` 读取同一份已校验的能力快照。Workspace 不接收本机命令、
 绝对路径、环境变量或认证信息。

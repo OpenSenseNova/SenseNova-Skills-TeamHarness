@@ -1,6 +1,6 @@
 # Human Workspace Web
 
-> 状态：V1 Project、Repository、Resource Link 与 Artifact 工作区已实现
+> 状态：Workspace 控制面、Project 折叠树、固定群聊与 WorkItem 评论已实现
 >
 > 当前契约版本：1.0.0
 >
@@ -8,27 +8,28 @@
 
 ## 1. 交付范围
 
-本模块提供 Human 进入和管理 Workspace/Project 协作面的最小完整产品。桌面布局左侧为当前管理范围、Conversation 与控制入口，中间为 Conversation、Project 资料或 Artifact 编辑器；Conversation 与 Artifact 页面右侧保留 Artifact 工作区，Project 默认资料页则由中间的统一“项目资源”承担资源管理。移动端使用 Drawer。
+本模块提供 Human 进入和管理 Workspace/Project 协作面的最小完整产品。Workspace 只承担组织、身份、邀请、唯一全员大群和一对一私聊；Project 是私有项目协作边界。桌面侧栏和移动端 Drawer 使用同一棵可多选展开的 Project 树，中间为 Conversation、Project 设置、WorkItem 或 Artifact 编辑器。
 
 已实现：
 
 - 注册、开发终端邮箱验证码、登录、退出和 30 天持久会话；
 - 创建、切换并在刷新后恢复 Workspace；
-- 只用名称创建 Project，管理成员、可选 Primary Repository 与统一项目资源，并在 Workspace/Project 两种 scope 中分别创建 Channel；DM 固定属于 Workspace；
-- 创建 Channel / DM 风格 Conversation，查看 Message，回复 Thread；
+- 只用名称创建 Project，自动建立 Owner 与主群，管理 Owner/Manager/Member、统一项目资源和 WorkItem；Project 可创建多个显式成员长期群聊，DM 固定属于 Workspace；
+- 创建 Channel / DM 风格 Conversation，查看 Message，并在主消息流中回复任意 Message；回复会显示所引用消息并自动提及原作者；
 - 从当前 Conversation 的 Human/Agent 成员中结构化选择 `@` mention；Channel 只为 Agent mention 创建 Agent Request，Human–Agent DM 中的 Human Message 则自动请求唯一 direct Agent，输入框不额外显示“无需 @”说明；
 - 查询、创建、编辑、暂停、恢复和删除 Agent；删除后目录中消失，既有私聊只读保留；
 - 编辑 Agent Execution Policy；
 - 在 Conversation 的 Agent Request 卡片查看 Run、Context version、Discussion frontier 与来源数量；
 - 为当前 Run 按来源类别创建一次 Private Context Grant 并撤销，且不显示私有正文、路径、原始 Prompt 或 Runtime Session；
-- 查询成员、创建/复制/撤销邀请、修改角色与权限、移除成员；
+- 查询成员；所有 active Workspace Human 可查看/复制分享式 Join Link，只有 Workspace Owner 可创建或停用链接并移除成员，接受者固定成为普通 Member；
 - 修改 Workspace 名称、查看当前 Membership、离开 Workspace；
-- 从 Workspace/Conversation 右栏创建 Markdown、上传任意文件、关联或解除 Project，并管理 7 天回收站；Project 默认页通过统一资源目录上传文件、加入已有 Artifact 或管理外部 Link；
+- 从 Workspace、Conversation 或 Project 使用同一个“上传 Artifact”动作放入任意支持的文件，不预先选择 Markdown、File 或 URL；Project 资源只能在当前 Project 直接上传，不提供从 Workspace 加入已有 Artifact 的入口；
 - 在主内容区实时协作编辑和预览 Markdown、替换 File 当前状态，并用可空名称显式保存 UUID 历史快照；
-- 从 Message composer 的 `+` 入口先选 Artifact，再选当前状态或历史快照；历史消息固定 snapshot UUID 并在软删除后展示元数据占位；
+- 从 Message composer 的 `+` 入口引用 Artifact：Markdown/File 再选当前状态或历史快照，URL 直接固定发送时 locator 和描述；历史消息在 Artifact 删除或封存后仍展示固定 metadata 和状态；
+- 在 Project WorkItem 看板查看、分配和评论；WorkItem 评论不创建 Topic 或 Conversation，Agent 只在分配或显式 `@mention` 时被唤醒；
 - 通过 Workspace change cursor 轮询并刷新受影响的权威投影。
 
-Conversation 归档/恢复的 Web 接线已经交付：详情页按权限提供归档/恢复，归档后保留历史并进入只读；Workspace 和 Project 侧栏均提供独立的已归档列表、历史查看和恢复入口。未实现：本机 Working Copy 连接向导、Computer/Runtime Catalog 与 Skill inventory 的完整 Web 接线、完整 Execution Timeline、Office 在线编辑、Artifact 文件树、WorkItem、Result Submission、Review 和复杂角色。Computer Token、本地命令路径、Runtime 凭据、Skill 正文和启动配置始终属于 Local Node，不在 Human Web 中暴露。
+Conversation 归档/恢复的 Web 接线已经交付：详情页按权限提供归档/恢复，归档后保留历史并进入只读；Workspace 和 Project 侧栏均提供独立的已归档列表、历史查看和恢复入口。未实现：Computer/Runtime Catalog 与 Skill inventory 的完整 Web 接线、完整 Execution Timeline、Office 在线编辑、Artifact/VFS 文件树、Review，以及新的 Agent Session 隔离与轮换。Computer Token、本地命令路径、Runtime 凭据、Skill 正文和启动配置始终属于 Local Node，不在 Human Web 中暴露。
 
 ## 2. 页面结构
 
@@ -36,29 +37,29 @@ Conversation 归档/恢复的 Web 接线已经交付：详情页按权限提供�
 /login                                登录
 /register                             注册
 /verify-email                         邮箱验证
-/invitations/:invitationId            接受邀请
+/join/:token                           预览并确认加入 Workspace
 /w/:workspaceId                       Workspace Shell
   /c/:conversationId                  Conversation / Thread / Agent Request
-  /projects                            Project 目录
-  /p/:projectId                       Project 资料 / Repository / 本机连接状态
+  /projects                            Project 树入口提示，不再承担目录中转页
+  /p/:projectId                       Project 设置 / 资源 / WorkItem
     /c/:conversationId                Project Conversation / Thread / Agent Request
     /members                          Project 成员
     /artifacts/:artifactId            Project 关联 Artifact 编辑器
   /artifacts/:artifactId              Workspace Artifact 编辑器
   /agents                             Agent 目录与治理
-  /members                            Human 成员与邀请
+  /members                            Human 成员与 Join Link
   /settings                           Workspace 设置
 ```
 
-宽屏主导航 Rail 将“协作 / Projects / 团队 / Workspace 设置”作为同级入口；窄屏 Drawer 提供相同层级。协作区显示 Workspace Channel 和全局私聊，Projects 区展示可选协作范围；进入某个 Project 后，二级侧栏只显示资料、Project Channel 和成员，不出现“项目私聊”。中间内容区是当前主工作面。Project 资料页不显示右侧 Artifacts 面板，避免与统一项目资源目录重复；Project Conversation 和 Artifact 编辑页仍保留该面板，移动端以 Drawer 提供同一能力。
+宽屏主导航 Rail 将“协作 / 项目 / 团队 / Workspace 设置”作为同级入口；窄屏 Drawer 提供相同层级。协作区只显示唯一 Workspace 大群和全局一对一私聊。项目区直接显示 Project 文件夹节点：点击名称只展开/折叠，不打开项目首页；多个 Project 可同时展开，当前路由对应节点自动展开，状态按 Workspace 保存在本地。每个节点只显示主群、其他固定群聊和“设置”，群聊逐 Project 独立懒加载。治理元数据 Project 单独显示且不能展开内容。
 
 ### 2.1 Project 的目标交互
 
-Project 页面是协作概览，表达名称、成员、Conversation、可选 Primary Repository 和统一项目资源。统一目录按更新时间倒序混排 File Artifact、Markdown Artifact 与 Resource Link；“加入已有 Artifact”只新增当前 Project 关联，不复制内容、不改变 Workspace 归属，也不移除其他 Project 关联。Repository 状态只在已挂载时出现，不能把“无 Repository”渲染成 Project 不完整或不可用。
+Project 不再通过目录页多点一次进入。“设置”页显示资料、群成员、WorkItem 和项目资源。Project Artifact 从当前 Project 直接上传，不查询或导入 Workspace Artifact。
 
-创建入口只要求名称，可选 description 与远程 Git Repository。Project Manager 可在资料页后来挂载 Repository、更新默认分支、解除后更换 identity；解除不会删除历史 Run provenance。
+创建入口只要求名称，可选 description。创建成功后直接展开新节点并打开主群；Project Owner/Manager 后续可在设置页管理成员、资源和 WorkItem。
 
-Project 默认页把上述资料放在同一页面。绝对路径只有当前本机用户在明确连接或诊断时可见，不进入服务端响应、变化流或其他成员页面。若已挂载 Repository 但当前 Computer 没有匹配 Working Copy，Conversation、Artifact 和 Resource Link 仍可用，Repository-backed Run 显示连接指引；未挂载 Repository 时 Project Run 明确使用隔离 scratch。
+Project 默认页把上述资料放在同一页面。本机绝对路径、Runtime 凭据和工作目录只属于 Local Computer，不进入服务端响应、变化流或其他成员页面。Project Run 使用隔离 scratch，Conversation 和 Artifact 不依赖本机目录。
 
 Project Conversation 继续使用普通 Conversation UI。`@Agent` 只产生普通 Mention Outcome / Agent Request 状态；Runtime 运行中状态进入统一执行状态面，Runtime 最终通过 Workspace CLI/MCP 在原 Discussion Scope 发送普通 Message，不为 `@` 单独构造回复卡片。
 
@@ -70,7 +71,7 @@ Project Conversation 继续使用普通 Conversation UI。`@Agent` 只产生普�
 
 ## 4. 数据恢复与变化同步
 
-进入 Workspace 后，Web 先读取 bootstrap cursor，再并行加载 members、agents、Workspace Channels/DM 与可发现 Projects。进入 Project 时再加载其 members 和全部 Project Channels。Membership change 会同时刷新 participant projection 与 `@Agent` 候选。随后每 2 秒读取变化流；页面隐藏时暂停，重新可见或网络恢复时立即追赶。
+进入 Workspace 后，Web 先读取 bootstrap cursor，再并行加载 members、agents、当前可见 Workspace Channels/DM 与可发现 Projects。进入 Project 时再加载其 members 和当前可见 Project Channels。Membership/audience change 会同时刷新 participant projection 与 `@Agent` 候选；governance-only private Channel 只加载基本信息和参与者，不请求 Message 或 Artifact。随后每 2 秒读取变化流；页面隐藏时暂停，重新可见或网络恢复时立即追赶。
 
 变化流只触发 TanStack Query 对应资源失效：
 
@@ -83,7 +84,7 @@ artifact             → Artifact list/detail/current/snapshots/trash and Projec
 project_membership   → Project member directory and Project context
 agent                → Agent directory
 workspace_membership → Member directory
-workspace_invitation → Invitation directory
+workspace_join_link  → Join Link directory
 workspace            → Workspace bootstrap/list
 ```
 
@@ -93,7 +94,7 @@ workspace            → Workspace bootstrap/list
 
 所有公开写入由 API client 附带 UUID `Idempotency-Key`，TanStack Query 不自动重试 mutation。实体治理提交当前 revision；`409` 冲突直接呈现给 Human，再读取最新权威投影。Message 发送成功才清空草稿；失败保留输入，避免丢失 Human 内容。
 
-结构化 `@` 由成员选择器产生 `mentionedActorIds`，显示文本中的 `@name` 只用于阅读。只有所选 actor 为 Agent 时才创建 Agent Request。文件不进入 `@`；`+` 提交 `artifactSelections[{artifactId,snapshotId|null}]`，其中 `null` 表示发送时固定当前状态。
+结构化 `@` 由成员选择器产生 `mentionedActorIds`，显示文本中的 `@name` 只用于阅读。只有所选 actor 为 Agent 时才创建 Agent Request。Artifact 不进入 `@`；`+` 提交 `artifactSelections[{artifactId,snapshotId|null}]`：Markdown/File 的 `null` 表示发送时固定 Current State，URL 必须为 `null` 并直接固定 locator，不显示 Snapshot 选择。
 
 ## 6. 联调边界
 

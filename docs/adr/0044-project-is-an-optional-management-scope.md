@@ -12,17 +12,17 @@ Project Membership、Artifact 所有权和 Repository 执行准入回答的是�
 ## Decision
 
 1. `Workspace → Conversation` 与 `Workspace → Project → Channel` 都是正式路径，共用唯一的 Conversation、Message、Agent Request、Run 和 Attempt 模型。DM 只属于 Workspace，不是 Project 子资源；Conversation scope 创建后不可移动。
-2. 任一 active Human Workspace Member 可以只用名称创建 Project；description 与 Primary Repository 都可选。创建必须原子建立 Project 和 creator 的首个 Human `manager` Project Membership。
-3. Project Membership 只能引用同 Workspace 的 active Membership。Human 为 `manager | member`，Agent 固定为 `member`；任何路径都不能消除最后一位 active Human Manager。所有 active Project Membership 都自动参与该 Project 的全部 Channel，角色只决定 Project 管理能力。
-4. 一个 Project 同时最多有一个 active Primary Repository。Manager 可以挂载 Repository、更新默认分支或解除关联；Repository identity 不可原地修改，更换必须先解除再挂载。解除只改变当前资源，历史记录继续支撑既有 Run provenance；存在 active Attempt 时拒绝解除。
-5. 有 Primary Repository 的新 Project Run 必须固定匹配 Working Copy，并在独立 Attempt Worktree 中执行；没有 Primary Repository 的新 Project Run 使用隔离 scratch workdir。已经接受的 Run 始终按其快照中的 Repository 基线执行。
-6. Resource Link 是 Project 下的轻量外部资料，仅接受 `http/https` URL。active Human Project Member 可创建，creator 或 Project Manager 可修改、删除。Resource Link 没有版本、上传、Agent lineage 或 Artifact 语义。
-7. Artifact 是 Workspace 级对象，通过显式多对多关联出现在一个或多个 Project 中。关联不复制内容、不转移所有权，并默认展示 Artifact 当前状态；Message、Run provenance 与 Context Source 仍固定具体 ArtifactSnapshot UUID。
-8. Project 页面是协作概览，分别呈现成员、Conversation、Artifacts、Resource Links 和可选 Repository，不再把 Repository 当作 Project 的唯一内容或空状态。
+2. 任一 active Human Workspace Member 可以只用名称创建 Project；description 可选。创建必须原子建立 Project 和 creator 的首个 Human `owner` Project Membership。
+3. Project Membership 只能引用同 Workspace 的 active Membership。Human 为 `owner | manager | member`，Agent 固定为 `member`；任何路径都不能消除最后一位 active Human Owner。所有 active Project Membership 都自动参与该 Project 的 public Channel，private Channel 使用显式 audience，角色只决定 Project 管理能力。
+4. Project 不要求 Repository、Working Copy 或本机目录；Agent 执行使用 Local Computer 上按 Attempt 隔离的 scratch workdir，路径和凭据不进入 Workspace Authority。
+5. WorkItem 是独立的 Project 工作对象，支持 Human 创建、分配/重新分配、阻塞/解除阻塞、评论、Agent Result Submission，以及 Human 完成/取消；开放认领、委派、Review 和 Completion Policy 延后。
+6. 外部资料统一使用 Workspace URL Artifact，并通过显式 Project Association 出现在一个或多个 Project 中。URL 只接受 `http/https`，locator 创建后不可修改；它没有 Current State、Snapshot 或上传语义，但与 Markdown/File 共用 Artifact identity、权限、Agent lineage、消息引用和删除生命周期。
+7. Artifact Association 不复制内容、不转移所有权。Project Manager 可以解除 Association，但不能据此修改或删除 Workspace Artifact。Markdown/File 的 Message 与 Run 引用固定 Snapshot；URL 引用固定发送时 locator 和展示 metadata。
+8. Project 页面统一呈现成员、Conversation、WorkItem、Artifacts 和项目资源；Repository、Working Copy 与旧版 Project Repository API 不属于当前 MVP。
 
 ## Consequences
 
 - 不保留“Project 必须有 Repository”的创建合同或 Repository-anchored 产品文案。
-- 同一 Project 可以从 scratch 协作开始，后来挂载 Repository；解除后未来 Run 回到 scratch，历史 Repository Run 仍可解释。
-- Local Working Copy 的绝对路径、凭据和未提交内容仍留在 Local Computer；Workspace 只保存安全 Repository identity 与执行 provenance。
-- Project invitation、delete/archive、Conversation 跨 scope move、多 active Repository 和任意本地目录仍不在当前范围。
+- Project 从 scratch 协作开始；当前版本不提供 Repository 挂载、Working Copy 或 Git worktree 能力。
+- Local Computer 的绝对路径、凭据和未提交内容始终留在本机，不进入 Workspace Authority。
+- Project 级加入流程、delete/archive、Conversation 跨 scope move、多 active Repository 和任意本地目录仍不在当前范围。

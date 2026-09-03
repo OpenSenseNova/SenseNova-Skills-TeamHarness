@@ -26,14 +26,14 @@ workspace.sqlite                     local-node.sqlite
 ├── identity / membership           ├── local_runtime_executions
 ├── workspace / agent               ├── wake_hints
 ├── conversation / message          ├── held_drafts
-├── request / inbox / run / attempt├── runtime_sessions
-├── run context / claim receipt    └── local receipts
-├── workspace_changes
+├── request / inbox / run / attempt├── held_artifact_drafts
+├── run context / claim receipt     ├── runtime_sessions
+├── workspace_changes              └── local receipts
 ├── delivery_jobs
 └── audit_events
 ```
 
-两个数据库不能共享外键或假装拥有分布式事务。共享事实先在 `workspace.sqlite` 成立；Local Node 通过幂等操作保存对应引用，并在崩溃后按共享事实对账。两类数据库各自使用独立 `application_id`，因此即使二者都处于 v1，也不能被误开为另一类数据库。
+两个数据库不能共享外键或假装拥有分布式事务。共享事实先在 `workspace.sqlite` 成立；Local Node 通过幂等操作保存对应引用，并在崩溃后按共享事实对账。两类数据库各自使用独立 `application_id`，并分别验证各自的 v1 基线，不能被误开为另一类数据库。
 
 启动配置：
 
@@ -44,7 +44,7 @@ PRAGMA synchronous = NORMAL
 PRAGMA busy_timeout = 5000
 ```
 
-当前稳定结构是 Workspace 与 Local Node 各自的正式 v1，早期开发版本和迁移已经 squash，不再是受支持输入。`schema/manifest.json` 是数据库族、当前版本和最低版本的唯一来源，完整建库 SQL 是 v1 的唯一权威结构。未来只有领域合同实际改变时才新增连续、只向前的编号化 SQL；稳定表不会因为其他模块变化而重建。启动时若迁移链完整，必须在一个事务内逐版升级并在提交前通过 `foreign_key_check`；完成后不保留旧字段、旧查询、双写、表名探测或结构猜测分支。未知数据库族、无版本但非空的数据库、低于正式基线或高于当前程序的数据库必须明确拒绝启动。
+当前完整建库结构是 Workspace 与 Local Node 各自的 schema v1；URL Artifact、persistent Message Artifact references、Conversation visibility 与 Agent held drafts 都属于这份基线。`schema/manifest.json` 是数据库族与建库版本的唯一来源，两份完整建库 SQL 是唯一权威结构。启动时严格校验 `application_id`，并验证当前程序依赖的表、字段和触发器是实际数据库的子集；额外对象不会阻止启动，非契约性的性能索引也不作为启动门禁，只有缺少或改变必需能力才会明确拒绝。当前实现不保留旧字段查询、迁移、双写、表名探测或字段 fallback。
 
 ## 3. 身份、角色与 Agent 责任
 
@@ -121,7 +121,7 @@ Agent Inbox wake（不含正文）
 
 一个事务中完成：
 
-1. 重新验证当前 scope Membership 或 fixed DM direct participant；
+1. 重新验证当前 public scope Membership、private 精确 audience 或 fixed DM participant；
 2. `conversations.context_version += 1`；
 3. 插入不可变 Message，并记录本次 `conversation_version`；
 4. 追加 `message_created` change；
@@ -176,13 +176,16 @@ POST /v1/workspaces/{workspaceId}/agents/{agentId}/runtime-bindings
 
 POST /v1/workspaces/{workspaceId}/conversations
 GET  /v1/conversations/{conversationId}
+GET  /v1/conversations/{conversationId}/participants
+PUT  /v1/conversations/{conversationId}/participants/{scopeMembershipId}
+DELETE /v1/conversations/{conversationId}/participants/{scopeMembershipId}
 POST /v1/conversations/{conversationId}/messages
 GET  /v1/conversations/{conversationId}/messages?afterVersion=&limit=
 
 GET  /v1/workspaces/{workspaceId}/changes?after=&limit=
 ```
 
-读取 Conversation 和 Message 时重新验证当前 Workspace/Project Membership 或 fixed DM reference。变化流要求 active Workspace Membership，并按变化提交时冻结的 `workspace_change_recipients` 投影 signal；任何正文仍必须回到当前权限的资源 API 读取。
+读取 Conversation 和 Message 时重新验证当前 public scope、private 精确 audience 或 fixed DM reference。scope 管理员的 governance access 只允许基本信息和 participant 治理。变化流要求 active Workspace Membership，按提交时的 content audience 冻结 recipients，并在读取时再次过滤已失权 Conversation signal；任何正文仍必须回到当前权限的资源 API 读取。
 
 ### 6.3 Local Node API
 
@@ -218,8 +221,8 @@ Human Token 不能调用 Local Node API，Computer Token 不能调用 Human Work
 
 - Identity/UI 模块只保存 Human Token，不能把 `actorId` 当成调用凭证；
 - Conversation UI 使用 `conversationVersion` 做增量读取，使用 `workspace_changes.position` 做断线跟随；
-- 协作请求模块原子创建 Agent Request 与 Agent Inbox Item；Execution 模块在 `message check` claim 时创建或复用 Run/Attempt；
-- Local Agent 模块只发送轻量 wake，Runtime 通过 Agent 级 `teamctl` 主动领取 Scope 增量并直接发布普通 Message；
+- 协作请求模块原子创建 Agent Request 与 Agent Inbox Item；持久聊天 Session 的 `message check` claim 不创建 Run/Attempt；
+- Local Agent 模块只发送轻量 wake，Runtime 通过 Agent 级 `teamctl` 主动领取 Scope 增量；候选正文先在 Local Computer 耐久保存，再由 Workspace 对精确 Discussion frontier 原子检查并发布普通 Message；
 - Delivery 模块只消费 `delivery_jobs`，通过 lease、fencing 和 dedupe 推进任务，不修改 Message；
 - Audit/运维模块按 Workspace 验证哈希链，并将校验失败视为数据完整性事件；
 - 后续模块不得绕过 Workspace Service 直接组合“领域写入 + version + change + audit”四步。
