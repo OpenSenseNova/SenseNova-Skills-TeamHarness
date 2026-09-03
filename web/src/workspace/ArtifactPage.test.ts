@@ -11,7 +11,7 @@ describe('Artifact return navigation', () => {
       .toBe('/w/workspace-1/p/project-1');
   });
 
-  it('falls back to the Workspace when a Workspace Artifact is deep-linked', () => {
+  it('falls back to the Workspace root when no Project scope is available', () => {
     expect(artifactReturnTarget(null, 'workspace-1')).toBe('/w/workspace-1');
   });
 });

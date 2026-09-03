@@ -1,67 +1,60 @@
-import { CopyOutlined, EditOutlined, MailOutlined, MessageOutlined, PlusOutlined, StopOutlined, UserDeleteOutlined } from '@ant-design/icons';
+import { CopyOutlined, LinkOutlined, MessageOutlined, StopOutlined, UserDeleteOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { App, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
+import { Alert, App, Button, Card, Input, Modal, Popconfirm, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { useState } from 'react';
-import { api, errorMessage, type Invitation, type Member } from '../api/client';
+import { api, errorMessage, type Member, type WorkspaceJoinLink } from '../api/client';
+import { copyText } from '../lib/clipboard';
+import { loadAllPages } from '../lib/pagination';
 import { useWorkspace, workspaceKeys } from './workspace-context';
 
 const { Text, Title } = Typography;
+
+function actorLabel(actorType: Member['actorType']): string {
+  return actorType === 'agent' ? 'Agent' : '成员';
+}
+
+function membershipRoleLabel(role: Member['membershipRole']): string {
+  return role === 'owner' ? '所有者' : '成员';
+}
 
 export function MembersPage() {
   const { workspace, members, openDirectMessage, openingDirectMessageMembershipId } = useWorkspace();
   const queryClient = useQueryClient();
   const { message } = App.useApp();
   const owner = workspace.membershipRole === 'owner';
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [editing, setEditing] = useState<Member | null>(null);
-  const [inviteForm] = Form.useForm<{ verifiedEmail: string; membershipRole: 'owner' | 'member' }>();
-  const [editForm] = Form.useForm<{ membershipRole: 'owner' | 'member' }>();
-  const invitations = useQuery({
-    queryKey: workspaceKeys.invitations(workspace.id),
-    queryFn: async () => {
-      const items: Invitation[] = [];
-      let cursor: string | undefined;
-      do {
-        const page = await api.listInvitations(workspace.id, cursor);
-        items.push(...page.items);
-        cursor = page.nextCursor ?? undefined;
-      } while (cursor);
-      return items;
-    },
-    enabled: owner,
+  const [generatedJoinUrl, setGeneratedJoinUrl] = useState<string | null>(null);
+  const joinLinks = useQuery({
+    queryKey: workspaceKeys.joinLinks(workspace.id),
+    queryFn: () => loadAllPages((cursor) => api.listWorkspaceJoinLinks(workspace.id, cursor)),
   });
   const refreshMembers = () => queryClient.invalidateQueries({ queryKey: workspaceKeys.members(workspace.id) });
-  const refreshInvitations = () => queryClient.invalidateQueries({ queryKey: workspaceKeys.invitations(workspace.id) });
+  const refreshJoinLinks = () => queryClient.invalidateQueries({ queryKey: workspaceKeys.joinLinks(workspace.id) });
+  const copyJoinLink = async (link: string) => {
+    if (await copyText(link)) {
+      void message.success('Workspace 邀请链接已复制');
+      return;
+    }
+    void message.warning('浏览器未允许自动复制，请在弹窗中手动复制链接。');
+  };
 
-  const invite = useMutation({
-    mutationFn: (value: { verifiedEmail: string; membershipRole: 'owner' | 'member' }) =>
-      api.createInvitation(workspace.id, value),
+  const createJoinLink = useMutation({
+    mutationFn: () => api.createWorkspaceJoinLink(workspace.id),
     onSuccess: async (created) => {
-      setInviteOpen(false);
-      inviteForm.resetFields();
-      await refreshInvitations();
-      const link = `${window.location.origin}/invitations/${created.id}?revision=${created.revision}`;
-      await navigator.clipboard.writeText(link);
-      await message.success('邀请已创建，接受链接已复制');
+      const link = `${window.location.origin}/join/${created.token}`;
+      setGeneratedJoinUrl(link);
+      await copyJoinLink(link);
+      await refreshJoinLinks();
     },
-  });
-  const update = useMutation({
-    mutationFn: (value: { membershipRole: 'owner' | 'member' }) =>
-      api.updateMember(workspace.id, editing!.membershipId, { ...value, expectedRevision: editing!.revision }),
-    onSuccess: async () => {
-      setEditing(null);
-      await refreshMembers();
-      await queryClient.invalidateQueries({ queryKey: workspaceKeys.bootstrap(workspace.id) });
-    },
+    onError: (error) => void message.error(errorMessage(error)),
   });
   const remove = useMutation({
     mutationFn: (member: Member) => api.removeMember(workspace.id, member.membershipId, member.revision),
     onSuccess: async () => { await refreshMembers(); },
     onError: (error) => void message.error(errorMessage(error)),
   });
-  const revoke = useMutation({
-    mutationFn: (item: Invitation) => api.revokeInvitation(item.id, item.revision),
-    onSuccess: async () => { await refreshInvitations(); },
+  const revokeJoinLink = useMutation({
+    mutationFn: (item: WorkspaceJoinLink) => api.revokeWorkspaceJoinLink(item.id, item.revision),
+    onSuccess: async () => { await refreshJoinLinks(); },
     onError: (error) => void message.error(errorMessage(error)),
   });
 
@@ -72,16 +65,15 @@ export function MembersPage() {
         dataSource={members}
         pagination={{ pageSize: 20, hideOnSinglePage: true }}
         columns={[
-          { title: '成员', dataIndex: 'displayName', render: (name, item) => <Space><Text strong>{name}</Text><Tag>{item.actorType}</Tag>{item.membershipId === workspace.membershipId && <Tag color="blue">你</Tag>}</Space> },
-          { title: 'Workspace 角色', dataIndex: 'membershipRole', width: 140, render: (value) => <Tag color={value === 'owner' ? 'gold' : 'default'}>{value}</Tag> },
+          { title: '成员', dataIndex: 'displayName', render: (name, item) => <Space><Text strong>{name}</Text><Tag>{actorLabel(item.actorType)}</Tag>{item.membershipId === workspace.membershipId && <Tag color="blue">你</Tag>}</Space> },
+          { title: 'Workspace 角色', dataIndex: 'membershipRole', width: 140, render: (value) => <Tag color={value === 'owner' ? 'gold' : 'default'}>{membershipRoleLabel(value)}</Tag> },
           {
             title: '操作', width: 210,
             render: (_, item) => (
               <div className="table-actions">
                 {item.membershipId !== workspace.membershipId && <Button type="link" icon={<MessageOutlined />} loading={openingDirectMessageMembershipId === item.membershipId} onClick={() => void openDirectMessage(item.membershipId)}>私聊</Button>}
-                {owner && item.actorType === 'human' && <Button type="link" icon={<EditOutlined />} onClick={() => { setEditing(item); editForm.setFieldsValue({ membershipRole: item.membershipRole }); }}>修改</Button>}
                 {owner && item.actorType === 'human' && item.membershipId !== workspace.membershipId && (
-                    <Popconfirm title="移除后不会恢复原 Conversation 访问权，确定继续？" onConfirm={() => remove.mutate(item)}>
+                    <Popconfirm title="移除后不会恢复原会话访问权，确定继续？" onConfirm={() => remove.mutate(item)}>
                       <Button type="link" danger icon={<UserDeleteOutlined />}>移除</Button>
                     </Popconfirm>
                   )}
@@ -93,53 +85,95 @@ export function MembersPage() {
     </Card>
   );
 
-  const invitationTable = owner ? (
+  const joinLinkTable = (
     <Card className="surface-card" variant="borderless">
-      <Table<Invitation>
+      <Alert
+        type="info"
+        showIcon
+        title="有效邀请链接对所有 Workspace 成员可见"
+        description={owner
+          ? '你可以创建、复制和停用链接；任何拿到有效链接并登录的用户都可以确认加入，加入后固定为 member。'
+          : '你可以查看和分享 Owner 创建的有效链接；只有 Workspace Owner 可以创建或停用链接。'}
+        style={{ marginBottom: 16 }}
+      />
+      <Table<WorkspaceJoinLink>
         rowKey="id"
-        loading={invitations.isPending}
-        dataSource={invitations.data ?? []}
+        loading={joinLinks.isPending}
+        dataSource={joinLinks.data ?? []}
         pagination={{ pageSize: 20, hideOnSinglePage: true }}
         columns={[
-          { title: '邮箱', dataIndex: 'verifiedEmail' },
-          { title: 'Workspace 角色', dataIndex: 'membershipRole', width: 140 },
-          { title: '状态', dataIndex: 'status', width: 110, render: (value) => <Tag color={value === 'pending' ? 'processing' : value === 'accepted' ? 'success' : 'default'}>{value}</Tag> },
+          { title: '创建时间', dataIndex: 'createdAt', render: (value: number) => new Date(value).toLocaleString() },
+          { title: '已加入', dataIndex: 'useCount', width: 100, render: (value: number) => `${value} 人` },
+          { title: '状态', dataIndex: 'status', width: 110, render: (value) => <Tag color={value === 'active' ? 'processing' : 'default'}>{value === 'active' ? '有效' : '已停用'}</Tag> },
           {
-            title: '操作', width: 220,
+            title: '操作', width: owner ? 220 : 120,
             render: (_, item) => (
               <div className="table-actions">
-                {item.status === 'pending' && <Button type="link" icon={<CopyOutlined />} onClick={async () => {
-                  await navigator.clipboard.writeText(`${window.location.origin}/invitations/${item.id}?revision=${item.revision}`);
-                  await message.success('邀请链接已复制');
-                }}>复制链接</Button>}
-                {item.status === 'pending' && <Popconfirm title="撤销这个邀请？" onConfirm={() => revoke.mutate(item)}><Button type="link" danger icon={<StopOutlined />}>撤销</Button></Popconfirm>}
+                {item.status === 'active' && item.token && (
+                  <Button
+                    type="link"
+                    icon={<CopyOutlined />}
+                    onClick={() => void copyJoinLink(`${window.location.origin}/join/${item.token}`)}
+                  >
+                    复制链接
+                  </Button>
+                )}
+                {owner && item.status === 'active' && (
+                  <Popconfirm title="停用后，已经分享出去的这个链接将立即失效。" onConfirm={() => revokeJoinLink.mutate(item)}>
+                    <Button type="link" danger icon={<StopOutlined />}>停用</Button>
+                  </Popconfirm>
+                )}
               </div>
             ),
           },
         ]}
+        locale={{ emptyText: '还没有创建过邀请链接' }}
       />
     </Card>
-  ) : <Card><Text type="secondary">只有 Workspace Owner 可以查看和管理邀请。</Text></Card>;
+  );
 
   return (
     <main className="page-scroll">
       <div className="page-header">
-        <div><Title level={2}>成员与邀请</Title><Text type="secondary">Workspace 只使用 owner/member 两种治理角色。</Text></div>
-        {owner && <Button type="primary" icon={<PlusOutlined />} onClick={() => setInviteOpen(true)}>邀请 Human</Button>}
+        <div><Text className="page-eyebrow">WORKSPACE</Text><Title level={2}>成员与邀请</Title><Text type="secondary">邀请成员加入 Workspace，一起参与会话、项目和 Agent 协作。</Text></div>
+        {owner && (
+          <Button type="primary" icon={<LinkOutlined />} loading={createJoinLink.isPending} onClick={() => createJoinLink.mutate()}>
+            创建并复制邀请链接
+          </Button>
+        )}
       </div>
-      <Tabs items={[{ key: 'members', label: `成员 ${members.length}`, children: memberTable }, { key: 'invitations', label: '邀请', children: invitationTable }]} />
-      <Modal title="邀请 Human" open={inviteOpen} okText="创建并复制链接" confirmLoading={invite.isPending} onCancel={() => setInviteOpen(false)} onOk={() => void inviteForm.validateFields().then((value) => invite.mutate(value))}>
-        <Form form={inviteForm} layout="vertical" initialValues={{ membershipRole: 'member' }}>
-          <Form.Item name="verifiedEmail" label="已验证邮箱" rules={[{ required: true }, { type: 'email' }]}><Input prefix={<MailOutlined />} /></Form.Item>
-          <Form.Item name="membershipRole" label="责任角色"><Select options={[{ value: 'owner', label: 'owner' }, { value: 'member', label: 'member' }]} /></Form.Item>
-        </Form>
-        {invite.error && <Text type="danger">{errorMessage(invite.error)}</Text>}
-      </Modal>
-      <Modal title={`修改 ${editing?.displayName ?? ''}`} open={Boolean(editing)} okText="保存" confirmLoading={update.isPending} onCancel={() => setEditing(null)} onOk={() => void editForm.validateFields().then((value) => update.mutate(value))}>
-        <Form form={editForm} layout="vertical">
-          <Form.Item name="membershipRole" label="责任角色"><Select options={[{ value: 'owner', label: 'owner' }, { value: 'member', label: 'member' }]} /></Form.Item>
-        </Form>
-        {update.error && <Text type="danger">{errorMessage(update.error)}</Text>}
+      <Tabs items={[{ key: 'members', label: `成员 ${members.length}`, children: memberTable }, { key: 'join-links', label: '邀请链接', children: joinLinkTable }]} />
+      <Modal
+        title="分享 Workspace"
+        open={Boolean(generatedJoinUrl)}
+        onCancel={() => setGeneratedJoinUrl(null)}
+        footer={[
+          <Button key="close" onClick={() => setGeneratedJoinUrl(null)}>完成</Button>,
+          <Button
+            key="copy"
+            type="primary"
+            icon={<CopyOutlined />}
+            onClick={() => {
+              if (generatedJoinUrl) void copyJoinLink(generatedJoinUrl);
+            }}
+          >
+            复制链接
+          </Button>,
+        ]}
+      >
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Text>把下面的链接发给要加入的人。对方登录后确认一次，就会直接进入 {workspace.name}。</Text>
+          <Input.TextArea
+            aria-label="邀请链接"
+            value={generatedJoinUrl ?? ''}
+            readOnly
+            autoSize
+            onFocus={(event) => event.currentTarget.select()}
+          />
+          <Text type="secondary">
+            有效链接会继续显示在“邀请链接”列表中，所有 Workspace 成员都可以复制；只有 Owner 可以停用。
+          </Text>
+        </Space>
       </Modal>
     </main>
   );

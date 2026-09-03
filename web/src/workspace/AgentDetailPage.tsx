@@ -58,8 +58,8 @@ function hasCurrentRuntimeBinding(value: Agent['runtimeBinding'] | undefined): v
 }
 
 function effectiveRuntimeValue(value: string | null, source: 'explicit' | 'runtime_default' | 'unavailable'): string {
-  if (value === null) return 'Runtime 未暴露';
-  return source === 'runtime_default' ? `${value}（Runtime 默认）` : value;
+  if (value === null) return '本地 Agent 未暴露';
+  return source === 'runtime_default' ? `${value}（本地 Agent 默认）` : value;
 }
 
 function lifecycleColor(status: Agent['lifecycleStatus']): string {
@@ -80,10 +80,11 @@ function ComputerOfflineHelp({ computerName }: { computerName: string }) {
       content={(
         <div className="computer-offline-help">
           <Text>在已绑定的计算机“{computerName}”上打开终端并运行：</Text>
-          <Paragraph code copyable={{ text: 'anc-computer run' }} className="computer-offline-help-command">
-            anc-computer run
+          <Paragraph code copyable={{ text: 'anc-computer service install' }} className="computer-offline-help-command">
+            anc-computer service install
           </Paragraph>
-          <Text type="secondary">保持客户端运行，重新连接后本页面会自动更新。</Text>
+          <Text type="secondary">客户端会立即上线，并在以后登录这台计算机时自动启动。本页面会自动更新。</Text>
+          <Text type="secondary">只想临时前台运行本地 Agent 时，可使用 <Text code>anc-computer run</Text>。</Text>
           <Text type="secondary">
             如果提示找不到命令，或出现“ANC_SERVER_URL and ANC_COMPUTER_TOKEN are required”，说明客户端未安装或版本过旧，请先安装最新版：
           </Text>
@@ -186,7 +187,7 @@ export function AgentDetailPage() {
     onSuccess: async (updated) => {
       queryClient.setQueryData(workspaceKeys.agent(workspace.id, agentId), updated);
       await refreshAgent();
-      await message.success('Agent 已重启；下一条消息会启动新的 Runtime 会话');
+      await message.success('Agent 已重启；下一条消息会启动新的本地 Agent 会话');
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -205,7 +206,7 @@ export function AgentDetailPage() {
         queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(workspace.id) }),
         queryClient.invalidateQueries({ queryKey: workspaceKeys.conversations(workspace.id) }),
       ]);
-      await message.success(agent?.membershipStatus === 'active' ? 'Agent Membership 已终止' : 'Agent Membership 已重新准入');
+      await message.success(agent?.membershipStatus === 'active' ? 'Agent 已从 Workspace 移除' : 'Agent 已重新加入 Workspace');
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -256,7 +257,7 @@ export function AgentDetailPage() {
     onSuccess: async () => {
       setBindingOpen(false);
       await refreshAgent();
-      await message.success(agent?.runtimeBinding ? '运行设置已更新' : '运行时已连接');
+      await message.success(agent?.runtimeBinding ? '运行设置已更新' : '本地 Agent 已连接');
     },
   });
 
@@ -291,7 +292,7 @@ export function AgentDetailPage() {
       </section>
       <section className="agent-profile-section">
         <Text type="secondary">描述</Text>
-        <Text>{agent.description || '暂无描述'}</Text>
+        <Text>{agent.description || '还没有描述'}</Text>
       </section>
       <section className="agent-profile-section">
         <Title level={5}>信息</Title>
@@ -309,12 +310,12 @@ export function AgentDetailPage() {
           { key: 'created', label: '创建时间', children: dateTime.format(agent.createdAt) },
           { key: 'creator', label: '创建者', children: creator?.displayName ?? '未知成员' },
           { key: 'owner', label: '当前 Owner', children: agent.ownerDisplayName },
-          { key: 'membership', label: 'Membership', children: <Tag color={agent.membershipStatus === 'active' ? 'success' : 'default'}>{agent.membershipStatus}</Tag> },
+          { key: 'membership', label: '成员状态', children: <Tag color={agent.membershipStatus === 'active' ? 'success' : 'default'}>{agent.membershipStatus === 'active' ? '正常' : '已移除'}</Tag> },
         ]} />
       </section>
       <section className="agent-profile-section">
         <div className="agent-profile-section-heading">
-          <Title level={5}>运行时配置</Title>
+          <Title level={5}>本地 Agent 配置</Title>
           {canBind && <Button type="link" icon={<EditOutlined />} onClick={() => setBindingOpen(true)}>编辑</Button>}
         </div>
         {runtimeBindingOutdated ? (
@@ -322,7 +323,7 @@ export function AgentDetailPage() {
             type="error"
             showIcon
             title="运行配置加载失败"
-            description="当前后端返回的数据不符合最新 Runtime Binding 契约。请完成后端数据升级并重启服务后刷新页面。"
+            description="当前后端返回的数据不符合最新本地 Agent 绑定契约。请完成后端数据升级并重启服务后刷新页面。"
           />
         ) : runtimeBinding ? (
           <>
@@ -330,7 +331,7 @@ export function AgentDetailPage() {
               <Alert type="warning" showIcon title={runtimeBinding.configuration.invalidReason?.message ?? '当前运行配置不可用'} />
             )}
             <div className="agent-runtime-fields">
-              <div><Text type="secondary">运行时</Text><Tag color="cyan">{runtimeLabel(runtimeBinding.runtimeId)}</Tag></div>
+              <div><Text type="secondary">本地 Agent</Text><Tag color="cyan">{runtimeLabel(runtimeBinding.runtimeId)}</Tag></div>
               <div><Text type="secondary">模型</Text><Tag color="geekblue">{effectiveRuntimeValue(runtimeBinding.configuration.effective.model.value, runtimeBinding.configuration.effective.model.source)}</Tag></div>
               <div><Text type="secondary">推理强度</Text><Tag color="gold">{effectiveRuntimeValue(runtimeBinding.configuration.effective.reasoningEffort.value, runtimeBinding.configuration.effective.reasoningEffort.source)}</Tag></div>
               <div><Text type="secondary">模式</Text><Tag color="orange">{effectiveRuntimeValue(runtimeBinding.configuration.effective.mode.value, runtimeBinding.configuration.effective.mode.source)}</Tag></div>
@@ -338,8 +339,8 @@ export function AgentDetailPage() {
             <Text type="secondary">{runtimeBinding.computerName} · {runtimeBinding.detectedVersion || boundRuntime?.detectedVersion || '未检测到版本'}</Text>
           </>
         ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未选择计算机和运行时">
-            {canBind && <Button type="primary" icon={<LinkOutlined />} onClick={() => setBindingOpen(true)}>连接运行时</Button>}
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未选择计算机和本地 Agent">
+            {canBind && <Button type="primary" icon={<LinkOutlined />} onClick={() => setBindingOpen(true)}>连接本地 Agent</Button>}
           </Empty>
         )}
       </section>
@@ -352,7 +353,7 @@ export function AgentDetailPage() {
             {agentOwner && agent.membershipStatus === 'active' && agent.lifecycleStatus === 'active' && runtimeBinding && (
               <Popconfirm
                 title="重启这个 Agent？"
-                description="当前执行会被取消，Runtime 会话会清空；Agent 资料和历史消息不受影响。"
+                description="当前执行会被取消，本地 Agent 会话会清空；Agent 资料和历史消息不受影响。"
                 okText="重启 Agent"
                 onConfirm={() => restart.mutate()}
               >
@@ -362,7 +363,7 @@ export function AgentDetailPage() {
             {workspaceOwner && <Button onClick={() => setTransferOpen(true)}>转移 Owner</Button>}
             {workspaceOwner && <Popconfirm
               title="永久删除这个 Agent？"
-              description="Agent 会从 Workspace 永久移除，Membership 和进行中的任务会终止；历史消息仍保留并标记为“已删除”。此操作无法撤销。"
+              description="Agent 会从 Workspace 永久移除，进行中的任务会终止；历史消息仍保留并标记为“已删除”。此操作无法撤销。"
               okText="删除 Agent"
               okButtonProps={{ danger: true }}
               onConfirm={() => deleteAgent.mutate()}
@@ -379,7 +380,7 @@ export function AgentDetailPage() {
   );
   return (
     <main className="page-scroll agent-detail-page">
-      <Button className="agent-back-button" type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(`/w/${workspace.id}/agents`)}>AGENTS</Button>
+      <Button className="agent-back-button" type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(`/w/${workspace.id}/agents`)}>返回 Agent 列表</Button>
       <Card className="agent-profile-header surface-card" variant="borderless">
         <div className="agent-profile-main">
           <Avatar size={72} className="agent-profile-avatar"><RobotOutlined /></Avatar>
@@ -393,7 +394,7 @@ export function AgentDetailPage() {
                 {runtimeBinding && !connected && !runtimeBindingOutdated && <ComputerOfflineHelp computerName={runtimeBinding.computerName} />}
               </Space>
             </Space>
-            <Text type="secondary">{agent.description || '暂无描述'}</Text>
+            <Text type="secondary">{agent.description || '还没有描述'}</Text>
           </div>
         </div>
       </Card>
@@ -423,7 +424,7 @@ export function AgentDetailPage() {
         onOk={() => void transferForm.validateFields().then((value) => transferOwnership.mutate(value))}
       >
         <Form form={transferForm} layout="vertical">
-          <Form.Item name="newOwnerMembershipId" label="新的 Human Owner" rules={[{ required: true }]}>
+          <Form.Item name="newOwnerMembershipId" label="新的所有者" rules={[{ required: true }]}>
             <Select options={members
               .filter((member) => member.actorType === 'human' && member.membershipId !== agent.ownerMembershipId)
               .map((member) => ({ value: member.membershipId, label: member.displayName }))} />
@@ -432,7 +433,7 @@ export function AgentDetailPage() {
         {transferOwnership.error && <Alert type="error" showIcon title={errorMessage(transferOwnership.error)} />}
       </Modal>
       <Modal
-        title={agent.runtimeBinding ? '编辑运行设置' : '连接运行时'}
+        title={agent.runtimeBinding ? '编辑运行设置' : '连接本地 Agent'}
         open={bindingOpen}
         okText="保存"
         confirmLoading={bind.isPending}
@@ -446,7 +447,7 @@ export function AgentDetailPage() {
           <Alert
             type="error"
             showIcon
-            title="暂时无法连接运行时"
+            title="暂时无法连接本地 Agent"
             description={computerLoadErrorMessage(computers.error)}
           />
         ) : (

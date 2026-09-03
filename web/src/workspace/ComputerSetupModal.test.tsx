@@ -28,8 +28,8 @@ describe('Computer setup', () => {
       </ConfigProvider>,
     );
 
-    await userEvent.type(screen.getByRole('textbox', { name: '计算机名称' }), 'My Mac');
-    await userEvent.click(screen.getByRole('button', { name: '添 加' }));
+    await userEvent.type(screen.getByRole('textbox', { name: '本地计算机名称' }), 'My Mac');
+    await userEvent.click(screen.getByRole('button', { name: '继 续' }));
 
     expect(await screen.findByText(/npm install --global 'http:\/\/localhost:3000\/downloads\/anc-local-computer\.tgz'/u))
       .toBeInTheDocument();

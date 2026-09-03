@@ -17,6 +17,8 @@ import {
   type Project,
   type WorkspaceMessage,
 } from '../api/client';
+import { agentActivityIcon, agentActivityTone, collapseAgentActivityEvents } from './agent-activity-presentation';
+import { loadAllPages } from '../lib/pagination';
 
 const { Paragraph, Text } = Typography;
 const dateTime = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' });
@@ -24,6 +26,7 @@ const dateTime = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeSty
 interface ActivityItem {
   conversation: Conversation;
   request: AgentRequest;
+  sourceMessage: WorkspaceMessage | null;
   messages: WorkspaceMessage[];
 }
 
@@ -31,20 +34,13 @@ interface ActivityPresentation {
   icon: React.ReactNode;
   label: string;
   title: string;
-  description: string;
+  description?: string;
   tone: 'waiting' | 'running' | 'success' | 'failed' | 'neutral';
 }
 
-async function loadProjectConversations(projectId: string): Promise<Conversation[]> {
-  const conversations: Conversation[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await api.listProjectConversations(projectId, cursor);
-    conversations.push(...page.items);
-    cursor = page.nextCursor ?? undefined;
-  } while (cursor);
-  return conversations;
-}
+const loadProjectConversations = (projectId: string): Promise<Conversation[]> => loadAllPages(
+  (cursor) => api.listProjectConversations(projectId, cursor),
+);
 
 function conversationLabel(conversation: Conversation): string {
   if (conversation.kind === 'dm') return '私信';
@@ -56,27 +52,34 @@ function requestPresentation(request: AgentRequest, messageCount: number): Activ
     return {
       icon: <CloseCircleOutlined />,
       label: '已取消',
-      title: '请求已取消',
-      description: '这次请求没有继续交给 Runtime 执行。',
+      title: '消息处理已取消',
       tone: 'neutral',
     };
   }
   if (request.status === 'rejected') {
     return {
       icon: <CloseCircleOutlined />,
-      label: '未执行',
-      title: '请求未被执行',
-      description: request.terminalReason?.detail || 'Runtime 没有接受这次请求。',
+      label: '未处理',
+      title: '消息未被处理',
+      description: request.terminalReason?.detail || 'Agent 没有处理这条消息。',
       tone: 'failed',
+    };
+  }
+  if (request.status === 'accepted' && request.run === null) {
+    return {
+      icon: <CheckCircleOutlined />,
+      label: '已收到',
+      title: 'Agent 已收到消息',
+      tone: 'success',
     };
   }
   if (request.run?.status === 'terminal') {
     if (request.run.outcome === 'publish') {
       return {
         icon: <CheckCircleOutlined />,
-        label: '已完成',
-        title: messageCount ? `已向 Conversation 返回 ${messageCount} 条消息` : 'ACP 已完成返回',
-        description: messageCount ? '返回内容已作为普通 Agent 消息写入 Conversation。' : '执行已结束，正在等待返回消息同步。',
+        label: messageCount ? '已回复' : '已完成',
+        title: messageCount ? `Agent 已发送 ${messageCount} 条回复` : 'Agent 已完成处理',
+        ...(messageCount ? {} : { description: '回复正在同步。' }),
         tone: 'success',
       };
     }
@@ -84,8 +87,8 @@ function requestPresentation(request: AgentRequest, messageCount: number): Activ
       return {
         icon: <CheckCircleOutlined />,
         label: '已完成',
-        title: '运行完成，没有返回消息',
-        description: '这次 ACP 执行正常结束，但没有向 Conversation 写入内容。',
+        title: 'Agent 已完成处理',
+        description: '没有发送回复。',
         tone: 'neutral',
       };
     }
@@ -93,25 +96,24 @@ function requestPresentation(request: AgentRequest, messageCount: number): Activ
       return {
         icon: <CloseCircleOutlined />,
         label: '失败',
-        title: 'ACP 执行失败',
-        description: request.run.attempt?.failureReason?.message || 'Runtime 未提供可展示的失败原因。',
+        title: 'Agent 处理失败',
+        description: request.run.attempt?.failureReason?.message || '没有可展示的失败原因。',
         tone: 'failed',
       };
     }
     return {
       icon: <CloseCircleOutlined />,
-      label: '未发布',
-      title: '运行结束，结果未发布',
-      description: request.run.outcome === 'cancelled' ? '运行已取消。' : '返回结果没有写入 Conversation。',
+      label: '未回复',
+      title: '处理结束，未发送回复',
+      ...(request.run.outcome === 'cancelled' ? { description: '处理已取消。' } : {}),
       tone: 'neutral',
     };
   }
   if (request.run?.status === 'active') {
     return {
       icon: <SyncOutlined spin />,
-      label: '执行中',
-      title: request.run.attempt?.status === 'running' ? 'ACP 正在执行' : 'Runtime 已接受请求',
-      description: request.run.attempt?.status === 'running' ? '正在等待 Runtime 返回执行结果。' : '正在等待 ACP Attempt 启动。',
+      label: '处理中',
+      title: request.run.attempt?.status === 'running' ? 'Agent 正在处理' : 'Agent 正在准备处理',
       tone: 'running',
     };
   }
@@ -119,8 +121,8 @@ function requestPresentation(request: AgentRequest, messageCount: number): Activ
     return {
       icon: <ClockCircleOutlined />,
       label: '等待中',
-      title: '等待 Runtime 上线',
-      description: '绑定的 Computer 或 Runtime 当前不可用。',
+      title: '等待 Agent 上线',
+      description: '绑定的计算机当前不可用。',
       tone: 'waiting',
     };
   }
@@ -136,8 +138,7 @@ function requestPresentation(request: AgentRequest, messageCount: number): Activ
   return {
     icon: <ClockCircleOutlined />,
     label: '等待中',
-    title: '等待 Runtime 接收请求',
-    description: '请求已经建立，尚未开始执行。',
+    title: '等待 Agent 处理',
     tone: 'waiting',
   };
 }
@@ -173,6 +174,8 @@ export function AgentActivityPanel({ agent, conversations, projects, enabled }: 
       return relevantGroups.flatMap(({ conversation, requests }) => requests.map((request) => ({
         conversation,
         request,
+        sourceMessage: (messagesByConversation.get(conversation.id) ?? [])
+          .find((item) => item.id === request.sourceMessageId) ?? null,
         messages: request.run
           ? (messagesByConversation.get(conversation.id) ?? []).filter((item) => item.producingRunId === request.run?.id)
           : [],
@@ -181,16 +184,46 @@ export function AgentActivityPanel({ agent, conversations, projects, enabled }: 
     enabled,
     refetchInterval: enabled ? 2_000 : false,
   });
+  const runtimeActivity = useQuery({
+    queryKey: ['workspace', agent.workspaceId, 'agent-activity', agent.id],
+    queryFn: () => api.listAgentActivity(agent.workspaceId, agent.id).then((page) => page.items),
+    enabled,
+    refetchInterval: enabled ? 1_000 : false,
+  });
 
-  if (activity.isPending) return <div className="agent-activity-loading"><Spin /></div>;
+  if (activity.isPending || runtimeActivity.isPending) return <div className="agent-activity-loading"><Spin /></div>;
   if (activity.isError) return <Alert type="error" showIcon title="动态加载失败" description={errorMessage(activity.error)} />;
-  if (!activity.data.length) {
-    return <Card className="surface-card agent-activity-empty" variant="borderless"><Empty description="还没有 Agent 运行记录" /></Card>;
+  const runtimeEvents = collapseAgentActivityEvents(runtimeActivity.data ?? []);
+  if (!activity.data.length && !runtimeEvents.length && !runtimeActivity.isError) {
+    return <Card className="surface-card agent-activity-empty" variant="borderless"><Empty description="还没有 Agent 动态" /></Card>;
   }
 
   return (
     <div className="agent-activity-list">
-      {activity.data.map(({ conversation, request, messages }) => {
+      {runtimeActivity.isError && (
+        <Alert type="warning" showIcon title="执行动态暂时不可用" description={errorMessage(runtimeActivity.error)} />
+      )}
+      {runtimeEvents.length > 0 && (
+        <Card className="surface-card agent-runtime-activity" variant="borderless">
+          <div className="agent-runtime-activity-heading">
+            <div>
+              <Text strong>执行动态</Text>
+              <Text type="secondary">Agent 处理过程中的实时动作</Text>
+            </div>
+            {runtimeEvents[0]?.turnStatus === 'active' && <Tag color="processing">进行中</Tag>}
+          </div>
+          <div className="agent-runtime-activity-events">
+            {runtimeEvents.slice(0, 30).map((item) => (
+              <div className={`agent-runtime-activity-event ${agentActivityTone(item)}`} key={item.eventId}>
+                <span className="agent-runtime-activity-event-icon">{agentActivityIcon(item)}</span>
+                <span>{item.title}</span>
+                <time>{dateTime.format(item.createdAt)}</time>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+      {activity.data.map(({ conversation, request, sourceMessage, messages }) => {
         const presentation = requestPresentation(request, messages.length);
         return (
           <Card className={`surface-card agent-activity-item ${presentation.tone}`} variant="borderless" key={request.id}>
@@ -203,16 +236,22 @@ export function AgentActivityPanel({ agent, conversations, projects, enabled }: 
                 </div>
                 <Tag>{presentation.label}</Tag>
               </div>
-              <Text type="secondary">{presentation.description}</Text>
+              {presentation.description && <Text type="secondary">{presentation.description}</Text>}
+              {sourceMessage && (
+                <div className="agent-activity-message">
+                  <MessageOutlined />
+                  <Paragraph ellipsis={{ rows: 3 }}>{sourceMessage.authorDisplayName}：{sourceMessage.body}</Paragraph>
+                </div>
+              )}
               {messages.map((item) => (
                 <div className="agent-activity-message" key={item.id}>
                   <MessageOutlined />
-                  <Paragraph ellipsis={{ rows: 3 }}>{item.body}</Paragraph>
+                  <Paragraph ellipsis={{ rows: 3 }}>Agent 回复：{item.body}</Paragraph>
                 </div>
               ))}
               <Button type="link" onClick={() => navigate(conversation.projectId
                 ? `/w/${agent.workspaceId}/p/${conversation.projectId}/c/${conversation.id}`
-                : `/w/${agent.workspaceId}/c/${conversation.id}`)}>查看 Conversation</Button>
+                : `/w/${agent.workspaceId}/c/${conversation.id}`)}>查看会话</Button>
             </div>
           </Card>
         );

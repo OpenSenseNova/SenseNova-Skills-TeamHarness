@@ -13,16 +13,11 @@ export const workspaceKeys = {
   projects: (id: string) => ['workspace', id, 'projects'] as const,
   project: (id: string) => ['project', id] as const,
   projectMembers: (id: string) => ['project', id, 'members'] as const,
-  projectWorkingCopies: (id: string) => ['project', id, 'working-copies'] as const,
+  projectWorkItems: (id: string) => ['project', id, 'work-items'] as const,
   projectConversations: (id: string) => ['project', id, 'conversations'] as const,
   projectArchivedConversations: (id: string) => ['project', id, 'conversations', 'archived'] as const,
-  projectResourceLinks: (id: string) => ['project', id, 'resource-links'] as const,
-  artifacts: (workspaceId: string, projectId?: string) => ['workspace', workspaceId, 'artifacts', projectId ?? 'all'] as const,
-  artifact: (id: string) => ['artifact', id] as const,
-  artifactSnapshots: (id: string) => ['artifact', id, 'snapshots'] as const,
-  artifactTrash: (workspaceId: string) => ['workspace', workspaceId, 'artifact-trash'] as const,
-  artifactCleanup: (workspaceId: string) => ['workspace', workspaceId, 'artifact-cleanup'] as const,
-  invitations: (id: string) => ['workspace', id, 'invitations'] as const,
+  projectArtifacts: (projectId: string) => ['project-v2', projectId, 'artifacts'] as const,
+  joinLinks: (id: string) => ['workspace', id, 'join-links'] as const,
 };
 
 export interface WorkspaceContextValue {
@@ -31,8 +26,13 @@ export interface WorkspaceContextValue {
   agents: Agent[];
   conversations: Conversation[];
   projects: Project[];
+  /** Projects archived in this browser; omitted from the default project surfaces. */
+  archivedProjects?: Project[];
   project: Project | null;
   projectMembers: ProjectMember[];
+  archiveProject?: (projectId: string) => void;
+  restoreProject?: (projectId: string) => void;
+  isProjectArchived?: (projectId: string) => boolean;
   openNewProject: () => void;
   openNewConversation: () => void;
   openDirectMessage: (membershipId: string) => Promise<void>;

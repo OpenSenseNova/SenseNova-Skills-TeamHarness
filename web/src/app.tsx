@@ -7,7 +7,7 @@ import { api } from './api/client';
 const LoginPage = lazy(() => import('./auth/AuthPages').then((module) => ({ default: module.LoginPage })));
 const RegisterPage = lazy(() => import('./auth/AuthPages').then((module) => ({ default: module.RegisterPage })));
 const VerifyEmailPage = lazy(() => import('./auth/AuthPages').then((module) => ({ default: module.VerifyEmailPage })));
-const InvitationAcceptPage = lazy(() => import('./auth/AuthPages').then((module) => ({ default: module.InvitationAcceptPage })));
+const WorkspaceJoinPage = lazy(() => import('./auth/AuthPages').then((module) => ({ default: module.WorkspaceJoinPage })));
 const WorkspaceEntry = lazy(() => import('./workspace/WorkspaceShell').then((module) => ({ default: module.WorkspaceEntry })));
 const WorkspaceHome = lazy(() => import('./workspace/WorkspaceShell').then((module) => ({ default: module.WorkspaceHome })));
 const WorkspaceShell = lazy(() => import('./workspace/WorkspaceShell').then((module) => ({ default: module.WorkspaceShell })));
@@ -17,8 +17,10 @@ const AgentDetailPage = lazy(() => import('./workspace/AgentDetailPage').then((m
 const MembersPage = lazy(() => import('./workspace/MembersPage').then((module) => ({ default: module.MembersPage })));
 const SettingsPage = lazy(() => import('./workspace/SettingsPage').then((module) => ({ default: module.SettingsPage })));
 const ProjectHome = lazy(() => import('./workspace/ProjectPages').then((module) => ({ default: module.ProjectHome })));
+const ProjectSettingsPage = lazy(() => import('./workspace/ProjectPages').then((module) => ({ default: module.ProjectSettingsPage })));
 const ProjectsPage = lazy(() => import('./workspace/ProjectPages').then((module) => ({ default: module.ProjectsPage })));
 const ProjectMembersPage = lazy(() => import('./workspace/ProjectPages').then((module) => ({ default: module.ProjectMembersPage })));
+const WorkItemBoardPage = lazy(() => import('./workspace/WorkItemBoardPage').then((module) => ({ default: module.WorkItemBoardPage })));
 const ArtifactPage = lazy(() => import('./workspace/ArtifactPage').then((module) => ({ default: module.ArtifactPage })));
 
 export const sessionQueryKey = ['auth', 'session'] as const;
@@ -72,14 +74,16 @@ export function Application() {
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route element={<AuthGuard />}>
             <Route path="/" element={<WorkspaceEntry />} />
-            <Route path="/invitations/:invitationId" element={<InvitationAcceptPage />} />
+            <Route path="/join/:token" element={<WorkspaceJoinPage />} />
             <Route path="/w/:workspaceId" element={<WorkspaceShell />}>
               <Route index element={<WorkspaceHome />} />
               <Route path="c/:conversationId" element={<ConversationPage />} />
               <Route path="projects" element={<ProjectsPage />} />
-              <Route path="p/:projectId" element={<ProjectHome />} />
+              <Route path="p/:projectId" element={<ProjectSettingsPage />} />
+              <Route path="p/:projectId/resources" element={<ProjectHome />} />
               <Route path="p/:projectId/c/:conversationId" element={<ConversationPage />} />
               <Route path="p/:projectId/members" element={<ProjectMembersPage />} />
+              <Route path="p/:projectId/work-items" element={<WorkItemBoardPage />} />
               <Route path="p/:projectId/artifacts/:artifactId" element={<ArtifactPage />} />
               <Route path="artifacts/:artifactId" element={<ArtifactPage />} />
               <Route path="agents" element={<AgentsPage />} />

@@ -1,32 +1,23 @@
 import {
-  BranchesOutlined,
-  CheckCircleOutlined,
-  CloudOutlined,
-  CopyOutlined,
-  DownOutlined,
-  DisconnectOutlined,
-  ExclamationCircleOutlined,
-  FileMarkdownOutlined,
   FileOutlined,
   FolderOpenOutlined,
   FolderOutlined,
-  GlobalOutlined,
-  ImportOutlined,
+  InboxOutlined,
   LinkOutlined,
   MessageOutlined,
   PlusOutlined,
+  ProjectOutlined,
+  RollbackOutlined,
+  SettingOutlined,
   TeamOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Alert,
   App,
   Avatar,
   Button,
   Card,
-  Descriptions,
-  Dropdown,
   Empty,
   Form,
   Input,
@@ -36,33 +27,14 @@ import {
   Select,
   Space,
   Tag,
-  Tooltip,
   Typography,
 } from 'antd';
 import { useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { api, errorMessage, type Artifact, type Project, type ProjectMember, type ProjectResourceLink, type ProjectWorkingCopy } from '../api/client';
+import { api, errorMessage, type Project, type ProjectLink, type ProjectMember, type ProjectResource } from '../api/client';
 import { useWorkspace, workspaceKeys } from './workspace-context';
 
 const { Text, Title } = Typography;
-
-const workingCopyLabels: Record<Project['workingCopySummary'], { label: string; color: string }> = {
-  connected: { label: '已连接', color: 'success' },
-  not_connected: { label: '未连接', color: 'default' },
-  mismatch: { label: 'Repository 不匹配', color: 'error' },
-  computer_offline: { label: 'Computer 离线', color: 'warning' },
-};
-
-function workingCopyStatus(copy: ProjectWorkingCopy) {
-  if (copy.availability === 'mismatch') return { label: 'Repository 不匹配', color: 'error', icon: <ExclamationCircleOutlined /> };
-  if (copy.connectionStatus === 'offline') return { label: 'Computer 离线', color: 'warning', icon: <CloudOutlined /> };
-  if (copy.availability === 'ready') return { label: '已连接', color: 'success', icon: <CheckCircleOutlined /> };
-  return { label: '未连接', color: 'default', icon: <DisconnectOutlined /> };
-}
-
-type ProjectResourceItem =
-  | { kind: 'artifact'; id: string; updatedAt: number; artifact: Artifact }
-  | { kind: 'link'; id: string; updatedAt: number; link: ProjectResourceLink };
 
 function formatBytes(byteLength: number) {
   if (byteLength < 1024) return `${byteLength} B`;
@@ -70,127 +42,211 @@ function formatBytes(byteLength: number) {
   return `${(byteLength / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function resourceLinkHost(url: string) {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}
-
 export function ProjectsPage() {
-  const { workspace, projects, openNewProject } = useWorkspace();
+  const { workspace, projects, archivedProjects = [], openNewProject, restoreProject } = useWorkspace();
   const navigate = useNavigate();
+  const { message } = App.useApp();
+  const [archivedOpen, setArchivedOpen] = useState(false);
+  const openProject = (project: Project) => {
+    navigate(project.governanceOnly
+      ? `/w/${workspace.id}/p/${project.id}`
+      : `/w/${workspace.id}/p/${project.id}/resources`);
+  };
   return (
     <main className="page-scroll project-directory-page">
       <div className="page-header project-directory-header">
         <div>
+          <Text className="page-eyebrow">WORKSPACE</Text>
           <Title level={2}>项目</Title>
-          <Text type="secondary">Project 是可选协作范围，用来组织成员、Conversation、Artifact 与外部资料。</Text>
+          <Text type="secondary">把文件、讨论、任务和交付物放在同一个协作空间。</Text>
         </div>
-        <Button type="primary" size="large" icon={<PlusOutlined />} onClick={openNewProject}>新建项目</Button>
+        <Space>
+          {archivedProjects.length > 0 && (
+            <Button icon={<InboxOutlined />} onClick={() => setArchivedOpen(true)}>
+              已归档 ({archivedProjects.length})
+            </Button>
+          )}
+          <Button type="primary" size="large" icon={<PlusOutlined />} onClick={openNewProject}>新建项目</Button>
+        </Space>
       </div>
       {projects.length ? (
-        <section aria-labelledby="project-list-title">
-          <div className="project-list-heading">
-            <Title id="project-list-title" level={5}>全部项目</Title>
-            <Text type="secondary">{projects.length} 个</Text>
-          </div>
-          <div className="project-repository-list">
-            {projects.map((project) => (
-              <button
-                key={project.id}
-                type="button"
-                className="project-repository-row"
-                aria-label={`打开项目 ${project.name}`}
-                onClick={() => navigate(`/w/${workspace.id}/p/${project.id}`)}
-              >
-                <span className="project-repository-icon"><FolderOpenOutlined /></span>
-                <span className="project-repository-main">
-                  <strong>{project.name}</strong>
-                  <span>{project.repository?.repositoryIdentity ?? project.description ?? '无需 Repository 也可协作'}</span>
-                </span>
-                <span className="project-repository-branch">{project.repository ? <><BranchesOutlined /> {project.repository.defaultBranch}</> : 'Scratch Run'}</span>
-                <Tag color={project.repository ? workingCopyLabels[project.workingCopySummary].color : 'blue'}>
-                  {project.repository ? workingCopyLabels[project.workingCopySummary].label : '无 Repository'}
+        <div className="project-directory-grid" aria-label="项目列表">
+          {projects.map((project) => (
+            <Card
+              key={project.id}
+              className={project.governanceOnly ? 'project-directory-card governance-only' : 'project-directory-card'}
+              variant="borderless"
+              hoverable
+              role="button"
+              tabIndex={0}
+              onClick={() => openProject(project)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  openProject(project);
+                }
+              }}
+            >
+              <div className="project-directory-card-heading">
+                <span className="project-directory-card-icon"><FolderOpenOutlined /></span>
+                <div>
+                  <Title level={4}>{project.name}</Title>
+                  <Text type="secondary">{project.governanceOnly ? '仅可查看项目治理信息' : (project.description || '还没有项目描述')}</Text>
+                </div>
+              </div>
+              <div className="project-directory-card-meta">
+                <span><TeamOutlined /> {project.activeMemberCount} 位成员</span>
+                <span><MessageOutlined /> {project.conversationCount} 个会话</span>
+              </div>
+              <div className="project-directory-card-footer">
+                <Tag color={project.governanceOnly ? 'default' : 'blue'}>
+                  {project.governanceOnly ? '仅治理权限' : project.role === 'owner' ? '所有者' : project.role === 'manager' ? '管理员' : '成员'}
                 </Tag>
-                <span className="project-repository-meta">
-                  <span><TeamOutlined /> {project.activeMemberCount}</span>
-                  <span><MessageOutlined /> {project.conversationCount}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
+                <Button type="link" tabIndex={-1}>打开项目 <span aria-hidden="true">→</span></Button>
+              </div>
+            </Card>
+          ))}
+        </div>
       ) : (
         <Card className="surface-card project-empty-card" variant="borderless">
           <Empty
             image={<FolderOutlined className="project-empty-icon" />}
             description={(
               <Space orientation="vertical" size={2}>
-                <Text strong>还没有项目</Text>
-                <Text type="secondary">先创建协作范围；Primary Repository 可以现在挂载，也可以以后再添加。</Text>
+                <Text strong>{archivedProjects.length ? '没有未归档项目' : '还没有项目'}</Text>
+                <Text type="secondary">{archivedProjects.length ? '已归档项目可从上方入口恢复。' : '创建一个项目，把资料、任务和 Agent 协作集中起来。'}</Text>
               </Space>
             )}
           >
-            <Button type="primary" icon={<PlusOutlined />} onClick={openNewProject}>创建第一个项目</Button>
+            {archivedProjects.length ? (
+              <Button icon={<InboxOutlined />} onClick={() => setArchivedOpen(true)}>查看已归档项目</Button>
+            ) : (
+              <Button type="primary" icon={<PlusOutlined />} onClick={openNewProject}>创建第一个项目</Button>
+            )}
           </Empty>
         </Card>
       )}
+      <Modal
+        title="已归档项目"
+        open={archivedOpen}
+        footer={<Button onClick={() => setArchivedOpen(false)}>关闭</Button>}
+        onCancel={() => setArchivedOpen(false)}
+      >
+        <Text type="secondary">归档只影响当前浏览器的默认展示，不会删除项目资料、会话或交付物。</Text>
+        <List
+          style={{ marginTop: 16 }}
+          dataSource={archivedProjects}
+          renderItem={(archivedProject) => (
+            <List.Item
+              actions={[
+                <Button
+                  key="restore"
+                  type="link"
+                  icon={<RollbackOutlined />}
+                  onClick={() => {
+                    restoreProject?.(archivedProject.id);
+                    void message.success('项目已恢复。');
+                  }}
+                >
+                  恢复
+                </Button>,
+                <Button key="open" type="link" onClick={() => openProject(archivedProject)}>查看</Button>,
+              ]}
+            >
+              <List.Item.Meta
+                avatar={<InboxOutlined />}
+                title={archivedProject.name}
+                description={archivedProject.description || '已归档项目'}
+              />
+            </List.Item>
+          )}
+        />
+      </Modal>
     </main>
   );
 }
 
+/** Project resource surface: project files, deliverables and external links. */
 export function ProjectHome() {
-  const { workspace, project, conversations, openNewConversation } = useWorkspace();
+  const { workspace, project, projectMembers, openNewConversation } = useWorkspace();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { message } = App.useApp();
+  const resourceInput = useRef<HTMLInputElement>(null);
+  const replaceInput = useRef<HTMLInputElement>(null);
+  const artifactInput = useRef<HTMLInputElement>(null);
+  const [folderName, setFolderName] = useState('');
+  const [folderOpen, setFolderOpen] = useState(false);
+  const [editingResource, setEditingResource] = useState<ProjectResource | null>(null);
+  const [replacementTarget, setReplacementTarget] = useState<ProjectResource | null>(null);
+  const [resourceName, setResourceName] = useState('');
+  const [resourceParent, setResourceParent] = useState<string | null>(null);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [editingLink, setEditingLink] = useState<ProjectLink | null>(null);
+  const [linkName, setLinkName] = useState('');
+  const [linkLocator, setLinkLocator] = useState('');
+  const [linkDescription, setLinkDescription] = useState('');
+  const resources = useQuery({ queryKey: ['project-v2', project?.id, 'resources'], queryFn: () => api.listProjectResources(project!.id).then((result) => result.items), enabled: Boolean(project) });
+  const artifacts = useQuery({ queryKey: ['project-v2', project?.id, 'artifacts'], queryFn: () => api.listProjectArtifactsV2(project!.id).then((result) => result.items), enabled: Boolean(project) });
+  const links = useQuery({ queryKey: ['project-v2', project?.id, 'links'], queryFn: () => api.listProjectLinks(project!.id).then((result) => result.items), enabled: Boolean(project) });
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['project-v2', project!.id, 'resources'] }),
+      queryClient.invalidateQueries({ queryKey: ['project-v2', project!.id, 'artifacts'] }),
+      queryClient.invalidateQueries({ queryKey: ['project-v2', project!.id, 'links'] }),
+    ]);
+  };
+  const uploadResource = useMutation({ mutationFn: (file: File) => api.uploadProjectResource(project!.id, file), onSuccess: async () => { await refresh(); void message.success('项目资料已上传。'); }, onError: (error) => void message.error(errorMessage(error)) });
+  const updateResource = useMutation({ mutationFn: () => { if (!editingResource) throw new Error('资料不存在。'); return api.updateProjectResourceInProject(project!.id, editingResource.resourceId, { name: resourceName.trim(), parentResourceId: resourceParent }); }, onSuccess: async () => { setEditingResource(null); await refresh(); void message.success('项目资料已更新。'); }, onError: (error) => void message.error(errorMessage(error)) });
+  const deleteResource = useMutation({ mutationFn: (resource: ProjectResource) => api.deleteProjectResource(resource.resourceId), onSuccess: async () => { await refresh(); void message.success('项目资料已移入回收站。'); }, onError: (error) => void message.error(errorMessage(error)) });
+  const replaceResource = useMutation({ mutationFn: async (file: File) => { if (!replacementTarget) throw new Error('资料不存在。'); return api.replaceProjectResource(replacementTarget.resourceId, file, replacementTarget.revision); }, onSuccess: async () => { setReplacementTarget(null); await refresh(); void message.success('项目资料已替换。'); }, onError: (error) => void message.error(errorMessage(error)) });
+  const publishArtifact = useMutation({ mutationFn: (file: File) => api.publishArtifactV2(project!.id, file, { artifactPath: '' }), onSuccess: async (result) => { await refresh(); navigate(`/w/${workspace.id}/p/${project!.id}/artifacts/${result.artifact.artifactId}`); }, onError: (error) => void message.error(errorMessage(error)) });
+  const createFolder = useMutation({ mutationFn: () => api.createProjectResourceFolder(project!.id, { name: folderName.trim() }), onSuccess: async () => { setFolderName(''); setFolderOpen(false); await refresh(); void message.success('文件夹已创建。'); }, onError: (error) => void message.error(errorMessage(error)) });
+  const createLink = useMutation({ mutationFn: () => api.createProjectLink(project!.id, { name: linkName.trim(), locator: linkLocator.trim(), description: linkDescription.trim() || null }), onSuccess: async () => { setLinkOpen(false); setLinkName(''); setLinkLocator(''); setLinkDescription(''); await refresh(); void message.success('外部链接已添加。'); }, onError: (error) => void message.error(errorMessage(error)) });
+  const updateLink = useMutation({ mutationFn: () => { if (!editingLink) throw new Error('链接不存在。'); return api.updateProjectLinkInProject(project!.id, editingLink.linkId, { name: linkName.trim(), description: linkDescription.trim() || null }); }, onSuccess: async () => { setEditingLink(null); await refresh(); void message.success('外部链接已更新。'); }, onError: (error) => void message.error(errorMessage(error)) });
+  const deleteLink = useMutation({ mutationFn: (link: ProjectLink) => api.deleteProjectLink(link.linkId), onSuccess: async () => { await refresh(); void message.success('外部链接已移入回收站。'); }, onError: (error) => void message.error(errorMessage(error)) });
+  if (!project) return <Navigate to={`/w/${workspace.id}/projects`} replace />;
+  return (
+    <main className="page-scroll project-profile-page">
+      <div className="page-header project-profile-header"><div className="project-title-lockup"><span className="project-title-icon"><FolderOpenOutlined /></span><div><Text type="secondary">{project.name}</Text><Title level={2}>项目资源</Title><Text type="secondary">项目资料、交付物和外部链接都在这里。</Text></div></div><Space><Button aria-label="任务看板" icon={<ProjectOutlined />} onClick={() => navigate(`/w/${workspace.id}/p/${project.id}/work-items`)}>任务看板</Button><Button aria-label="项目设置" icon={<SettingOutlined />} onClick={() => navigate(`/w/${workspace.id}/p/${project.id}`)}>设置</Button><Button aria-label="项目成员" icon={<TeamOutlined />} onClick={() => navigate(`/w/${workspace.id}/p/${project.id}/members`)}>成员 ({projectMembers.length})</Button><Button type="primary" icon={<MessageOutlined />} onClick={openNewConversation}>新建会话</Button></Space></div>
+      <div className="project-profile-grid">
+        <Card title="项目资料" className="surface-card" extra={<Space><Button icon={<FolderOutlined />} loading={createFolder.isPending} onClick={() => { setFolderName(''); setFolderOpen(true); }}>新建文件夹</Button><Button type="primary" icon={<UploadOutlined />} loading={uploadResource.isPending} onClick={() => resourceInput.current?.click()}>上传资料</Button></Space>}>
+          <input ref={resourceInput} hidden type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadResource.mutate(file); event.target.value = ''; }} />
+          <input ref={replaceInput} hidden type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) replaceResource.mutate(file); event.target.value = ''; }} />
+          {(resources.data ?? []).length ? <div role="list" aria-label="项目资源列表"><List dataSource={resources.data ?? []} renderItem={(resource) => <List.Item role="listitem" actions={[...(resource.kind === 'file' ? [<Button key="download" type="link" href={`/v1/projects/${project.id}/resources/${resource.resourceId}/download`}>下载</Button>, <Button key="replace" type="link" onClick={() => { setReplacementTarget(resource); replaceInput.current?.click(); }}>替换</Button>] : []), <Button key="edit" type="link" onClick={() => { setEditingResource(resource); setResourceName(resource.name); setResourceParent(resource.parentResourceId); }}>整理</Button>, <Popconfirm key="delete" title="移入回收站？" description="删除后可以在回收站中恢复。" onConfirm={() => deleteResource.mutate(resource)}><Button type="link" danger>删除</Button></Popconfirm>]}><List.Item.Meta avatar={resource.kind === 'directory' ? <FolderOutlined /> : <FileOutlined />} title={resource.path} description={resource.kind === 'directory' ? '文件夹' : `${resource.mediaType ?? '文件'} · ${formatBytes(resource.byteLength ?? 0)} · 更新于 ${new Date(resource.updatedAt).toLocaleDateString('zh-CN')}`} /></List.Item>} /></div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有项目资料" />}
+        </Card>
+        <Card title="交付物" className="surface-card" extra={<><input ref={artifactInput} hidden type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) publishArtifact.mutate(file); event.target.value = ''; }} /><Button type="primary" icon={<UploadOutlined />} loading={publishArtifact.isPending} onClick={() => artifactInput.current?.click()}>发布交付物</Button></>}>
+          {(artifacts.data ?? []).length ? <div role="list" aria-label="交付物列表"><List dataSource={artifacts.data ?? []} renderItem={(artifact) => <List.Item role="listitem" actions={[<Button key="open" type="link" onClick={() => navigate(`/w/${workspace.id}/p/${project.id}/artifacts/${artifact.artifactId}`)}>打开</Button>]}><List.Item.Meta avatar={<FileOutlined />} title={`${artifact.projectPath ? `${artifact.projectPath}/` : ''}${artifact.name}`} description={artifact.latestVersion ? `v${artifact.latestVersion.version} · ${artifact.latestVersion.fileName} · ${artifact.latestVersion.mediaType}` : '暂无可用版本'} /></List.Item>} /></div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有交付物" />}
+        </Card>
+        <Card title="外部链接" className="surface-card" extra={<Button icon={<LinkOutlined />} onClick={() => { setEditingLink(null); setLinkName(''); setLinkLocator(''); setLinkDescription(''); setLinkOpen(true); }}>添加链接</Button>}>
+          {(links.data ?? []).length ? <div role="list" aria-label="外部链接列表"><List dataSource={links.data ?? []} renderItem={(link) => <List.Item role="listitem" actions={[<Button key="edit" type="link" onClick={() => { setEditingLink(link); setLinkName(link.name); setLinkLocator(link.locator); setLinkDescription(link.description ?? ''); }}>编辑</Button>, <Popconfirm key="delete" title="移入回收站？" onConfirm={() => deleteLink.mutate(link)}><Button type="link" danger>删除</Button></Popconfirm>]}><List.Item.Meta avatar={<LinkOutlined />} title={<a href={link.locator} target="_blank" rel="noreferrer">{link.name}</a>} description={link.description || link.locator} /></List.Item>} /></div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有外部链接" />}
+        </Card>
+      </div>
+      <Modal title="整理项目资料" open={Boolean(editingResource)} okText="保存" cancelText="取消" confirmLoading={updateResource.isPending} okButtonProps={{ disabled: !resourceName.trim() }} onCancel={() => setEditingResource(null)} onOk={() => updateResource.mutate()}>
+        <Input aria-label="资料名称" value={resourceName} onChange={(event) => setResourceName(event.target.value)} />
+        <Select aria-label="所在文件夹" value={resourceParent} allowClear placeholder="项目根目录" style={{ width: '100%', marginTop: 12 }} onChange={(value) => setResourceParent(value ?? null)} options={[{ label: '项目根目录', value: null }, ...(resources.data ?? []).filter((resource) => resource.kind === 'directory' && resource.resourceId !== editingResource?.resourceId).map((resource) => ({ label: resource.path, value: resource.resourceId }))]} />
+      </Modal>
+      <Modal title="新建文件夹" open={folderOpen} okText="创建文件夹" cancelText="取消" confirmLoading={createFolder.isPending} okButtonProps={{ disabled: !folderName.trim() }} onCancel={() => setFolderOpen(false)} onOk={() => createFolder.mutate()}>
+        <Text type="secondary">给资料建立一个清晰的目录，方便团队成员找到文件。</Text>
+        <Input autoFocus aria-label="文件夹名称" value={folderName} placeholder="例如：设计稿、会议记录" onChange={(event) => setFolderName(event.target.value)} style={{ marginTop: 12 }} onPressEnter={() => { if (folderName.trim()) createFolder.mutate(); }} />
+      </Modal>
+      <Modal title={editingLink ? '编辑外部链接' : '添加外部链接'} open={linkOpen || Boolean(editingLink)} okText={editingLink ? '保存' : '添加'} cancelText="取消" confirmLoading={editingLink ? updateLink.isPending : createLink.isPending} okButtonProps={{ disabled: !linkName.trim() || (!editingLink && !linkLocator.trim()) }} onCancel={() => { setLinkOpen(false); setEditingLink(null); }} onOk={() => editingLink ? updateLink.mutate() : createLink.mutate()}><Input placeholder="名称" value={linkName} onChange={(event) => setLinkName(event.target.value)} /><Input placeholder="https://..." value={linkLocator} disabled={Boolean(editingLink)} onChange={(event) => setLinkLocator(event.target.value)} style={{ marginTop: 12 }} /><Input.TextArea placeholder="描述（可选）" value={linkDescription} onChange={(event) => setLinkDescription(event.target.value)} style={{ marginTop: 12 }} /></Modal>
+    </main>
+  );
+}
+
+export function ProjectSettingsPage() {
+  const {
+    workspace,
+    project,
+    archiveProject,
+    restoreProject,
+    isProjectArchived,
+  } = useWorkspace();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { message } = App.useApp();
   const [form] = Form.useForm<{ name: string; description: string | null }>();
-  const [repositoryForm] = Form.useForm<{ cloneUrl: string; defaultBranch: string }>();
-  const [resourceLinkForm] = Form.useForm<{ title: string; url: string; description?: string }>();
-  const [resourceLinkEditForm] = Form.useForm<{ title: string; url: string; description?: string }>();
-  const [editingResourceLink, setEditingResourceLink] = useState<ProjectResourceLink | null>(null);
-  const [artifactToMove, setArtifactToMove] = useState<string>();
-  const [artifactPickerOpen, setArtifactPickerOpen] = useState(false);
-  const [resourceLinkCreateOpen, setResourceLinkCreateOpen] = useState(false);
-  const uploadInput = useRef<HTMLInputElement>(null);
-  const workingCopies = useQuery({
-    queryKey: workspaceKeys.projectWorkingCopies(project?.id ?? ''),
-    queryFn: () => api.listProjectWorkingCopies(project!.id).then((page) => page.items),
-    enabled: Boolean(project),
-    refetchInterval: 10_000,
-  });
-  const resourceLinks = useQuery({
-    queryKey: workspaceKeys.projectResourceLinks(project?.id ?? ''),
-    queryFn: () => api.listProjectResourceLinks(project!.id).then((page) => page.items),
-    enabled: Boolean(project),
-  });
-  const projectArtifacts = useQuery({
-    queryKey: workspaceKeys.artifacts(workspace.id, project?.id),
-    queryFn: () => api.listArtifacts(workspace.id, project!.id).then((page) => page.items),
-    enabled: Boolean(project),
-  });
-  const workspaceArtifacts = useQuery({
-    queryKey: workspaceKeys.artifacts(workspace.id),
-    queryFn: () => api.listArtifacts(workspace.id).then((page) => page.items),
-    enabled: Boolean(project),
-  });
-  const refreshProject = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: workspaceKeys.project(project!.id) }),
-      queryClient.invalidateQueries({ queryKey: workspaceKeys.projects(workspace.id) }),
-      queryClient.invalidateQueries({ queryKey: workspaceKeys.projectWorkingCopies(project!.id) }),
-    ]);
-  };
-  const refreshProjectResources = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['workspace', workspace.id, 'artifacts'] }),
-      queryClient.invalidateQueries({ queryKey: workspaceKeys.projectResourceLinks(project!.id) }),
-      queryClient.invalidateQueries({ queryKey: workspaceKeys.project(project!.id) }),
-      queryClient.invalidateQueries({ queryKey: workspaceKeys.projects(workspace.id) }),
-    ]);
-  };
   const update = useMutation({
     mutationFn: (value: { name: string; description: string | null }) => api.updateProject(project!.id, {
       name: value.name.trim(),
@@ -202,432 +258,73 @@ export function ProjectHome() {
         queryClient.invalidateQueries({ queryKey: workspaceKeys.project(project!.id) }),
         queryClient.invalidateQueries({ queryKey: workspaceKeys.projects(workspace.id) }),
       ]);
-      void message.success('Project 资料已更新。');
+      void message.success('项目设置已保存。');
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
-  const putRepository = useMutation({
-    mutationFn: (value: { cloneUrl: string; defaultBranch: string }) => api.putProjectRepository(project!.id, {
-      cloneUrl: value.cloneUrl.trim(),
-      defaultBranch: value.defaultBranch.trim(),
-      expectedProjectRevision: project!.revision,
-      ...(project!.repository ? { expectedRepositoryRevision: project!.repository.revision } : {}),
-    }),
-    onSuccess: async () => {
-      await refreshProject();
-      void message.success(project!.repository ? '默认分支已更新。' : 'Primary Repository 已挂载。');
-    },
-    onError: (error) => void message.error(errorMessage(error)),
-  });
-  const detachRepository = useMutation({
-    mutationFn: () => api.deleteProjectRepository(project!.id, {
-      expectedProjectRevision: project!.revision,
-      expectedRepositoryRevision: project!.repository!.revision,
-    }),
-    onSuccess: async () => {
-      repositoryForm.resetFields();
-      await refreshProject();
-      void message.success('Primary Repository 已解除；后续 Run 将使用 scratch workdir。');
-    },
-    onError: (error) => void message.error(errorMessage(error)),
-  });
-  const createResourceLink = useMutation({
-    mutationFn: (value: { title: string; url: string; description?: string }) => api.createProjectResourceLink(project!.id, {
-      title: value.title.trim(), url: value.url.trim(), description: value.description?.trim() || null,
-    }),
-    onSuccess: async () => {
-      resourceLinkForm.resetFields();
-      setResourceLinkCreateOpen(false);
-      await refreshProjectResources();
-      void message.success('外部链接已添加。');
-    },
-    onError: (error) => void message.error(errorMessage(error)),
-  });
-  const deleteResourceLink = useMutation({
-    mutationFn: (link: { id: string; revision: number }) => api.deleteProjectResourceLink(project!.id, link.id, link.revision),
-    onSuccess: async () => {
-      await refreshProjectResources();
-      void message.success('外部链接已删除。');
-    },
-    onError: (error) => void message.error(errorMessage(error)),
-  });
-  const updateResourceLink = useMutation({
-    mutationFn: (value: { title: string; url: string; description?: string }) => api.updateProjectResourceLink(
-      project!.id,
-      editingResourceLink!.id,
-      {
-        title: value.title.trim(),
-        url: value.url.trim(),
-        description: value.description?.trim() || null,
-        expectedRevision: editingResourceLink!.revision,
-      },
-    ),
-    onSuccess: async () => {
-      setEditingResourceLink(null);
-      await refreshProjectResources();
-      void message.success('外部链接已更新。');
-    },
-    onError: (error) => void message.error(errorMessage(error)),
-  });
-  const uploadProjectFile = useMutation({
-    mutationFn: (file: File) => api.createFileArtifact(workspace.id, file, file.name, [project!.id]),
-    onSuccess: async () => {
-      await refreshProjectResources();
-      void message.success('文件已上传到项目资源。');
-    },
-    onError: (error) => void message.error(errorMessage(error)),
-  });
-  const moveArtifactToProject = useMutation({
-    mutationFn: (artifactId: string) => api.associateArtifact(project!.id, artifactId),
-    onSuccess: async () => {
-      setArtifactToMove(undefined);
-      setArtifactPickerOpen(false);
-      await refreshProjectResources();
-      void message.success('Artifact 已加入项目资源。');
-    },
-    onError: (error) => void message.error(errorMessage(error)),
-  });
-  const removeArtifactFromProject = useMutation({
-    mutationFn: (artifactId: string) => api.dissociateArtifact(project!.id, artifactId),
-    onSuccess: async () => {
-      await refreshProjectResources();
-      void message.success('Artifact 已移出项目资源。');
-    },
-    onError: (error) => void message.error(errorMessage(error)),
-  });
+
   if (!project) return <Navigate to={`/w/${workspace.id}/projects`} replace />;
-  const bindCommand = `anc-computer project bind --project ${project.id}`;
-  const cloneCommand = `anc-computer project clone --project ${project.id}`;
-  const connected = project.workingCopySummary === 'connected';
-  const movableArtifacts = (workspaceArtifacts.data ?? []).filter((artifact) => !artifact.projectIds.includes(project.id));
-  const projectResources: ProjectResourceItem[] = [
-    ...(projectArtifacts.data ?? []).map((artifact) => ({
-      kind: 'artifact' as const,
-      id: artifact.id,
-      updatedAt: artifact.updatedAt,
-      artifact,
-    })),
-    ...(resourceLinks.data ?? []).map((link) => ({
-      kind: 'link' as const,
-      id: link.id,
-      updatedAt: link.updatedAt,
-      link,
-    })),
-  ].sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id));
-  const addResourceMenu = {
-    items: [
-      { key: 'upload', icon: <UploadOutlined />, label: '上传文件' },
-      { key: 'artifact', icon: <ImportOutlined />, label: '加入已有 Artifact' },
-      { key: 'link', icon: <LinkOutlined />, label: '添加外部链接' },
-    ],
-    onClick: ({ key }: { key: string }) => {
-      if (key === 'upload') uploadInput.current?.click();
-      if (key === 'artifact') setArtifactPickerOpen(true);
-      if (key === 'link') setResourceLinkCreateOpen(true);
-    },
-  };
+  const canManage = project.role === 'owner' || project.role === 'manager';
+  const archived = isProjectArchived?.(project.id) ?? false;
+  const canArchive = canManage && Boolean(archiveProject) && Boolean(restoreProject);
   return (
-    <main className="page-scroll project-profile-page">
+    <main className="page-scroll project-settings-page">
       <div className="page-header project-profile-header">
         <div className="project-title-lockup">
-          <span className="project-title-icon"><FolderOpenOutlined /></span>
+          <span className="project-title-icon"><SettingOutlined /></span>
           <div>
-            <Title level={2}>{project.name}</Title>
-            <Text type="secondary">{project.description || 'Project 协作概览'}</Text>
+            <Text type="secondary">{project.name}</Text>
+            <Title level={2}>项目设置</Title>
           </div>
         </div>
         <Space>
-          <Button aria-label="管理项目成员" icon={<TeamOutlined />} onClick={() => navigate(`/w/${workspace.id}/p/${project.id}/members`)}>成员</Button>
-          <Button aria-label="新建项目会话" type="primary" icon={<MessageOutlined />} onClick={openNewConversation}>新建会话</Button>
+          <Button icon={<FolderOpenOutlined />} onClick={() => navigate(`/w/${workspace.id}/p/${project.id}/resources`)}>查看资源</Button>
+          <Button icon={<TeamOutlined />} onClick={() => navigate(`/w/${workspace.id}/p/${project.id}/members`)}>成员 ({project.activeMemberCount})</Button>
+          {canArchive && (archived ? (
+            <Button
+              icon={<RollbackOutlined />}
+              onClick={() => {
+                restoreProject?.(project.id);
+                void message.success('项目已恢复。');
+              }}
+            >
+              恢复项目
+            </Button>
+          ) : (
+            <Popconfirm
+              title="归档这个项目？"
+              description="归档后会从默认项目列表和侧边栏隐藏；项目资料、会话和交付物不会被删除。当前版本仅对这个浏览器生效。"
+              okText="归档"
+              cancelText="取消"
+              onConfirm={() => {
+                archiveProject?.(project.id);
+                void message.success('项目已归档。');
+                navigate(`/w/${workspace.id}/projects`);
+              }}
+            >
+              <Button danger icon={<InboxOutlined />}>归档项目</Button>
+            </Popconfirm>
+          ))}
         </Space>
       </div>
 
-      {project.repository && !connected && (
-        <Alert
-          className="project-connection-alert"
-          type={project.workingCopySummary === 'mismatch' ? 'error' : 'warning'}
-          showIcon
-          title={project.workingCopySummary === 'mismatch' ? 'Repository 不匹配' : '需要连接仓库'}
-          description="仍然可以进入 Conversation，并使用 Artifact 和 Resource Link；需要仓库的 Project Run 会等待匹配的 Working Copy。"
-        />
-      )}
-
-      <div className="project-profile-grid">
-        <Card title="资料" className="surface-card">
+      <Card title="基本信息" className="surface-card">
+        {archived && <Tag icon={<InboxOutlined />} color="gold" style={{ marginBottom: 16 }}>已归档（仅当前浏览器）</Tag>}
           <Form
             form={form}
             layout="vertical"
             initialValues={{ name: project.name, description: project.description }}
             onFinish={(value) => update.mutate(value)}
           >
-            <Form.Item name="name" label="显示名称" rules={[{ required: true, max: 120 }]}>
-              <Input disabled={project.role !== 'manager'} />
+            <Form.Item name="name" label="项目名称" rules={[{ required: true, max: 120 }]}>
+              <Input disabled={!canManage} />
             </Form.Item>
             <Form.Item name="description" label="描述" rules={[{ max: 3000 }]}>
-              <Input.TextArea disabled={project.role !== 'manager'} rows={4} placeholder="暂无描述" />
+              <Input.TextArea disabled={!canManage} rows={4} placeholder="暂无描述" />
             </Form.Item>
-            {project.role === 'manager' && <Button htmlType="submit" loading={update.isPending}>保存资料</Button>}
+            {canManage && <Button type="primary" htmlType="submit" loading={update.isPending}>保存设置</Button>}
           </Form>
-        </Card>
-
-        <Card title="Primary Repository" className="surface-card">
-          {project.repository && (
-            <Descriptions column={1} size="small">
-              <Descriptions.Item label="Identity"><Text code>{project.repository.repositoryIdentity}</Text></Descriptions.Item>
-              <Descriptions.Item label="Clone URL"><Text copyable>{project.repository.cloneUrl}</Text></Descriptions.Item>
-            </Descriptions>
-          )}
-          <Form
-            form={repositoryForm}
-            layout="vertical"
-            initialValues={{
-              cloneUrl: project.repository?.cloneUrl ?? '',
-              defaultBranch: project.repository?.defaultBranch ?? 'main',
-            }}
-            onFinish={(value) => putRepository.mutate(value)}
-          >
-            <Form.Item name="cloneUrl" label="Clone URL" rules={[{ required: true, max: 2000 }]}>
-              <Input disabled={Boolean(project.repository) || project.role !== 'manager'} placeholder="https://github.com/org/repo.git" />
-            </Form.Item>
-            <Form.Item name="defaultBranch" label="默认分支" rules={[{ required: true, max: 255 }]}>
-              <Input disabled={project.role !== 'manager'} />
-            </Form.Item>
-            {project.role === 'manager' && (
-              <Space>
-                <Button htmlType="submit" loading={putRepository.isPending}>{project.repository ? '更新默认分支' : '挂载 Repository'}</Button>
-                {project.repository && (
-                  <Popconfirm title="解除 Primary Repository？" description="有 active Attempt 时会被拒绝。" onConfirm={() => detachRepository.mutate()}>
-                    <Button danger loading={detachRepository.isPending}>解除</Button>
-                  </Popconfirm>
-                )}
-              </Space>
-            )}
-          </Form>
-          <Text type="secondary">Repository identity 不可原地修改；更换时先解除，再挂载新的 Repository。</Text>
-        </Card>
-      </div>
-
-      {project.repository && <Card title="本机 Working Copy" className="surface-card project-working-copies">
-        {workingCopies.data?.length ? (
-          <List
-            dataSource={workingCopies.data}
-            renderItem={(copy) => {
-              const status = workingCopyStatus(copy);
-              return (
-                <List.Item>
-                  <List.Item.Meta
-                    avatar={<Avatar icon={status.icon} />}
-                    title={<Space><Text strong>{copy.computerName}</Text><Tag color={status.color}>{status.label}</Tag></Space>}
-                    description={copy.branch && copy.headCommit
-                      ? `${copy.branch} · ${copy.headCommit.slice(0, 8)}${copy.dirty ? ' · 有未提交修改（不会进入 Attempt）' : ''}`
-                      : '当前没有可用的 Repository 状态'}
-                  />
-                </List.Item>
-              );
-            }}
-          />
-        ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未连接本机 Repository" />}
-        <div className="project-command-list">
-          {([['绑定已有 checkout', bindCommand], ['Clone 并绑定', cloneCommand]] as const).map(([label, command]) => (
-            <div className="command-block" key={command}>
-              <span><Text strong>{label}</Text><code>{command}</code></span>
-              <Tooltip title="复制命令"><Button aria-label={`复制${label}命令`} icon={<CopyOutlined />} onClick={() => void navigator.clipboard.writeText(command)} /></Tooltip>
-            </div>
-          ))}
-        </div>
-      </Card>}
-
-      <Card title="协作" className="surface-card project-collaboration-summary">
-        <Text>{project.activeMemberCount} 位成员 · {conversations.length} 个当前可见 Conversation</Text>
-        <Text type="secondary">Project 内只创建 Channel，参与者由当前 active Project Membership 决定；DM 始终位于 Workspace 协作区。</Text>
       </Card>
-
-      <Card
-        title="项目资源"
-        className="surface-card project-resources"
-        extra={(
-          <Dropdown menu={addResourceMenu} trigger={['click']}>
-            <Button type="primary" icon={<PlusOutlined />} loading={uploadProjectFile.isPending}>
-              添加资源 <DownOutlined />
-            </Button>
-          </Dropdown>
-        )}
-      >
-        <input
-          ref={uploadInput}
-          className="project-resource-file-input"
-          type="file"
-          aria-label="选择要上传的项目文件"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) uploadProjectFile.mutate(file);
-            event.target.value = '';
-          }}
-        />
-        <Text type="secondary">文件、Markdown Artifact 和外部链接统一列在这里。</Text>
-        {projectResources.length ? (
-          <div className="project-resource-list" role="list" aria-label="项目资源列表">
-            {projectResources.map((resource) => {
-              if (resource.kind === 'artifact') {
-                const { artifact } = resource;
-                const isFile = artifact.artifactType === 'file';
-                const currentLabel = `当前修订 r${artifact.currentState.currentRevision}`;
-                const snapshotLabel = artifact.latestSnapshot
-                  ? artifact.latestSnapshot.label ?? '已保存快照'
-                  : '尚无快照';
-                const detail = isFile
-                  ? `文件 · ${currentLabel} · ${formatBytes(artifact.currentState.byteLength)}`
-                  : `Markdown · ${currentLabel} · ${snapshotLabel}`;
-                return (
-                  <div className="project-resource-row" role="listitem" key={`artifact-${artifact.id}`}>
-                    <span className={`project-resource-icon ${isFile ? 'file' : 'markdown'}`}>
-                      {isFile ? <FileOutlined /> : <FileMarkdownOutlined />}
-                    </span>
-                    <button
-                      type="button"
-                      className="project-resource-copy"
-                      onClick={() => navigate(`/w/${workspace.id}/p/${project.id}/artifacts/${artifact.id}`)}
-                    >
-                      <strong>{artifact.name}</strong>
-                      <span>{detail}</span>
-                    </button>
-                    <Tag>{isFile ? '文件' : 'Artifact'}</Tag>
-                    <time>{new Date(artifact.updatedAt).toLocaleDateString('zh-CN')}</time>
-                    <Space className="project-resource-actions" size={2}>
-                      <Button type="link" onClick={() => navigate(`/w/${workspace.id}/p/${project.id}/artifacts/${artifact.id}`)}>打开</Button>
-                      {project.role === 'manager' && (
-                        <Popconfirm
-                          title="将这个 Artifact 移出当前项目？"
-                          description="Artifact 本身、版本以及其他 Project 关联都不会被删除。"
-                          onConfirm={() => removeArtifactFromProject.mutate(artifact.id)}
-                        >
-                          <Button type="link" danger loading={removeArtifactFromProject.isPending}>移出项目</Button>
-                        </Popconfirm>
-                      )}
-                    </Space>
-                  </div>
-                );
-              }
-              const { link } = resource;
-              const canEditLink = link.createdByMembershipId === workspace.membershipId || project.role === 'manager';
-              return (
-                <div className="project-resource-row" role="listitem" key={`link-${link.id}`}>
-                  <span className="project-resource-icon link"><GlobalOutlined /></span>
-                  <a className="project-resource-copy" href={link.url} target="_blank" rel="noreferrer">
-                    <strong>{link.title}</strong>
-                    <span>{resourceLinkHost(link.url)}{link.description ? ` · ${link.description}` : ''}</span>
-                  </a>
-                  <Tag>外部链接</Tag>
-                  <time>{new Date(link.updatedAt).toLocaleDateString('zh-CN')}</time>
-                  <Space className="project-resource-actions" size={2}>
-                    <Button type="link" href={link.url} target="_blank">打开链接</Button>
-                    {canEditLink && (
-                      <>
-                        <Button type="link" onClick={() => {
-                          setEditingResourceLink(link);
-                          resourceLinkEditForm.setFieldsValue({
-                            title: link.title,
-                            url: link.url,
-                            description: link.description ?? '',
-                          });
-                        }}>修改</Button>
-                        <Popconfirm title="删除这个外部链接？" onConfirm={() => deleteResourceLink.mutate(link)}>
-                          <Button type="link" danger loading={deleteResourceLink.isPending}>删除</Button>
-                        </Popconfirm>
-                      </>
-                    )}
-                  </Space>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <Empty
-            className="project-resource-empty"
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="还没有项目资源"
-          >
-            <Space wrap>
-              <Button icon={<UploadOutlined />} onClick={() => uploadInput.current?.click()}>上传文件</Button>
-              <Button icon={<ImportOutlined />} onClick={() => setArtifactPickerOpen(true)}>加入已有 Artifact</Button>
-              <Button icon={<LinkOutlined />} onClick={() => setResourceLinkCreateOpen(true)}>添加外部链接</Button>
-            </Space>
-          </Empty>
-        )}
-        <Text className="project-resource-footnote" type="secondary">
-          加入已有 Artifact 只建立当前 Project 关联，不复制内容，也不移除其他 Project 关联。
-        </Text>
-      </Card>
-      <Modal
-        title="加入已有 Artifact"
-        open={artifactPickerOpen}
-        okText="加入项目"
-        cancelText="取消"
-        okButtonProps={{ disabled: !artifactToMove }}
-        confirmLoading={moveArtifactToProject.isPending}
-        onCancel={() => {
-          setArtifactPickerOpen(false);
-          setArtifactToMove(undefined);
-        }}
-        onOk={() => artifactToMove && moveArtifactToProject.mutate(artifactToMove)}
-      >
-        <Text type="secondary">这里只显示尚未加入当前 Project 的 Workspace Artifact。</Text>
-        <Select
-          aria-label="选择要加入项目的 Artifact"
-          value={artifactToMove}
-          placeholder={movableArtifacts.length ? '搜索并选择 Artifact' : '没有可加入的 Artifact'}
-          showSearch
-          optionFilterProp="label"
-          options={movableArtifacts.map((artifact) => ({
-            label: `${artifact.name} · ${artifact.artifactType === 'file' ? '文件' : 'Markdown'}`,
-            value: artifact.id,
-          }))}
-          onChange={setArtifactToMove}
-          style={{ width: '100%', marginTop: 16 }}
-        />
-      </Modal>
-      <Modal
-        title="添加外部链接"
-        open={resourceLinkCreateOpen}
-        okText="添加"
-        cancelText="取消"
-        confirmLoading={createResourceLink.isPending}
-        onCancel={() => setResourceLinkCreateOpen(false)}
-        onOk={() => void resourceLinkForm.validateFields().then((value) => createResourceLink.mutate(value))}
-      >
-        <Form form={resourceLinkForm} layout="vertical">
-          <Form.Item name="title" label="标题" rules={[{ required: true, max: 200 }]}>
-            <Input aria-label="外部链接标题" placeholder="例如：产品需求文档" />
-          </Form.Item>
-          <Form.Item name="url" label="URL" rules={[{ required: true, type: 'url', max: 4000 }]}>
-            <Input aria-label="外部链接 URL" placeholder="https://…" />
-          </Form.Item>
-          <Form.Item name="description" label="说明（可选）" rules={[{ max: 3000 }]}>
-            <Input.TextArea aria-label="外部链接说明" rows={3} />
-          </Form.Item>
-        </Form>
-      </Modal>
-      <Modal
-        title="修改 Resource Link"
-        open={Boolean(editingResourceLink)}
-        okText="保存"
-        cancelText="取消"
-        confirmLoading={updateResourceLink.isPending}
-        onCancel={() => setEditingResourceLink(null)}
-        onOk={() => void resourceLinkEditForm.validateFields().then((value) => updateResourceLink.mutate(value))}
-      >
-        <Form form={resourceLinkEditForm} layout="vertical">
-          <Form.Item name="title" label="标题" rules={[{ required: true, max: 200 }]}>
-            <Input aria-label="修改 Resource Link 标题" />
-          </Form.Item>
-          <Form.Item name="url" label="URL" rules={[{ required: true, type: 'url', max: 4000 }]}>
-            <Input aria-label="修改 Resource Link URL" />
-          </Form.Item>
-          <Form.Item name="description" label="说明" rules={[{ max: 3000 }]}>
-            <Input.TextArea aria-label="修改 Resource Link 说明" rows={3} />
-          </Form.Item>
-        </Form>
-      </Modal>
     </main>
   );
 }
@@ -639,7 +336,8 @@ export function ProjectMembersPage() {
   const [form] = Form.useForm<{ workspaceMembershipId: string; role: 'manager' | 'member' }>();
   const selectedWorkspaceMembershipId = Form.useWatch('workspaceMembershipId', form);
   const projectId = project?.id ?? '';
-  const canManage = project?.role === 'manager';
+  const canManage = project?.role === 'owner' || project?.role === 'manager';
+  const canChangeRoles = project?.role === 'owner';
   const activeWorkspaceMembershipIds = new Set(projectMembers.map((item) => item.workspaceMembershipId));
   const candidates = members.filter((item) => !activeWorkspaceMembershipIds.has(item.membershipId));
   const selectedCandidateIsAgent = candidates.find(
@@ -662,7 +360,7 @@ export function ProjectMembersPage() {
     onError: (error) => void message.error(errorMessage(error)),
   });
   const update = useMutation({
-    mutationFn: ({ member, role }: { member: ProjectMember; role: 'manager' | 'member' }) => {
+    mutationFn: ({ member, role }: { member: ProjectMember; role: ProjectMember['role'] }) => {
       if (!project) throw new Error('项目不存在。');
       return api.updateProjectMember(project.id, member.projectMembershipId, {
         role,
@@ -685,7 +383,7 @@ export function ProjectMembersPage() {
   return (
     <main className="page-scroll">
       <div className="page-header">
-        <div><Title level={2}>项目成员</Title><Text type="secondary">加入项目不会自动获得任何会话的查看权限。</Text></div>
+        <div><Text className="page-eyebrow">PROJECT</Text><Title level={2}>项目成员</Title><Text type="secondary">项目成员会自动进入主群；其他群聊按显式成员管理。</Text></div>
       </div>
       {canManage && (
         <Card style={{ marginBottom: 20 }}>
@@ -699,14 +397,14 @@ export function ProjectMembersPage() {
               <Select
                 showSearch
                 optionFilterProp="label"
-                placeholder="选择工作区成员或 Agent"
+                placeholder="选择成员或 Agent"
                 onChange={(workspaceMembershipId) => {
                   if (candidates.find((item) => item.membershipId === workspaceMembershipId)?.actorType === 'agent') {
                     form.setFieldValue('role', 'member');
                   }
                 }}
                 options={candidates.map((item) => ({
-                  label: `${item.displayName} · ${item.actorType}`,
+                  label: `${item.displayName} · ${item.actorType === 'agent' ? 'Agent' : '成员'}`,
                   value: item.membershipId,
                 }))}
               />
@@ -714,7 +412,7 @@ export function ProjectMembersPage() {
             <Form.Item name="role">
               <Select disabled={selectedCandidateIsAgent} style={{ width: 130 }} options={[
                 { label: '成员', value: 'member' },
-                { label: '管理员', value: 'manager' },
+                ...(canChangeRoles ? [{ label: '管理员', value: 'manager' as const }] : []),
               ]} />
             </Form.Item>
             <Button type="primary" htmlType="submit" loading={add.isPending}>添加</Button>
@@ -734,28 +432,29 @@ export function ProjectMembersPage() {
                     key="role"
                     size="small"
                     value={member.role}
-                    disabled={member.actorType === 'agent' || update.isPending}
+                    disabled={!canChangeRoles || member.actorType === 'agent' || member.role === 'owner' || update.isPending}
                     style={{ width: 110 }}
                     options={[
                       { label: '成员', value: 'member' },
                       { label: '管理员', value: 'manager' },
+                      { label: '转让所有权', value: 'owner' },
                     ]}
                     onChange={(role) => update.mutate({ member, role })}
                   />,
                   <Popconfirm
                     key="remove"
                     title="移出项目？"
-                    disabled={isSelf}
+                    disabled={isSelf || member.role === 'owner'}
                     onConfirm={() => remove.mutate(member)}
                   >
-                    <Button type="text" danger disabled={isSelf}>移除</Button>
+                    <Button type="text" danger disabled={isSelf || member.role === 'owner'}>移除</Button>
                   </Popconfirm>,
                 ] : []}
               >
                 <List.Item.Meta
                   avatar={<Avatar>{member.displayName.slice(0, 1).toUpperCase()}</Avatar>}
-                  title={<Space>{member.displayName}{isSelf && <Tag>you</Tag>}</Space>}
-                  description={`${member.actorType === 'agent' ? 'Agent' : 'Human'} · ${member.role}`}
+                  title={<Space>{member.displayName}{isSelf && <Tag>你</Tag>}</Space>}
+                  description={`${member.actorType === 'agent' ? 'Agent' : '成员'} · ${member.role === 'owner' ? '所有者' : member.role === 'manager' ? '管理员' : '成员'}`}
                 />
               </List.Item>
             );

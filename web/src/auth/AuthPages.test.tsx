@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ConfigProvider } from 'antd';
+import { App, ConfigProvider } from 'antd';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { LoginPage, RegisterPage, VerifyEmailPage } from './AuthPages';
+import { LoginPage, RegisterPage, VerifyEmailPage, WorkspaceJoinPage } from './AuthPages';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -94,5 +94,58 @@ describe('development email verification', () => {
     await user.click(screen.getByRole('button', { name: '重新发送验证码' }));
     expect(await screen.findByText('654321')).toBeVisible();
     expect(screen.queryByText('123456')).not.toBeInTheDocument();
+  });
+});
+
+describe('WorkspaceJoinPage', () => {
+  it('lets any signed-in user confirm a shared Workspace link and enter directly', async () => {
+    const workspaceId = '7f53df4b-b987-4caa-b14d-13529ff6593f';
+    const token = `anc_${'a'.repeat(43)}`;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const request = input as Request;
+      const url = new URL(request.url);
+      if (request.method === 'GET' && url.pathname === `/v1/workspace-join-links/${token}`) {
+        return new Response(JSON.stringify({
+          workspaceId,
+          workspaceName: 'Launch Team',
+          status: 'active',
+          alreadyMember: false,
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (request.method === 'POST' && url.pathname === `/v1/workspace-join-links/${token}/accept`) {
+        return new Response(JSON.stringify({
+          membershipId: '710fc34d-3142-4ed2-a5cd-a234398a5a57',
+          actorId: '3d93162a-97fa-449e-836d-091eaf1da6e7',
+          actorType: 'human',
+          displayName: 'Bob',
+          membershipRole: 'member',
+          revision: 1,
+          joinedAt: Date.now(),
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(
+      <ConfigProvider>
+        <App>
+          <QueryClientProvider client={queryClient}>
+            <MemoryRouter initialEntries={[`/join/${token}`]}>
+              <Routes>
+                <Route path="/join/:token" element={<WorkspaceJoinPage />} />
+                <Route path="/w/:workspaceId" element={<div>Workspace 已打开</div>} />
+              </Routes>
+            </MemoryRouter>
+          </QueryClientProvider>
+        </App>
+      </ConfigProvider>,
+    );
+
+    expect(await screen.findByText('加入 Launch Team')).toBeVisible();
+    expect(screen.getByText(/不会向 Owner 暴露你的注册邮箱/)).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: '确认加入' }));
+    expect(await screen.findByText('Workspace 已打开')).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

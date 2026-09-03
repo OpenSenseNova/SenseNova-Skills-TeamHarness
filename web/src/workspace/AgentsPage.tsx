@@ -37,8 +37,9 @@ export function AgentsPage() {
     <main className="page-scroll agent-directory-page">
       <div className="page-header agent-directory-header">
         <div>
-          <Title level={2}>AGENTS</Title>
-          <Text type="secondary">创建 Agent，并为它选择运行的计算机和运行时。</Text>
+          <Text className="page-eyebrow">TEAM</Text>
+          <Title level={2}>Agent</Title>
+          <Text type="secondary">把需要持续协作的任务交给本地 Agent，并随时查看它的运行状态。</Text>
         </div>
         <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
           创建 Agent
@@ -46,9 +47,9 @@ export function AgentsPage() {
       </div>
 
       <div className="agent-directory-summary">
-        <Card size="small" variant="borderless"><Text type="secondary">全部</Text><strong>{agents.length}</strong></Card>
+        <Card size="small" variant="borderless"><Text type="secondary">Agent 总数</Text><strong>{agents.length}</strong></Card>
         <Card size="small" variant="borderless"><Text type="secondary">可用</Text><strong>{active}</strong></Card>
-        <Card size="small" variant="borderless"><Text type="secondary">已连接</Text><strong>{connected}</strong></Card>
+        <Card size="small" variant="borderless"><Text type="secondary">本地在线</Text><strong>{connected}</strong></Card>
       </div>
 
       {agents.length ? (
@@ -77,7 +78,7 @@ export function AgentsPage() {
                   icon={<ArrowRightOutlined />}
                   onClick={() => navigate(`/w/${workspace.id}/agents/${agent.id}`)}
                 >
-                  资料
+                  查看详情
                 </Button>,
               ]}
             >
@@ -88,7 +89,7 @@ export function AgentsPage() {
                     <Title level={4}>{agent.name}</Title>
                     <Tag color={lifecycleColor(agent.lifecycleStatus)}>{lifecycleLabel(agent.lifecycleStatus)}</Tag>
                   </Space>
-                  <Text type="secondary" ellipsis>{agent.description || '暂无描述'}</Text>
+                  <Text type="secondary" ellipsis>{agent.description || '还没有描述'}</Text>
                 </div>
               </div>
               <div className={agent.runtimeBinding ? `agent-runtime-summary${runtimeConnected ? ' connected' : ''}` : 'agent-runtime-summary unbound'}>
@@ -99,7 +100,7 @@ export function AgentsPage() {
                     <Text type="secondary">{agent.runtimeBinding.computerName} · {runtimeConnected ? '已连接' : '离线'}</Text>
                   </div>
                 ) : (
-                  <div><Text strong>未连接</Text><Text type="secondary">选择计算机和运行时</Text></div>
+                  <div><Text strong>尚未连接</Text><Text type="secondary">选择一台在线计算机和本地 Agent</Text></div>
                 )}
               </div>
             </Card>
@@ -110,7 +111,7 @@ export function AgentsPage() {
         <Card className="surface-card agent-empty-card" variant="borderless">
           <Empty
             image={<RobotOutlined className="agent-empty-icon" />}
-            description={<Space orientation="vertical" size={2}><Text strong>还没有 Agent</Text><Text type="secondary">创建一个 Agent 开始协作。</Text></Space>}
+            description={<Space orientation="vertical" size={2}><Text strong>还没有 Agent</Text><Text type="secondary">连接一台本地计算机后，就可以创建第一个 Agent。</Text></Space>}
           >
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>创建第一个 Agent</Button>
           </Empty>

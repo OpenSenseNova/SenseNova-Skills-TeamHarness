@@ -23,12 +23,14 @@ const attemptId = 'ce5471f8-2035-441c-9c46-7bfcb0e8351b';
 const projectId = '8b9eb173-8812-4cc3-99fd-76bf483c0f7e';
 const runtimeConfiguration: NonNullable<Computer['runtimes'][number]['configuration']> = {
   models: [
-    { id: 'gpt-5.6-codex', label: 'GPT-5.6 Codex', description: null, supportedReasoningEfforts: ['medium', 'high'] },
+    { id: 'gpt-5.6-codex', label: 'GPT-5.6 Codex', description: null, supportedReasoningEfforts: ['medium', 'high', 'ultra'] },
+    { id: 'gpt-5.4', label: 'GPT-5.4', description: null, supportedReasoningEfforts: ['medium', 'high'] },
   ],
   defaultModelId: 'gpt-5.6-codex',
   reasoningEfforts: [
     { id: 'medium', label: 'Medium', description: null },
     { id: 'high', label: 'High', description: null },
+    { id: 'ultra', label: 'Ultra', description: null },
   ],
   defaultReasoningEffort: 'medium',
   modes: [
@@ -136,11 +138,13 @@ describe('Agent runtime flow', () => {
       queryClient,
     );
 
-    const dialog = await screen.findByRole('dialog', { name: '创建 AGENT' });
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '计算机' })).toBeEnabled());
-    await waitFor(() => expect(screen.getByRole('combobox', { name: /模型/ })).toBeEnabled());
-    expect(screen.getByRole('combobox', { name: /推理强度/ })).toBeEnabled();
-    expect(screen.getByRole('combobox', { name: /运行模式/ })).toBeEnabled();
+    const dialog = await screen.findByRole('dialog', { name: '创建 Agent' });
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: '计算机' })).toBeEnabled();
+      expect(screen.getByRole('combobox', { name: /模型/ })).toBeEnabled();
+      expect(screen.getByRole('combobox', { name: /推理强度/ })).toBeEnabled();
+      expect(screen.getByRole('combobox', { name: /运行模式/ })).toBeEnabled();
+    }, { timeout: 5_000 });
     await userEvent.type(screen.getByRole('textbox', { name: '名称' }), 'Researcher');
     await userEvent.type(screen.getByRole('textbox', { name: /描述/ }), '负责检索和核对资料');
     const submit = screen.getByRole('button', { name: /创建 Agent/i });
@@ -159,6 +163,31 @@ describe('Agent runtime flow', () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['workspace', workspaceId, 'agents'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['workspace', workspaceId, 'members'] });
     expect(dialog).not.toBeInTheDocument();
+  });
+
+  it('only offers reasoning efforts supported by the selected model', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const request = input as Request;
+      return new URL(request.url).pathname === '/v1/computers'
+        ? json({ items: [computer] })
+        : new Response(null, { status: 404 });
+    }));
+
+    renderApp(
+      <MemoryRouter>
+        <AgentCreateModal workspaceId={workspaceId} open onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+
+    const model = await screen.findByRole('combobox', { name: /模型/ });
+    await waitFor(() => expect(model).toBeEnabled());
+    await userEvent.click(model);
+    await userEvent.click(await screen.findByText('GPT-5.4'));
+    const reasoning = screen.getByRole('combobox', { name: /推理强度/ });
+    await userEvent.click(reasoning);
+    expect(await screen.findByRole('option', { name: 'Medium' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'High' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Ultra' })).not.toBeInTheDocument();
   });
 
   it('still offers adding another Computer when every existing Computer is offline', async () => {
@@ -253,8 +282,9 @@ describe('Agent runtime flow', () => {
     await userEvent.click(helpButton);
 
     expect(await screen.findByText('让计算机重新上线')).toBeInTheDocument();
+    expect(screen.getByText('anc-computer service install')).toBeInTheDocument();
     expect(screen.getByText('anc-computer run')).toBeInTheDocument();
-    expect(screen.getByText(/保持客户端运行/)).toBeInTheDocument();
+    expect(screen.getByText(/登录这台计算机时自动启动/)).toBeInTheDocument();
     expect(screen.getByText(/ANC_SERVER_URL and ANC_COMPUTER_TOKEN are required/)).toBeInTheDocument();
     expect(screen.getByText(/downloads\/anc-local-computer\.tgz/)).toBeInTheDocument();
   });
@@ -271,11 +301,42 @@ describe('Agent runtime flow', () => {
         return json({ agentId, deletedAt: Date.now() });
       }
       if (url.pathname === `/v1/workspaces/${workspaceId}/agents/${agentId}`) return json(agent);
+      if (url.pathname === `/v1/workspaces/${workspaceId}/agent-activity`) return json({ items: [{
+        eventId: 'a3d854d1-78b0-45f4-91b0-3cc063d5f75f',
+        turnId: 'f9060bb0-85f8-468b-809d-91cad3b8a385',
+        workspaceId,
+        agentId,
+        agentName: 'Researcher',
+        sequence: 3,
+        eventType: 'tool',
+        title: '正在检索项目文件',
+        status: 'in_progress',
+        turnStatus: 'active',
+        turnStartedAt: 4_100,
+        turnUpdatedAt: 4_200,
+        turnFinishedAt: null,
+        createdAt: 4_200,
+      }, {
+        eventId: '5a018ca1-03c8-4f5e-8acc-51841dfc7111',
+        turnId: 'f9060bb0-85f8-468b-809d-91cad3b8a385',
+        workspaceId,
+        agentId,
+        agentName: 'Researcher',
+        sequence: 2,
+        eventType: 'plan',
+        title: '计划：核对第二批资料',
+        status: 'in_progress',
+        turnStatus: 'active',
+        turnStartedAt: 4_100,
+        turnUpdatedAt: 4_200,
+        turnFinishedAt: null,
+        createdAt: 4_150,
+      }] });
       if (url.pathname === `/v1/projects/${projectId}/conversations`) return json({ items: [{
         id: conversationId,
         workspaceId,
         projectId,
-        kind: 'channel',
+        kind: 'channel', visibility: 'public', accessMode: 'content',
         title: 'all',
         contextVersion: 2,
         timelineFrontier: 2,
@@ -342,8 +403,40 @@ describe('Agent runtime flow', () => {
         createdAt: 2_500,
         updatedAt: 3_000,
         terminalAt: 3_000,
+      }, {
+        id: 'b209b68f-8170-4dd0-8d7b-f80041795101',
+        workspaceId,
+        sourceMessageId: '93a41120-33f0-45ea-a5e3-2af49c600cf9',
+        targetAgentId: agentId,
+        resultConversationId: conversationId,
+        resultThreadId: null,
+        status: 'accepted',
+        version: 2,
+        intake: null,
+        terminalReason: null,
+        run: null,
+        createdAt: 3_500,
+        updatedAt: 4_000,
       }] });
       if (url.pathname === `/v1/conversations/${conversationId}/messages`) return json({ items: [{
+        id: '93a41120-33f0-45ea-a5e3-2af49c600cf9',
+        workspaceId,
+        conversationId,
+        threadId: null,
+        threadRootMessageId: null,
+        authorActorId: humanId,
+        authorMembershipId: '5f9195bf-903d-480d-90eb-5404dc4eefb4',
+        authorActorType: 'human',
+        authorDisplayName: 'Alice',
+        authorDeleted: false,
+        body: '请继续检查第二批资料。',
+        conversationVersion: 3,
+        scopePosition: 3,
+        producingRunId: null,
+        producingAttemptId: null,
+        mentionOutcomes: [],
+        createdAt: 3_500,
+      }, {
         id: '4a30761e-e4c0-4f26-a4c3-78ba53cc259f',
         workspaceId,
         conversationId,
@@ -402,10 +495,6 @@ describe('Agent runtime flow', () => {
         governanceOnly: false,
         activeMemberCount: 2,
         conversationCount: 1,
-        repository: null,
-        connectedComputerCount: 0,
-        readyComputerCount: 0,
-        workingCopySummary: 'not_connected',
         createdByMembershipId: '5f9195bf-903d-480d-90eb-5404dc4eefb4',
         createdAt: 1,
         updatedAt: 1,
@@ -447,20 +536,29 @@ describe('Agent runtime flow', () => {
     expect(screen.getByText('模型')).toBeVisible();
     expect(screen.getByText('推理强度')).toBeVisible();
     expect(screen.getByText('模式')).toBeVisible();
-    expect(screen.getByText('gpt-5.6-codex（Runtime 默认）')).toBeVisible();
-    expect(screen.getByText('medium（Runtime 默认）')).toBeVisible();
-    expect(screen.getByText('default（Runtime 默认）')).toBeVisible();
+    expect(screen.getByText('gpt-5.6-codex（本地 Agent 默认）')).toBeVisible();
+    expect(screen.getByText('medium（本地 Agent 默认）')).toBeVisible();
+    expect(screen.getByText('default（本地 Agent 默认）')).toBeVisible();
     expect(screen.queryByRole('button', { name: '如何让 Alice Mac 上线' })).not.toBeInTheDocument();
     expect(openDirectMessage).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: '停用' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /删除 Agent/ })).toBeVisible();
 
     await userEvent.click(screen.getByRole('tab', { name: '动态' }));
+    expect(await screen.findByText('执行动态')).toBeVisible();
+    expect(screen.getByText('正在检索项目文件')).toBeVisible();
+    expect(screen.getByText('计划：核对第二批资料')).toBeVisible();
     expect(await screen.findByText('Artifact current version changed during return.')).toBeVisible();
-    expect(await screen.findByText('已向 Conversation 返回 1 条消息')).toBeVisible();
-    expect(screen.getByText('资料已经核对完成，结果已发送到 Conversation。')).toBeVisible();
-    expect(screen.getAllByText(/#all/)).toHaveLength(2);
-    await userEvent.click(screen.getAllByRole('button', { name: '查看 Conversation' })[0]!);
+    expect(await screen.findByText('Agent 已发送 1 条回复')).toBeVisible();
+    expect(screen.getByText('Agent 回复：资料已经核对完成，结果已发送到 Conversation。')).toBeVisible();
+    const receivedTitle = screen.getByText('Agent 已收到消息');
+    expect(receivedTitle).toBeVisible();
+    expect(screen.getByText('Alice：请继续检查第二批资料。')).toBeVisible();
+    const activityList = receivedTitle.closest('.agent-activity-list');
+    expect(activityList).toBeInstanceOf(HTMLElement);
+    expect(within(activityList as HTMLElement).queryByText(/Inbox|Run|Attempt|Runtime|ACP/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/#all/)).toHaveLength(3);
+    await userEvent.click(screen.getAllByRole('button', { name: '查看会话' })[0]!);
     expect(await screen.findByText('Project Conversation 已打开')).toBeVisible();
   });
 

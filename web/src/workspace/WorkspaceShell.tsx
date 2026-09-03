@@ -2,18 +2,22 @@ import {
   CheckOutlined,
   DownOutlined,
   FileOutlined,
+  FolderOpenOutlined,
   FolderOutlined,
   InboxOutlined,
+  LockOutlined,
   LoadingOutlined,
   LogoutOutlined,
   MenuUnfoldOutlined,
   MessageOutlined,
   PlusOutlined,
+  ProjectOutlined,
   RobotOutlined,
   RollbackOutlined,
   SettingOutlined,
   TeamOutlined,
   UserOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -33,7 +37,6 @@ import {
   Select,
   Space,
   Spin,
-  Tabs,
   Tooltip,
   Typography,
 } from 'antd';
@@ -43,36 +46,29 @@ import {
   api,
   ApiError,
   errorMessage,
+  type AgentActivityEvent,
   type AgentRequest,
   type Conversation,
   type CreateProjectInput,
   type Human,
+  type Project,
 } from '../api/client';
 import { sessionQueryKey } from '../app';
 import { WorkspaceContext, type WorkspaceContextValue, useWorkspace, workspaceKeys } from './workspace-context';
 import { ArtifactsPanel } from './ArtifactsPanel';
+import { agentActivityIcon, agentActivityTone } from './agent-activity-presentation';
+import { readArchivedProjectIds, writeArchivedProjectIds } from './project-archive';
+import { ThemeToggleButton, useThemeMode } from '../theme';
+import { loadAllPages } from '../lib/pagination';
 
 const { Sider, Content } = Layout;
 const { Text, Title } = Typography;
 
-async function loadAll<T>(loader: (cursor?: string) => Promise<{ items: T[]; nextCursor: string | null }>): Promise<T[]> {
-  const items: T[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await loader(cursor);
-    items.push(...page.items);
-    cursor = page.nextCursor ?? undefined;
-  } while (cursor);
-  return items;
-}
-
 function agentActivityLabel(request: AgentRequest): string {
-  if (request.run?.status === 'active') return '正在执行…';
-  if (request.intake?.reasons.includes('runtime_unavailable')) return '等待运行时上线…';
-  if (request.intake?.reasons.includes('project_working_copy_unavailable')) return '等待连接仓库…';
+  if (request.intake?.reasons.includes('runtime_unavailable')) return '等待本地 Agent 上线…';
   if (request.intake?.reasons.includes('agent_suspended')) return 'Agent 已暂停';
   if (request.intake?.reasons.includes('authority_revoked')) return '当前会话不可用';
-  return '等待执行…';
+  return '有待处理消息…';
 }
 
 function useWorkspaceChanges(workspaceId: string, initialCursor: number | undefined) {
@@ -105,14 +101,14 @@ function useWorkspaceChanges(workspaceId: string, initialCursor: number | undefi
       }
       if (sourceType === 'agent') await queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(workspaceId) });
       if (sourceType === 'artifact') {
-        await queryClient.invalidateQueries({ queryKey: ['workspace', workspaceId, 'artifacts'] });
-        await queryClient.invalidateQueries({ queryKey: ['artifact'] });
+        if (projectId) await queryClient.invalidateQueries({ queryKey: workspaceKeys.projectArtifacts(projectId) });
+        await queryClient.invalidateQueries({ queryKey: ['artifact-v2'] });
       }
       if (sourceType === 'workspace_membership') {
         await queryClient.invalidateQueries({ queryKey: workspaceKeys.members(workspaceId) });
         await queryClient.invalidateQueries({ queryKey: ['conversation'] });
       }
-      if (sourceType === 'project' || sourceType === 'project_membership' || sourceType === 'project_working_copy') {
+      if (sourceType === 'project' || sourceType === 'project_membership') {
         await queryClient.invalidateQueries({ queryKey: workspaceKeys.projects(workspaceId) });
         if (sourceType === 'project_membership') {
           await queryClient.invalidateQueries({ queryKey: ['conversation'] });
@@ -120,10 +116,12 @@ function useWorkspaceChanges(workspaceId: string, initialCursor: number | undefi
         if (projectId) {
           await queryClient.invalidateQueries({ queryKey: workspaceKeys.project(projectId) });
           await queryClient.invalidateQueries({ queryKey: workspaceKeys.projectMembers(projectId) });
-          await queryClient.invalidateQueries({ queryKey: workspaceKeys.projectWorkingCopies(projectId) });
         }
       }
-      if (sourceType === 'workspace_invitation') await queryClient.invalidateQueries({ queryKey: workspaceKeys.invitations(workspaceId) });
+      if (sourceType === 'work_item' && projectId) {
+        await queryClient.invalidateQueries({ queryKey: workspaceKeys.projectWorkItems(projectId) });
+      }
+      if (sourceType === 'workspace_join_link') await queryClient.invalidateQueries({ queryKey: workspaceKeys.joinLinks(workspaceId) });
       if (sourceType === 'workspace') {
         await queryClient.invalidateQueries({ queryKey: workspaceKeys.bootstrap(workspaceId) });
         await queryClient.invalidateQueries({ queryKey: workspaceKeys.list });
@@ -162,7 +160,7 @@ export function WorkspaceEntry() {
   const queryClient = useQueryClient();
   const workspaces = useQuery({
     queryKey: workspaceKeys.list,
-    queryFn: () => loadAll(api.listWorkspaces),
+    queryFn: () => loadAllPages(api.listWorkspaces),
   });
   const create = useMutation({
     mutationFn: (name: string) => api.createWorkspace(name),
@@ -181,15 +179,22 @@ export function WorkspaceEntry() {
   }
   return (
     <main className="full-page-center page-background">
+      <ThemeToggleButton className="entry-theme-toggle" compact />
       <Card className="empty-workspace" variant="borderless">
-        <RobotOutlined style={{ fontSize: 42, color: '#4f6ef7' }} />
-        <Title level={2}>创建第一个 Workspace</Title>
-        <Text type="secondary">Workspace 用来组织成员、Agent 和共享 Conversation。</Text>
+        <span className="empty-workspace-icon"><RobotOutlined /></span>
+        <Text className="page-eyebrow">AI NATIVE COLLABORATION</Text>
+        <Title level={2}>创建你的第一个 Workspace</Title>
+        <Text type="secondary">邀请团队成员，连接本地 Agent，把讨论、任务和交付物放在一起。</Text>
+        <div className="onboarding-steps" aria-label="开始使用的步骤">
+          <div><span>1</span><Text>创建工作区</Text></div>
+          <div><span>2</span><Text>邀请成员</Text></div>
+          <div><span>3</span><Text>连接 Agent</Text></div>
+        </div>
         <Form form={form} layout="vertical" style={{ marginTop: 28 }} onFinish={({ name }) => create.mutate(name)}>
-          <Form.Item name="name" label="Workspace 名称" rules={[{ required: true, max: 120 }]}>
-            <Input size="large" placeholder="例如：产品团队" />
+          <Form.Item name="name" label="Workspace 名称" rules={[{ required: true, max: 120, whitespace: true }]}>
+            <Input size="large" placeholder="例如：产品团队" autoFocus />
           </Form.Item>
-          <Button type="primary" htmlType="submit" size="large" block loading={create.isPending}>创建 Workspace</Button>
+          <Button type="primary" htmlType="submit" size="large" block loading={create.isPending}>创建 Workspace，开始协作</Button>
         </Form>
         {create.error && <Text type="danger">{errorMessage(create.error)}</Text>}
       </Card>
@@ -198,7 +203,7 @@ export function WorkspaceEntry() {
 }
 
 export function WorkspaceHome() {
-  const { workspace, conversations, agents, openNewConversation } = useWorkspace();
+  const { workspace, conversations, agents } = useWorkspace();
   const navigate = useNavigate();
   if (conversations.length > 0) {
     return <Navigate to={`/w/${workspace.id}/c/${conversations[0]!.id}`} replace />;
@@ -207,23 +212,152 @@ export function WorkspaceHome() {
   return (
     <main className="full-page-center page-background workspace-home">
       <Card className="empty-workspace" variant="borderless">
-        <MessageOutlined style={{ fontSize: 42, color: '#4f6ef7' }} />
+        <span className="empty-workspace-icon"><MessageOutlined /></span>
+        <Text className="page-eyebrow">WORKSPACE</Text>
         <Title level={2}>{workspace.name} 已准备好</Title>
         <Text type="secondary">
-          这个 Workspace 还没有 Conversation。创建第一个 Conversation 后，就可以邀请成员或请求 Agent 协作。
+          这里还没有团队会话。你可以先创建项目、邀请成员，或连接一个本地 Agent。
         </Text>
+        <div className="workspace-home-summary">
+          <span><strong>{activeAgents}</strong> 个可用 Agent</span>
+          <span><strong>{agents.length}</strong> 个 Agent 总数</span>
+        </div>
         <Space orientation="vertical" size="middle" style={{ width: '100%', marginTop: 28 }}>
-          <Button type="primary" size="large" icon={<PlusOutlined />} block onClick={openNewConversation}>
-            新建 Conversation
+          <Button type="primary" size="large" icon={<FolderOutlined />} block onClick={() => navigate(`/w/${workspace.id}/projects`)}>
+              查看项目
           </Button>
           {activeAgents === 0 && (
             <Button size="large" icon={<RobotOutlined />} block onClick={() => navigate(`/w/${workspace.id}/agents`)}>
-              先创建 Agent
+              连接本地 Agent
             </Button>
           )}
         </Space>
       </Card>
     </main>
+  );
+}
+
+function ProjectTreeNode({
+  project,
+  expanded,
+  activeProjectId,
+  selectedConversationId,
+  selectedKey,
+  onToggle,
+  onNavigate,
+  onNewConversation,
+}: {
+  project: Project;
+  expanded: boolean;
+  activeProjectId: string | undefined;
+  selectedConversationId: string | null;
+  selectedKey: string;
+  onToggle: () => void;
+  onNavigate: (path: string) => void;
+  onNewConversation: () => void;
+}) {
+  const conversations = useQuery({
+    queryKey: workspaceKeys.projectConversations(project.id),
+    queryFn: () => loadAllPages((cursor) => api.listProjectConversations(project.id, cursor)),
+    enabled: expanded,
+  });
+  const channels = (conversations.data ?? []).filter((conversation) => conversation.kind === 'channel');
+
+  return (
+    <div className="project-tree-node">
+      <div className="project-tree-row">
+        <button
+          type="button"
+          className={activeProjectId === project.id ? 'sidebar-row project-tree-toggle active-soft' : 'sidebar-row project-tree-toggle'}
+          aria-expanded={expanded}
+          aria-label={`${expanded ? '收起' : '展开'}项目 ${project.name}`}
+          onClick={onToggle}
+        >
+          <DownOutlined className={expanded ? 'project-tree-chevron expanded' : 'project-tree-chevron'} />
+          <span className="sidebar-row-icon">{expanded ? <FolderOpenOutlined /> : <FolderOutlined />}</span>
+          <span className="sidebar-row-label">{project.name}</span>
+        </button>
+        {project.role !== null && (
+          <Tooltip title={`在 ${project.name} 中新建群聊`}>
+            <Button
+              type="text"
+              size="small"
+              aria-label={`在 ${project.name} 中新建群聊`}
+              icon={<PlusOutlined />}
+              onClick={onNewConversation}
+            />
+          </Tooltip>
+        )}
+      </div>
+      {expanded && (
+        <div className="project-tree-children" role="group" aria-label={`${project.name} 项目内容`}>
+          {conversations.isPending ? (
+            <div className="project-tree-loading"><LoadingOutlined spin /> 加载群聊…</div>
+          ) : conversations.isError ? (
+            <div className="sidebar-empty">群聊加载失败，请稍后重试</div>
+          ) : (
+            <>
+              {channels.map((conversation) => (
+                <button
+                  type="button"
+                  key={conversation.id}
+                  className={selectedConversationId === conversation.id ? 'sidebar-row project-tree-child active' : 'sidebar-row project-tree-child'}
+                  onClick={() => onNavigate(`/p/${project.id}/c/${conversation.id}`)}
+                >
+                  <span className="sidebar-row-icon">#</span>
+                  <span className="sidebar-row-label">{conversation.title || '未命名群聊'}</span>
+                </button>
+              ))}
+              {!channels.length && <div className="project-tree-empty">还没有项目会话</div>}
+            </>
+          )}
+          <button
+            type="button"
+            aria-label="资源"
+            className={activeProjectId === project.id && selectedKey === 'project-resources'
+              ? 'sidebar-row project-tree-child active'
+              : 'sidebar-row project-tree-child'}
+            onClick={() => onNavigate(`/p/${project.id}/resources`)}
+          >
+            <span className="sidebar-row-icon"><FolderOpenOutlined /></span>
+            <span className="sidebar-row-label">资源</span>
+          </button>
+          <button
+            type="button"
+            aria-label="项目成员"
+            className={activeProjectId === project.id && selectedKey === 'project-members'
+              ? 'sidebar-row project-tree-child active'
+              : 'sidebar-row project-tree-child'}
+            onClick={() => onNavigate(`/p/${project.id}/members`)}
+          >
+            <span className="sidebar-row-icon"><TeamOutlined /></span>
+            <span className="sidebar-row-label">项目成员</span>
+          </button>
+          <button
+            type="button"
+            aria-label="任务看板"
+            className={activeProjectId === project.id && selectedKey === 'project-work-items'
+              ? 'sidebar-row project-tree-child active'
+              : 'sidebar-row project-tree-child'}
+            onClick={() => onNavigate(`/p/${project.id}/work-items`)}
+          >
+            <span className="sidebar-row-icon"><ProjectOutlined /></span>
+            <span className="sidebar-row-label">任务看板</span>
+          </button>
+          <button
+            type="button"
+            aria-label="设置"
+            className={activeProjectId === project.id && selectedKey === 'project-settings'
+              ? 'sidebar-row project-tree-child active'
+              : 'sidebar-row project-tree-child'}
+            onClick={() => onNavigate(`/p/${project.id}`)}
+          >
+            <span className="sidebar-row-icon"><SettingOutlined /></span>
+            <span className="sidebar-row-label">设置</span>
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -233,35 +367,49 @@ export function WorkspaceShell() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const { message } = App.useApp();
+  const { isDark } = useThemeMode();
   const screens = Grid.useBreakpoint();
   const desktop = screens.lg ?? false;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [artifactsOpen, setArtifactsOpen] = useState(false);
   const [conversationModal, setConversationModal] = useState(false);
+  const [conversationProjectId, setConversationProjectId] = useState<string>();
   const [archivedModal, setArchivedModal] = useState(false);
   const [projectModal, setProjectModal] = useState(false);
-  const [projectCreateMode, setProjectCreateMode] = useState<'remote' | 'local'>('remote');
-  const localProjectBaseline = useRef<Set<string>>(new Set());
+  const [archivedProjectIds, setArchivedProjectIds] = useState<Set<string>>(
+    () => readArchivedProjectIds(workspaceId),
+  );
+  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem(`anc:expanded-projects:${workspaceId}`);
+      return new Set(stored ? JSON.parse(stored) as string[] : []);
+    } catch {
+      return new Set();
+    }
+  });
   const [workspaceModal, setWorkspaceModal] = useState(false);
-  const [conversationForm] = Form.useForm<{ title: string }>();
+  const [conversationForm] = Form.useForm<{
+    title: string;
+    participantProjectMembershipIds: string[];
+  }>();
   const [projectForm] = Form.useForm<CreateProjectInput>();
   const [workspaceForm] = Form.useForm<{ name: string }>();
   const selectedConversationId = location.pathname.match(/\/c\/([^/]+)/)?.[1] ?? null;
 
   const session = queryClient.getQueryData<Human>(sessionQueryKey)!;
-  const workspaceList = useQuery({ queryKey: workspaceKeys.list, queryFn: () => loadAll(api.listWorkspaces) });
+  const workspaceList = useQuery({ queryKey: workspaceKeys.list, queryFn: () => loadAllPages(api.listWorkspaces) });
   const bootstrap = useQuery({
     queryKey: workspaceKeys.bootstrap(workspaceId),
     queryFn: () => api.bootstrapWorkspace(workspaceId),
   });
   const members = useQuery({
     queryKey: workspaceKeys.members(workspaceId),
-    queryFn: () => loadAll((cursor) => api.listMembers(workspaceId, cursor)),
+    queryFn: () => loadAllPages((cursor) => api.listMembers(workspaceId, cursor)),
     enabled: bootstrap.isSuccess,
   });
   const agents = useQuery({
     queryKey: workspaceKeys.agents(workspaceId),
-    queryFn: () => loadAll((cursor) => api.listAgents(workspaceId, cursor)),
+    queryFn: () => loadAllPages((cursor) => api.listAgents(workspaceId, cursor)),
     enabled: bootstrap.isSuccess,
   });
   const computers = useQuery({
@@ -272,12 +420,12 @@ export function WorkspaceShell() {
   });
   const conversations = useQuery({
     queryKey: workspaceKeys.conversations(workspaceId),
-    queryFn: () => loadAll((cursor) => api.listConversations(workspaceId, cursor)),
+    queryFn: () => loadAllPages((cursor) => api.listConversations(workspaceId, cursor)),
     enabled: bootstrap.isSuccess,
   });
   const projects = useQuery({
     queryKey: workspaceKeys.projects(workspaceId),
-    queryFn: () => loadAll((cursor) => api.listProjects(workspaceId, cursor)),
+    queryFn: () => loadAllPages((cursor) => api.listProjects(workspaceId, cursor)),
     enabled: bootstrap.isSuccess,
   });
   const project = useQuery({
@@ -287,30 +435,42 @@ export function WorkspaceShell() {
   });
   const projectMembers = useQuery({
     queryKey: workspaceKeys.projectMembers(projectId ?? ''),
-    queryFn: () => loadAll((cursor) => api.listProjectMembers(projectId!, cursor)),
+    queryFn: () => loadAllPages((cursor) => api.listProjectMembers(projectId!, cursor)),
     enabled: project.isSuccess && !project.data.governanceOnly,
   });
   const projectConversations = useQuery({
     queryKey: workspaceKeys.projectConversations(projectId ?? ''),
-    queryFn: () => loadAll((cursor) => api.listProjectConversations(projectId!, cursor)),
+    queryFn: () => loadAllPages((cursor) => api.listProjectConversations(projectId!, cursor)),
     enabled: project.isSuccess && !project.data.governanceOnly,
+  });
+  const conversationProjectMembers = useQuery({
+    queryKey: workspaceKeys.projectMembers(conversationProjectId ?? ''),
+    queryFn: () => loadAllPages((cursor) => api.listProjectMembers(conversationProjectId!, cursor)),
+    enabled: conversationModal && Boolean(conversationProjectId),
   });
   const archivedConversations = useQuery({
     queryKey: projectId
       ? workspaceKeys.projectArchivedConversations(projectId)
       : workspaceKeys.archivedConversations(workspaceId),
-    queryFn: () => loadAll((cursor) => projectId
+    queryFn: () => loadAllPages((cursor) => projectId
       ? api.listProjectConversations(projectId, cursor, 'archived')
       : api.listConversations(workspaceId, cursor, 'archived')),
     enabled: archivedModal && bootstrap.isSuccess && (!projectId || (project.isSuccess && !project.data.governanceOnly)),
   });
+  const currentConversations = projectId ? (projectConversations.data ?? []) : (conversations.data ?? []);
+  const selectedConversation = currentConversations.find((item) => item.id === selectedConversationId);
   const agentRequests = useQuery({
     queryKey: ['conversation', selectedConversationId, 'requests'],
     queryFn: () => api.listAgentRequests(selectedConversationId!).then((page) => page.items),
-    enabled: bootstrap.isSuccess && selectedConversationId !== null,
+    enabled: bootstrap.isSuccess && selectedConversationId !== null && selectedConversation?.accessMode === 'content',
     refetchInterval: 2_000,
   });
-  const currentConversations = projectId ? (projectConversations.data ?? []) : (conversations.data ?? []);
+  const agentActivity = useQuery({
+    queryKey: ['workspace', workspaceId, 'agent-activity'],
+    queryFn: () => api.listAgentActivity(workspaceId).then((page) => page.items),
+    enabled: bootstrap.isSuccess,
+    refetchInterval: 1_000,
+  });
   const workspaceDirectConversations = (conversations.data ?? []).filter((conversation) => conversation.kind === 'dm');
   const directConversationIds = workspaceDirectConversations.map((conversation) => conversation.id);
   const directMessageParticipants = useQuery({
@@ -323,33 +483,46 @@ export function WorkspaceShell() {
   });
   useWorkspaceChanges(workspaceId, bootstrap.data?.changeCursor);
   useEffect(() => {
-    if (!projectModal || projectCreateMode !== 'local') return;
-    const created = (projects.data ?? []).find((item) => (
-      !item.governanceOnly && !localProjectBaseline.current.has(item.id)
-    ));
-    if (!created) return;
-    setProjectModal(false);
-    navigate(`/w/${workspaceId}/p/${created.id}`);
-  }, [projectCreateMode, projectModal, projects.data, navigate, workspaceId]);
+    if (!projectId) return;
+    setExpandedProjectIds((current) => {
+      if (current.has(projectId)) return current;
+      return new Set(current).add(projectId);
+    });
+  }, [projectId]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(`anc:expanded-projects:${workspaceId}`);
+      const next = new Set(stored ? JSON.parse(stored) as string[] : []);
+      if (projectId) next.add(projectId);
+      setExpandedProjectIds(next);
+    } catch {
+      setExpandedProjectIds(new Set());
+    }
+  }, [projectId, workspaceId]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      `anc:expanded-projects:${workspaceId}`,
+      JSON.stringify([...expandedProjectIds]),
+    );
+  }, [expandedProjectIds, workspaceId]);
 
   const createConversation = useMutation({
-    mutationFn: (value: { title: string }) => projectId
-      ? api.createProjectConversation(projectId, {
-          kind: 'channel',
-          title: value.title.trim(),
-        })
-      : api.createConversation(workspaceId, {
-          kind: 'channel',
-          title: value.title.trim(),
-        }),
+    mutationFn: (value: { title: string; participantProjectMembershipIds: string[] }) => {
+      if (!conversationProjectId) throw new Error('请先选择 Project。');
+      return api.createProjectConversation(conversationProjectId, {
+        kind: 'channel',
+        title: value.title.trim(),
+        participantProjectMembershipIds: value.participantProjectMembershipIds,
+      });
+    },
     onSuccess: async (conversation) => {
       setConversationModal(false);
       conversationForm.resetFields();
-      await queryClient.invalidateQueries({ queryKey: workspaceKeys.conversations(workspaceId) });
-      if (projectId) await queryClient.invalidateQueries({ queryKey: workspaceKeys.projectConversations(projectId) });
-      navigate(projectId
-        ? `/w/${workspaceId}/p/${projectId}/c/${conversation.id}`
-        : `/w/${workspaceId}/c/${conversation.id}`);
+      await queryClient.invalidateQueries({ queryKey: workspaceKeys.projectConversations(conversation.projectId!) });
+      navigate(`/w/${workspaceId}/p/${conversation.projectId}/c/${conversation.id}`);
+      setConversationProjectId(undefined);
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -403,36 +576,24 @@ export function WorkspaceShell() {
   });
   const createProject = useMutation({
     mutationFn: (value: CreateProjectInput) => {
-      const cloneUrl = value.repository?.cloneUrl?.trim();
       return api.createProject(workspaceId, {
         name: value.name.trim(),
         description: value.description?.trim() || null,
-        ...(cloneUrl ? { repository: {
-          cloneUrl,
-          defaultBranch: value.repository?.defaultBranch?.trim() || 'main',
-        } } : {}),
       });
     },
     onSuccess: async (created) => {
       projectForm.resetFields();
       setProjectModal(false);
       await queryClient.invalidateQueries({ queryKey: workspaceKeys.projects(workspaceId) });
-      navigate(`/w/${workspaceId}/p/${created.id}`);
-    },
-    onError: (error) => void message.error(errorMessage(error)),
-  });
-  const recoverProjectGovernance = useMutation({
-    mutationFn: () => api.addProjectMember(projectId!, {
-      workspaceMembershipId: bootstrap.data!.workspace.membershipId,
-      role: 'manager',
-    }),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: workspaceKeys.project(projectId!) }),
-        queryClient.invalidateQueries({ queryKey: workspaceKeys.projectMembers(projectId!) }),
-        queryClient.invalidateQueries({ queryKey: workspaceKeys.projects(workspaceId) }),
-      ]);
-      void message.success('已加入 Project；现在可以访问全部 Project Channel 并执行恢复治理。');
+      setExpandedProjectIds((current) => new Set(current).add(created.id));
+      const conversations = await api.listProjectConversations(created.id);
+      const main = conversations.items.find((conversation) => (
+        conversation.scope.type === 'project_group'
+        && conversation.scope.membershipMode === 'project_all'
+      ));
+      navigate(main
+        ? `/w/${workspaceId}/p/${created.id}/c/${main.id}`
+        : `/w/${workspaceId}/p/${created.id}`);
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -466,6 +627,10 @@ export function WorkspaceShell() {
     localStorage.setItem('anc:last-workspace', workspaceId);
   }, [workspaceId]);
 
+  useEffect(() => {
+    setArchivedProjectIds(readArchivedProjectIds(workspaceId));
+  }, [workspaceId]);
+
   if (bootstrap.isPending || members.isPending || agents.isPending || conversations.isPending || projects.isPending
     || (projectId && project.isPending)
     || (project.isSuccess && !project.data.governanceOnly && (projectMembers.isPending || projectConversations.isPending))) {
@@ -491,15 +656,9 @@ export function WorkspaceShell() {
         <Card title={selectedProject.name} style={{ width: 520, maxWidth: 'calc(100vw - 32px)' }}>
           <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
             <Text type="secondary">
-              你当前只有 Workspace 治理元数据权限：{selectedProject.activeMemberCount} 位成员，{selectedProject.conversationCount} 个 Conversation。成员和内容尚不可见。
+              你当前只有 Workspace 治理信息权限：{selectedProject.activeMemberCount} 位成员，{selectedProject.conversationCount} 个会话。成员详情和内容暂不可见。
             </Text>
-            <Button
-              type="primary"
-              loading={recoverProjectGovernance.isPending}
-              onClick={() => recoverProjectGovernance.mutate()}
-            >
-              以 Manager 身份加入并恢复治理
-            </Button>
+            <Alert type="info" showIcon title="Workspace 所有者只能查看治理信息，不能因此获得项目内容权限。" />
             <Button onClick={() => navigate(`/w/${workspaceId}/projects`)}>返回项目列表</Button>
           </Space>
         </Card>
@@ -508,8 +667,14 @@ export function WorkspaceShell() {
   }
 
   const workspace = bootstrap.data.workspace;
-  const selectedKey = projectId && location.pathname.endsWith('/members') ? 'project-members'
-    : projectId && location.pathname.endsWith(`/p/${projectId}`) ? 'project-profile'
+  const conversationParticipantOptions = (conversationProjectMembers.data ?? []).map((member) => ({
+    value: member.projectMembershipId,
+    label: `${member.displayName} · ${member.actorType === 'agent' ? 'Agent' : '成员'}`,
+  }));
+  const selectedKey = projectId && location.pathname.endsWith('/work-items') ? 'project-work-items'
+    : projectId && location.pathname.endsWith('/members') ? 'project-members'
+    : projectId && location.pathname.endsWith('/resources') ? 'project-resources'
+    : projectId && location.pathname.endsWith(`/p/${projectId}`) ? 'project-settings'
     : location.pathname.endsWith('/projects') ? 'projects'
     : location.pathname.includes('/agents') ? 'agents'
     : location.pathname.includes('/members') ? 'members'
@@ -518,7 +683,7 @@ export function WorkspaceShell() {
   const primarySection = projectId || selectedKey === 'projects' ? 'projects' : selectedKey === 'agents' || selectedKey === 'members'
     ? 'members'
     : selectedKey === 'settings' ? 'settings' : 'chat';
-  const showArtifactsPanel = selectedKey !== 'project-profile';
+  const showArtifactsPanel = selectedKey !== 'project-resources' && selectedKey !== 'project-members' && selectedKey !== 'project-work-items' && selectedKey !== 'project-settings';
   const selectedAgentId = location.pathname.match(/\/agents\/([^/]+)/)?.[1] ?? null;
 
   const refresh = async () => {
@@ -581,9 +746,13 @@ export function WorkspaceShell() {
       : `/c/${conversation.id}`);
   };
   const canManageConversation = (conversation: Conversation) => conversation.kind === 'dm'
-    || conversation.createdByMembershipId === workspace.membershipId
-    || workspace.membershipRole === 'owner'
-    || (conversation.projectId !== null && project.data?.role === 'manager');
+    || (conversation.scope.type === 'project_group'
+      && conversation.scope.membershipMode === 'explicit'
+      && (
+        conversation.createdByMembershipId === workspace.membershipId
+        || project.data?.role === 'owner'
+        || project.data?.role === 'manager'
+      ));
   const rail = (
     <nav className="workspace-rail" aria-label="Workspace 主导航">
       {workspaceButton()}
@@ -593,6 +762,7 @@ export function WorkspaceShell() {
         <Tooltip title="团队" placement="right"><Button aria-label="团队" className={primarySection === 'members' ? 'rail-button active' : 'rail-button'} icon={<TeamOutlined />} onClick={() => go('/agents')} /></Tooltip>
       </div>
       <div className="rail-bottom">
+        <Tooltip title={isDark ? '切换为浅色模式' : '切换为深色模式'} placement="right"><ThemeToggleButton className="rail-button" compact /></Tooltip>
         <Tooltip title="Workspace 设置" placement="right"><Button aria-label="Workspace 设置" className={primarySection === 'settings' ? 'rail-button active' : 'rail-button'} icon={<SettingOutlined />} onClick={() => go('/settings')} /></Tooltip>
         <Dropdown
           trigger={['click']}
@@ -616,31 +786,108 @@ export function WorkspaceShell() {
         ? `/p/${conversation.projectId}/c/${conversation.id}`
         : `/c/${conversation.id}`)}
     >
-      <span className="sidebar-row-icon">{conversation.kind === 'dm' ? <UserOutlined /> : '#'}</span>
+      <span className="sidebar-row-icon">{conversation.kind === 'dm'
+        ? <UserOutlined />
+        : conversation.visibility === 'private' ? <LockOutlined /> : '#'}</span>
       <span className="sidebar-row-label">{conversation.kind === 'dm' ? otherParticipant?.displayName ?? '私聊' : conversation.title || '未命名会话'}</span>
     </button>
     );
   };
   const channelConversations = currentConversations.filter((item) => item.kind === 'channel');
   const directConversations = workspaceDirectConversations;
-  const visibleProjects = projects.data.filter((item) => !item.governanceOnly);
+  const visibleProjects = projects.data.filter((item) => !item.governanceOnly && !archivedProjectIds.has(item.id));
+  const archivedProjects = projects.data.filter((item) => !item.governanceOnly && archivedProjectIds.has(item.id));
   const governanceProjects = projects.data.filter((item) => item.governanceOnly);
-  const activeAgentRequests = (agentRequests.data ?? []).filter((request) => (
-    request.status === 'pending' || request.run?.status === 'active'
-  ));
+  const archiveProject = (projectId: string) => {
+    setArchivedProjectIds((current) => {
+      const next = new Set(current);
+      next.add(projectId);
+      writeArchivedProjectIds(workspaceId, next);
+      return next;
+    });
+  };
+  const restoreProject = (projectId: string) => {
+    setArchivedProjectIds((current) => {
+      const next = new Set(current);
+      next.delete(projectId);
+      writeArchivedProjectIds(workspaceId, next);
+      return next;
+    });
+  };
+  const activeAgentRequests = Array.from(new Map(
+    (agentRequests.data ?? [])
+      .filter((request) => request.status === 'pending')
+      .map((request) => [request.targetAgentId, request] as const),
+  ).values());
+  const latestActivityByAgent = new Map<string, AgentActivityEvent>();
+  for (const activity of agentActivity.data ?? []) {
+    if (!latestActivityByAgent.has(activity.agentId)) latestActivityByAgent.set(activity.agentId, activity);
+  }
+  const pendingRequestByAgent = new Map(activeAgentRequests.map((request) => [request.targetAgentId, request]));
+  const visibleAgentIds = new Set(agents.data.map((agent) => agent.id));
+  const activityAgentIds = new Set(
+    [...latestActivityByAgent.keys(), ...pendingRequestByAgent.keys()].filter((agentId) => visibleAgentIds.has(agentId)),
+  );
+  const sidebarAgentActivity: Array<{
+    agentId: string;
+    activity: AgentActivityEvent | null;
+    request: AgentRequest | null;
+    timestamp: number;
+  }> = [];
+  for (const agentId of activityAgentIds) {
+    const activity = latestActivityByAgent.get(agentId);
+    const request = pendingRequestByAgent.get(agentId);
+    if (request && (!activity || (activity.turnStatus !== 'active' && request.updatedAt > activity.turnUpdatedAt))) {
+      sidebarAgentActivity.push({ agentId, activity: null, request, timestamp: request.updatedAt });
+      continue;
+    }
+    if (activity && (activity.turnStatus === 'active' || Date.now() - activity.turnUpdatedAt < 15_000)) {
+      sidebarAgentActivity.push({ agentId, activity, request: null, timestamp: activity.turnUpdatedAt });
+    }
+  }
+  sidebarAgentActivity.sort((left, right) => right.timestamp - left.timestamp);
   const openConversation = () => {
+    if (projectId) openProjectConversation(projectId);
+  };
+  const openProjectConversation = (targetProjectId: string) => {
+    if (projectId !== targetProjectId) navigate(`/w/${workspaceId}/p/${targetProjectId}`);
+    setConversationProjectId(targetProjectId);
     conversationForm.resetFields();
     setConversationModal(true);
   };
   const openProjectModal = () => {
-    setProjectCreateMode('remote');
     projectForm.resetFields();
     projectForm.setFieldsValue({ name: '' });
     setProjectModal(true);
   };
+  const agentActivityArea = sidebarAgentActivity.length > 0 && (
+    <div className="sidebar-agent-activity" aria-live="polite" aria-label="Agent 实时动态">
+      {sidebarAgentActivity.map((item) => {
+        const agent = agents.data.find((candidate) => candidate.id === item.agentId);
+        const name = item.activity?.agentName ?? agent?.name ?? 'Agent';
+        return (
+          <div className="sidebar-agent-activity-row" key={item.agentId}>
+            <span className="member-avatar agent">{name.slice(0, 1).toUpperCase()}</span>
+            <span className="sidebar-agent-activity-copy">
+              <strong>{name}</strong>
+              {item.activity ? (
+                <small className={`agent-activity-${agentActivityTone(item.activity)}`}>
+                  {agentActivityIcon(item.activity)} <span>{item.activity.title}</span>
+                </small>
+              ) : agentActivity.isError ? (
+                <small className="agent-activity-failed"><WarningOutlined /> 动态连接异常，正在重试…</small>
+              ) : (
+                <small><LoadingOutlined spin /> {agentActivityLabel(item.request!)}</small>
+              )}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
   const contextualSidebar = (
     <aside className="context-sidebar">
-      <div className="mobile-workspace-header">{workspaceButton(true)}</div>
+      <div className="mobile-workspace-header"><div className="mobile-workspace-header-row">{workspaceButton(true)}<ThemeToggleButton compact /></div></div>
       {!desktop && (
         <section className="sidebar-section">
           <div className="sidebar-section-heading"><span>主导航</span></div>
@@ -663,117 +910,65 @@ export function WorkspaceShell() {
           <header className="context-sidebar-title">协作</header>
           <div className="sidebar-scroll">
             <section className="sidebar-section">
-              <div className="sidebar-section-heading"><span>Workspace 会话 <small>{channelConversations.length}</small></span><Button type="text" size="small" aria-label="新建会话" icon={<PlusOutlined />} onClick={openConversation} /></div>
+              <div className="sidebar-section-heading"><span>团队会话</span></div>
               {channelConversations.map(conversationItem)}
-              {!channelConversations.length && <div className="sidebar-empty">还没有 Channel</div>}
+              {!channelConversations.length && <div className="sidebar-empty">还没有团队会话</div>}
             </section>
             <section className="sidebar-section">
               <div className="sidebar-section-heading"><span>私聊 <small>{directConversations.length}</small></span></div>
               {directConversations.map(conversationItem)}
-              {!directConversations.length && <div className="sidebar-empty">从团队成员列表发起私信</div>}
+              {!directConversations.length && <div className="sidebar-empty">从“团队”中选择成员开始私聊</div>}
             </section>
             <section className="sidebar-section">
               <button type="button" className="sidebar-row" onClick={() => setArchivedModal(true)}>
                 <span className="sidebar-row-icon"><InboxOutlined /></span>
-                <span className="sidebar-row-label">已归档 Conversation</span>
+                <span className="sidebar-row-label">已归档会话</span>
               </button>
             </section>
           </div>
-          {activeAgentRequests.length > 0 && (
-            <div className="sidebar-agent-activity" aria-live="polite">
-              {activeAgentRequests.map((request) => {
-                const agent = agents.data.find((item) => item.id === request.targetAgentId);
-                const name = agent?.name ?? 'Agent';
-                return (
-                  <div className="sidebar-agent-activity-row" key={request.id}>
-                    <span className="member-avatar agent">{name.slice(0, 1).toUpperCase()}</span>
-                    <span className="sidebar-agent-activity-copy">
-                      <strong>{name}</strong>
-                      <small><LoadingOutlined spin /> {agentActivityLabel(request)}</small>
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </>
       )}
       {primarySection === 'projects' && (
         <>
-          <header className="context-sidebar-title">{projectId ? project.data!.name : '项目'}</header>
+          <header className="context-sidebar-title">项目</header>
           <div className="sidebar-scroll">
-            {projectId ? (
-              <>
-                <section className="sidebar-section">
-                  <button type="button" className="sidebar-row" onClick={() => go('/projects')}>
-                    <span className="sidebar-row-icon">←</span><span className="sidebar-row-label">返回项目列表</span>
+            <section className="sidebar-section project-tree-section">
+              <div className="sidebar-section-heading">
+                <span>项目 <small>{visibleProjects.length}</small></span>
+                <Button type="text" size="small" aria-label="新建项目" icon={<PlusOutlined />} onClick={openProjectModal} />
+              </div>
+              {visibleProjects.map((item) => (
+                <ProjectTreeNode
+                  key={item.id}
+                  project={item}
+                  expanded={expandedProjectIds.has(item.id)}
+                  activeProjectId={projectId}
+                  selectedConversationId={selectedConversationId}
+                  selectedKey={selectedKey}
+                  onToggle={() => setExpandedProjectIds((current) => {
+                    const next = new Set(current);
+                    if (next.has(item.id)) next.delete(item.id);
+                    else next.add(item.id);
+                    return next;
+                  })}
+                  onNavigate={go}
+                  onNewConversation={() => openProjectConversation(item.id)}
+                />
+              ))}
+              {!visibleProjects.length && <div className="sidebar-empty">还没有项目，点击 + 创建一个</div>}
+            </section>
+            {governanceProjects.length > 0 && (
+              <section className="sidebar-section">
+                <div className="sidebar-section-heading"><span>项目治理 <small>{governanceProjects.length}</small></span></div>
+                {governanceProjects.map((item) => (
+                  <button type="button" className="sidebar-row" key={item.id} onClick={() => go(`/p/${item.id}`)}>
+                    <span className="sidebar-row-icon"><SettingOutlined /></span>
+                  <span className="sidebar-row-label">{item.name} · 仅治理信息</span>
                   </button>
-                </section>
-                <section className="sidebar-section">
-                  <div className="sidebar-section-heading"><span>项目会话 <small>{channelConversations.length}</small></span><Button type="text" size="small" aria-label="新建项目会话" icon={<PlusOutlined />} onClick={openConversation} /></div>
-                  {channelConversations.map(conversationItem)}
-                  {!channelConversations.length && <div className="sidebar-empty">还没有 Channel</div>}
-                  <button type="button" className="sidebar-row" onClick={() => setArchivedModal(true)}>
-                    <span className="sidebar-row-icon"><InboxOutlined /></span>
-                    <span className="sidebar-row-label">已归档 Conversation</span>
-                  </button>
-                </section>
-                <section className="sidebar-section">
-                  <div className="sidebar-section-heading"><span>项目管理</span></div>
-                  <button type="button" className={selectedKey === 'project-profile' ? 'sidebar-row active' : 'sidebar-row'} onClick={() => go(`/p/${projectId}`)}>
-                    <FolderOutlined /><span className="sidebar-row-label">资料与 Repository</span>
-                  </button>
-                  <button type="button" className={selectedKey === 'project-members' ? 'sidebar-row active' : 'sidebar-row'} onClick={() => go(`/p/${projectId}/members`)}>
-                    <TeamOutlined /><span className="sidebar-row-label">成员</span>
-                  </button>
-                </section>
-              </>
-            ) : (
-              <>
-                <section className="sidebar-section">
-                  <div className="sidebar-section-heading">
-                    <span>项目 <small>{visibleProjects.length}</small></span>
-                    <Button type="text" size="small" aria-label="新建项目" icon={<PlusOutlined />} onClick={openProjectModal} />
-                  </div>
-                  {visibleProjects.map((item) => (
-                    <button type="button" className="sidebar-row" key={item.id} onClick={() => go(`/p/${item.id}`)}>
-                      <span className="sidebar-row-icon"><FolderOutlined /></span>
-                      <span className="sidebar-row-label">{item.name}</span>
-                    </button>
-                  ))}
-                  {!visibleProjects.length && <div className="sidebar-empty">还没有项目</div>}
-                </section>
-                {governanceProjects.length > 0 && (
-                  <section className="sidebar-section">
-                    <div className="sidebar-section-heading"><span>项目治理 <small>{governanceProjects.length}</small></span></div>
-                    {governanceProjects.map((item) => (
-                      <button type="button" className="sidebar-row" key={item.id} onClick={() => go(`/p/${item.id}`)}>
-                        <span className="sidebar-row-icon"><SettingOutlined /></span>
-                        <span className="sidebar-row-label">{item.name} · 仅元数据</span>
-                      </button>
-                    ))}
-                  </section>
-                )}
-              </>
+                ))}
+              </section>
             )}
           </div>
-          {projectId && activeAgentRequests.length > 0 && (
-            <div className="sidebar-agent-activity" aria-live="polite">
-              {activeAgentRequests.map((request) => {
-                const agent = agents.data.find((item) => item.id === request.targetAgentId);
-                const name = agent?.name ?? 'Agent';
-                return (
-                  <div className="sidebar-agent-activity-row" key={request.id}>
-                    <span className="member-avatar agent">{name.slice(0, 1).toUpperCase()}</span>
-                    <span className="sidebar-agent-activity-copy">
-                      <strong>{name}</strong>
-                      <small><LoadingOutlined spin /> {agentActivityLabel(request)}</small>
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </>
       )}
       {primarySection === 'members' && (
@@ -785,14 +980,19 @@ export function WorkspaceShell() {
               {agents.data.map((agent) => {
                 const computer = computers.data?.find((item) => item.id === agent.runtimeBinding?.computerId);
                 const runtimeConnected = Boolean(agent.runtimeBinding && computer?.connectionStatus === 'online');
+                const agentWorking = latestActivityByAgent.get(agent.id)?.turnStatus === 'active';
                 return (
                 <div key={agent.id} className={selectedAgentId === agent.id ? 'sidebar-member-row active-soft' : 'sidebar-member-row'}>
                   <button type="button" className="sidebar-member-main" onClick={() => go(`/agents/${agent.id}`)}>
                     <span className="member-avatar agent">{agent.name.slice(0, 1).toUpperCase()}</span>
                     <span className="sidebar-row-label">{agent.name}</span>
                     <span
-                      className={runtimeConnected ? 'runtime-unbound-dot connected' : 'runtime-unbound-dot'}
-                      title={agent.runtimeBinding ? `${agent.runtimeBinding.computerName} · ${runtimeConnected ? '已连接' : '离线'}` : '尚未选择计算机和运行时'}
+                      className={agentWorking
+                        ? 'runtime-unbound-dot working'
+                        : runtimeConnected ? 'runtime-unbound-dot connected' : 'runtime-unbound-dot'}
+                      title={agentWorking
+                        ? 'Agent 正在处理'
+                        : agent.runtimeBinding ? `${agent.runtimeBinding.computerName} · ${runtimeConnected ? '已连接' : '离线'}` : '尚未选择计算机和本地 Agent'}
                     />
                   </button>
                   <Tooltip title={`与 ${agent.name} 私聊`}>
@@ -808,16 +1008,16 @@ export function WorkspaceShell() {
                 </div>
                 );
               })}
-              {!agents.data.length && <div className="sidebar-empty">还没有 Agent</div>}
+              {!agents.data.length && <div className="sidebar-empty">还没有 Agent，点击 + 创建一个</div>}
             </section>
             <section className="sidebar-section">
-              <div className="sidebar-section-heading"><span>Human 成员 <small>{members.data.filter((item) => item.actorType === 'human').length}</small></span><Button type="text" size="small" aria-label="管理 Human 成员" icon={<PlusOutlined />} onClick={() => go('/members')} /></div>
+              <div className="sidebar-section-heading"><span>成员 <small>{members.data.filter((item) => item.actorType === 'human').length}</small></span><Button type="text" size="small" aria-label="管理成员" icon={<PlusOutlined />} onClick={() => go('/members')} /></div>
               {members.data.filter((item) => item.actorType === 'human').map((member) => (
                 <div key={member.membershipId} className={selectedKey === 'members' ? 'sidebar-member-row active-soft' : 'sidebar-member-row'}>
                   <button type="button" className="sidebar-member-main" onClick={() => go('/members')}>
                     <span className="member-avatar human">{member.displayName.slice(0, 1).toUpperCase()}</span>
                     <span className="sidebar-row-label">{member.displayName}</span>
-                    {member.membershipId === workspace.membershipId && <small>you</small>}
+                    {member.membershipId === workspace.membershipId && <small>你</small>}
                   </button>
                   {member.membershipId !== workspace.membershipId && (
                     <Tooltip title={`与 ${member.displayName} 私聊`}>
@@ -847,6 +1047,7 @@ export function WorkspaceShell() {
           </div>
         </>
       )}
+      {agentActivityArea}
     </aside>
   );
 
@@ -856,8 +1057,12 @@ export function WorkspaceShell() {
     agents: agents.data,
     conversations: currentConversations,
     projects: visibleProjects,
+    archivedProjects,
     project: projectId ? project.data! : null,
     projectMembers: projectId ? projectMembers.data ?? [] : [],
+    archiveProject,
+    restoreProject,
+    isProjectArchived: (id) => archivedProjectIds.has(id),
     openNewProject: openProjectModal,
     openNewConversation: openConversation,
     openDirectMessage: async (membershipId) => {
@@ -893,7 +1098,7 @@ export function WorkspaceShell() {
                 className="artifacts-toggle"
                 type="text"
                 icon={<FileOutlined />}
-                aria-label="打开 Artifacts"
+                aria-label="打开交付物"
                 onClick={() => setArtifactsOpen(true)}
               />
             )}
@@ -905,7 +1110,6 @@ export function WorkspaceShell() {
             <ArtifactsPanel
               workspaceId={workspaceId}
               projectId={projectId ?? null}
-              canManageProject={project.data?.role === 'manager' || bootstrap.data?.workspace.membershipRole === 'owner'}
             />
           </Sider>
         )}
@@ -921,28 +1125,43 @@ export function WorkspaceShell() {
           <ArtifactsPanel
             workspaceId={workspaceId}
             projectId={projectId ?? null}
-            canManageProject={project.data?.role === 'manager' || bootstrap.data?.workspace.membershipRole === 'owner'}
           />
         </Drawer>
       )}
       <Modal
-        title={projectId ? `在 ${project.data!.name} 中新建会话` : '新建工作区会话'}
+        title={`在 ${(projects.data ?? []).find((item) => item.id === conversationProjectId)?.name ?? '项目'} 中新建群聊`}
         open={conversationModal}
         forceRender
         okText="创建"
         cancelText="取消"
         confirmLoading={createConversation.isPending}
-        onCancel={() => setConversationModal(false)}
+        onCancel={() => {
+          setConversationModal(false);
+          setConversationProjectId(undefined);
+        }}
         onOk={() => void conversationForm.validateFields().then((value) => createConversation.mutate(value))}
       >
         <Form form={conversationForm} layout="vertical">
-          <Form.Item name="title" label="标题" rules={[{ required: true, max: 200 }]}><Input aria-label="标题" /></Form.Item>
-          <Alert type="info" showIcon title={projectId ? '成员与当前 Project 自动同步。' : '成员与当前 Workspace 自动同步。'} />
+          <Form.Item name="title" label="会话名称" rules={[{ required: true, max: 200, whitespace: true }]}><Input aria-label="会话名称" placeholder="例如：设计评审" /></Form.Item>
+          <Form.Item name="participantProjectMembershipIds" label="群聊成员" rules={[{ required: true, type: 'array', min: 1 }]}>
+            <Select
+              mode="multiple"
+              aria-label="群聊成员"
+              placeholder="选择项目成员或你拥有的 Agent"
+              loading={conversationProjectMembers.isPending}
+              options={conversationParticipantOptions}
+            />
+          </Form.Item>
+          <Alert
+            type="info"
+            showIcon
+            title="创建者会自动加入。Agent 需要单独加入会话，不会因为加入项目而自动出现。"
+          />
         </Form>
         {createConversation.error && <Text type="danger">{errorMessage(createConversation.error)}</Text>}
       </Modal>
       <Modal
-        title={projectId ? `${project.data?.name ?? 'Project'} · 已归档 Conversation` : '已归档 Conversation'}
+        title={projectId ? `${project.data?.name ?? '项目'} · 已归档会话` : '已归档会话'}
         open={archivedModal}
         footer={<Button onClick={() => setArchivedModal(false)}>关闭</Button>}
         onCancel={() => setArchivedModal(false)}
@@ -981,70 +1200,23 @@ export function WorkspaceShell() {
             ))}
           </div>
         ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有已归档的 Conversation" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有已归档的会话" />
         )}
       </Modal>
       <Modal
         title="创建项目"
         open={projectModal}
-        okText="创建 Project"
+        okText="创建项目"
         cancelText="取消"
         confirmLoading={createProject.isPending}
         onCancel={() => setProjectModal(false)}
-        {...(projectCreateMode === 'remote'
-          ? { onOk: () => void projectForm.validateFields().then((value) => createProject.mutate(value)) }
-          : { footer: <Button onClick={() => setProjectModal(false)}>关闭</Button> })}
+        onOk={() => void projectForm.validateFields().then((value) => createProject.mutate(value))}
       >
-        <Tabs
-          activeKey={projectCreateMode}
-          onChange={(key) => {
-            const mode = key as 'remote' | 'local';
-            setProjectCreateMode(mode);
-            if (mode === 'local') localProjectBaseline.current = new Set(visibleProjects.map((item) => item.id));
-          }}
-          items={[
-            {
-              key: 'remote',
-              label: '协作 Project',
-              children: (
-                <Form form={projectForm} layout="vertical" initialValues={{ repository: { defaultBranch: 'main' } }}>
-                  <Form.Item name="name" label="Project 名称" rules={[{ required: true, max: 120 }]}>
-                    <Input autoFocus placeholder="例如：agent-platform" />
-                  </Form.Item>
-                  <Form.Item name="description" label="描述（可选）" rules={[{ max: 3000 }]}>
-                    <Input.TextArea rows={3} placeholder="这个 Repository 承载什么工作？" />
-                  </Form.Item>
-                  <Form.Item name={['repository', 'cloneUrl']} label="Primary Repository Clone URL（可选）" rules={[{ max: 2000 }]}>
-                    <Input placeholder="可以稍后挂载" />
-                  </Form.Item>
-                  <Form.Item name={['repository', 'defaultBranch']} label="默认分支" rules={[{ max: 255 }]}>
-                    <Input placeholder="main" />
-                  </Form.Item>
-                  <Alert type="info" showIcon title="Repository 不是 Project 成立条件；没有仓库时 Agent 在隔离 scratch workdir 中运行。" />
-                </Form>
-              ),
-            },
-            {
-              key: 'local',
-              label: '本地 Repository',
-              children: (
-                <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-                  <Alert
-                    type="info"
-                    showIcon
-                    title="从本机 checkout 创建"
-                    description="目录路径与 Git 凭据只保存在 anc-computer 本地，不会发送到 Workspace 服务。"
-                  />
-                  <div className="command-block">
-                    <code>{`anc-computer project create --workspace ${workspaceId}`}</code>
-                    <Button size="small" onClick={() => void navigator.clipboard.writeText(`anc-computer project create --workspace ${workspaceId}`)}>复制</Button>
-                  </div>
-                  <Text type="secondary">命令完成后，此页面会自动刷新并进入新 Project。</Text>
-                </Space>
-              ),
-            },
-          ]}
-        />
+        <Form form={projectForm} layout="vertical">
+          <Form.Item name="name" label="项目名称" rules={[{ required: true, max: 120, whitespace: true }]}><Input autoFocus placeholder="例如：agent-platform" /></Form.Item>
+          <Form.Item name="description" label="描述（可选）" rules={[{ max: 3000 }]}><Input.TextArea rows={3} placeholder="这个项目用于什么协作？" /></Form.Item>
+          <Alert type="info" showIcon title="项目会集中管理资料、交付物和外部链接；Agent 会在隔离的临时环境中运行。" />
+        </Form>
         {createProject.error && <Text type="danger">{errorMessage(createProject.error)}</Text>}
       </Modal>
       <Modal

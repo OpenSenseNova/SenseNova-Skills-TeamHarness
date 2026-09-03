@@ -61,7 +61,7 @@ export function AgentCreateModal({ workspaceId, open, onClose }: {
         queryClient.invalidateQueries({ queryKey: workspaceKeys.members(workspaceId) }),
       ]);
       queryClient.setQueryData(workspaceKeys.agent(workspaceId, agent.id), agent);
-      void message.success('Agent 已创建并连接运行时');
+      void message.success('Agent 已创建，并已连接本地运行环境');
       navigate(`/w/${workspaceId}/agents/${agent.id}`);
     },
   });
@@ -76,7 +76,7 @@ export function AgentCreateModal({ workspaceId, open, onClose }: {
   return (
     <Modal
       className="agent-create-modal"
-      title="创建 AGENT"
+      title="创建 Agent"
       open={open}
       width={600}
       okText="创建 Agent"
@@ -106,7 +106,7 @@ export function AgentCreateModal({ workspaceId, open, onClose }: {
                 rows={4}
                 maxLength={2000}
                 showCount
-                placeholder="留空作为通用 Agent，或描述一个角色…"
+              placeholder="例如：负责整理资料、跟进任务或生成周报"
               />
             </Form.Item>
           </AgentRuntimeFields>

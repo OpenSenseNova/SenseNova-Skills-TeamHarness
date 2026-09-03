@@ -1,5 +1,13 @@
 import createClient from 'openapi-fetch';
 import type { paths } from './generated';
+import {
+  commandKey,
+  requestBlob,
+  requestJson,
+  unwrap,
+} from './transport';
+
+export { ApiError, errorMessage } from './transport';
 
 const client = createClient<paths>({
   baseUrl: typeof window === 'undefined' ? 'http://localhost' : window.location.origin,
@@ -39,18 +47,23 @@ export type ProjectMemberPage = JsonResponse<'/v1/projects/{projectId}/members',
 export type ProjectMember = ProjectMemberPage['items'][number];
 export type CreateProjectInput = JsonRequestBody<'/v1/workspaces/{workspaceId}/projects', 'post'>;
 export type UpdateProjectInput = JsonRequestBody<'/v1/projects/{projectId}', 'patch'>;
-export type ProjectWorkingCopyPage = JsonResponse<'/v1/projects/{projectId}/working-copies', 'get', 200>;
-export type ProjectWorkingCopy = ProjectWorkingCopyPage['items'][number];
-export type ProjectResourceLinkPage = JsonResponse<'/v1/projects/{projectId}/resource-links', 'get', 200>;
-export type ProjectResourceLink = ProjectResourceLinkPage['items'][number];
-export type ArtifactPage = JsonResponse<'/v1/workspaces/{workspaceId}/artifacts', 'get', 200>;
-export type Artifact = ArtifactPage['items'][number];
-export type ArtifactSnapshotPage = JsonResponse<'/v1/artifacts/{artifactId}/snapshots', 'get', 200>;
-export type ArtifactSnapshot = ArtifactSnapshotPage['items'][number];
-export type ArtifactSnapshotSave = JsonResponse<'/v1/artifacts/{artifactId}/snapshots', 'post', 200>;
-export type ArtifactCleanupStatus = JsonResponse<'/v1/workspaces/{workspaceId}/artifacts/cleanup-status', 'get', 200>;
-export type InvitationPage = JsonResponse<'/v1/workspaces/{workspaceId}/invitations', 'get', 200>;
-export type Invitation = InvitationPage['items'][number];
+export type WorkItemPage = JsonResponse<'/v1/projects/{projectId}/work-items', 'get', 200>;
+export type WorkItem = WorkItemPage['items'][number];
+export type WorkItemCommentPage = JsonResponse<'/v1/work-items/{workItemId}/comments', 'get', 200>;
+export type WorkItemComment = WorkItemCommentPage['items'][number];
+export type CreateWorkItemInput = JsonRequestBody<'/v1/projects/{projectId}/work-items', 'post'>;
+export type CreateWorkItemFromMessageInput = JsonRequestBody<'/v1/messages/{messageId}/work-item', 'post'>;
+export type ProjectResourcePage = JsonResponse<'/v1/projects/{projectId}/resources', 'get', 200>;
+export type ProjectResource = ProjectResourcePage['items'][number];
+export type ProjectLinkPage = JsonResponse<'/v1/projects/{projectId}/links', 'get', 200>;
+export type ProjectLink = ProjectLinkPage['items'][number];
+export type ArtifactV2Page = JsonResponse<'/v1/projects/{projectId}/artifacts', 'get', 200>;
+export type ArtifactV2 = ArtifactV2Page['items'][number];
+export type ArtifactVersionV2 = NonNullable<ArtifactV2['latestVersion']>;
+export type ArtifactV2PublishResult = JsonResponse<'/v1/projects/{projectId}/artifacts', 'post', 201>;
+export type ArtifactVersionContextV2 = JsonResponse<'/v1/artifact-versions/{versionId}/context', 'get', 200>;
+export type WorkspaceJoinLinkPage = JsonResponse<'/v1/workspaces/{workspaceId}/join-links', 'get', 200>;
+export type WorkspaceJoinLink = WorkspaceJoinLinkPage['items'][number];
 export type AgentPage = JsonResponse<'/v1/workspaces/{workspaceId}/agents', 'get', 200>;
 export type Agent = AgentPage['items'][number];
 export type RuntimeBinding = NonNullable<Agent['runtimeBinding']>;
@@ -68,44 +81,11 @@ export type ParticipantPage = JsonResponse<'/v1/conversations/{conversationId}/p
 export type Participant = ParticipantPage['items'][number];
 export type AgentRequestPage = JsonResponse<'/v1/conversations/{conversationId}/agent-requests', 'get', 200>;
 export type AgentRequest = AgentRequestPage['items'][number];
+export type AgentActivityPage = JsonResponse<'/v1/workspaces/{workspaceId}/agent-activity', 'get', 200>;
+export type AgentActivityEvent = AgentActivityPage['items'][number];
 export type PrivateGrantPage = JsonResponse<'/v1/runs/{runId}/private-context-grants', 'get', 200>;
 export type PrivateGrant = PrivateGrantPage['items'][number];
 export type ChangePage = JsonResponse<'/v1/workspaces/{workspaceId}/changes', 'get', 200>;
-
-export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly code: string,
-    message: string,
-    public readonly details: unknown = null,
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
-
-function commandKey(): string {
-  return crypto.randomUUID();
-}
-
-async function unwrap<T>(request: Promise<{ data?: T; error?: unknown; response: Response }>): Promise<T> {
-  const result = await request;
-  if (result.data !== undefined || result.response.ok) return result.data as T;
-  const error = result.error as { error?: { code?: string; message?: string; details?: unknown } } | undefined;
-  throw new ApiError(
-    result.response.status,
-    error?.error?.code ?? 'REQUEST_FAILED',
-    error?.error?.message ?? `请求失败（${result.response.status}）`,
-    error?.error?.details,
-  );
-}
-
-async function unwrapResponse<T>(response: Response): Promise<T> {
-  const payload = await response.json() as T | { error?: { code?: string; message?: string; details?: unknown } };
-  if (response.ok) return payload as T;
-  const error = (payload as { error?: { code?: string; message?: string; details?: unknown } }).error;
-  throw new ApiError(response.status, error?.code ?? 'REQUEST_FAILED', error?.message ?? `请求失败（${response.status}）`, error?.details);
-}
 
 export const api = {
   register: (body: { displayName: string; email: string; password: string }) =>
@@ -134,29 +114,23 @@ export const api = {
   listMembers: (workspaceId: string, cursor?: string) => unwrap(client.GET('/v1/workspaces/{workspaceId}/members', {
     params: { path: { workspaceId }, query: { limit: 100, ...(cursor ? { cursor } : {}) } },
   })),
-  listInvitations: (workspaceId: string, cursor?: string) => unwrap(client.GET('/v1/workspaces/{workspaceId}/invitations', {
+  listWorkspaceJoinLinks: (workspaceId: string, cursor?: string) => unwrap(client.GET('/v1/workspaces/{workspaceId}/join-links', {
     params: { path: { workspaceId }, query: { limit: 100, ...(cursor ? { cursor } : {}) } },
   })),
-  createInvitation: (workspaceId: string, body: {
-    verifiedEmail: string;
-    membershipRole: 'owner' | 'member';
-  }) => unwrap(client.POST('/v1/workspaces/{workspaceId}/invitations', {
-    params: { path: { workspaceId }, header: { 'idempotency-key': commandKey() } }, body,
+  createWorkspaceJoinLink: (workspaceId: string) => unwrap(client.POST('/v1/workspaces/{workspaceId}/join-links', {
+    params: { path: { workspaceId } },
   })),
-  revokeInvitation: (invitationId: string, expectedRevision: number) =>
-    unwrap(client.POST('/v1/invitations/{invitationId}/revoke', {
-      params: { path: { invitationId }, header: { 'idempotency-key': commandKey() } }, body: { expectedRevision },
-    })),
-  acceptInvitation: (invitationId: string, expectedRevision: number) =>
-    unwrap(client.POST('/v1/invitations/{invitationId}/accept', {
-      params: { path: { invitationId }, header: { 'idempotency-key': commandKey() } }, body: { expectedRevision },
-    })),
-  updateMember: (workspaceId: string, membershipId: string, body: {
-    membershipRole: 'owner' | 'member';
-    expectedRevision: number;
-  }) => unwrap(client.PATCH('/v1/workspaces/{workspaceId}/members/{membershipId}', {
-    params: { path: { workspaceId, membershipId }, header: { 'idempotency-key': commandKey() } }, body,
+  previewWorkspaceJoinLink: (token: string) => unwrap(client.GET('/v1/workspace-join-links/{token}', {
+    params: { path: { token } },
   })),
+  revokeWorkspaceJoinLink: (joinLinkId: string, expectedRevision: number) =>
+    unwrap(client.POST('/v1/workspace-join-links/{joinLinkId}/revoke', {
+      params: { path: { joinLinkId }, header: { 'idempotency-key': commandKey() } }, body: { expectedRevision },
+    })),
+  acceptWorkspaceJoinLink: (token: string) =>
+    unwrap(client.POST('/v1/workspace-join-links/{token}/accept', {
+      params: { path: { token }, header: { 'idempotency-key': commandKey() } },
+    })),
   removeMember: (workspaceId: string, membershipId: string, expectedRevision: number) =>
     unwrap(client.DELETE('/v1/workspaces/{workspaceId}/members/{membershipId}', {
       params: { path: { workspaceId, membershipId }, header: { 'idempotency-key': commandKey() } }, body: { expectedRevision },
@@ -179,34 +153,8 @@ export const api = {
     unwrap(client.PATCH('/v1/projects/{projectId}', {
       params: { path: { projectId }, header: { 'idempotency-key': commandKey() } }, body,
     })),
-  putProjectRepository: (projectId: string, body: JsonRequestBody<'/v1/projects/{projectId}/repository', 'put'>) =>
-    unwrap(client.PUT('/v1/projects/{projectId}/repository', {
-      params: { path: { projectId }, header: { 'idempotency-key': commandKey() } }, body,
-    })),
-  deleteProjectRepository: (projectId: string, body: JsonRequestBody<'/v1/projects/{projectId}/repository', 'delete'>) =>
-    unwrap(client.DELETE('/v1/projects/{projectId}/repository', {
-      params: { path: { projectId }, header: { 'idempotency-key': commandKey() } }, body,
-    })),
-  listProjectResourceLinks: (projectId: string) => unwrap(client.GET('/v1/projects/{projectId}/resource-links', {
-    params: { path: { projectId } },
-  })),
-  createProjectResourceLink: (projectId: string, body: JsonRequestBody<'/v1/projects/{projectId}/resource-links', 'post'>) =>
-    unwrap(client.POST('/v1/projects/{projectId}/resource-links', {
-      params: { path: { projectId }, header: { 'idempotency-key': commandKey() } }, body,
-    })),
-  updateProjectResourceLink: (projectId: string, linkId: string, body: JsonRequestBody<'/v1/projects/{projectId}/resource-links/{linkId}', 'patch'>) =>
-    unwrap(client.PATCH('/v1/projects/{projectId}/resource-links/{linkId}', {
-      params: { path: { projectId, linkId }, header: { 'idempotency-key': commandKey() } }, body,
-    })),
-  deleteProjectResourceLink: (projectId: string, linkId: string, expectedRevision: number) =>
-    unwrap(client.DELETE('/v1/projects/{projectId}/resource-links/{linkId}', {
-      params: { path: { projectId, linkId }, header: { 'idempotency-key': commandKey() } }, body: { expectedRevision },
-    })),
   listProjectMembers: (projectId: string, cursor?: string) => unwrap(client.GET('/v1/projects/{projectId}/members', {
     params: { path: { projectId }, query: { limit: 100, ...(cursor ? { cursor } : {}) } },
-  })),
-  listProjectWorkingCopies: (projectId: string) => unwrap(client.GET('/v1/projects/{projectId}/working-copies', {
-    params: { path: { projectId } },
   })),
   addProjectMember: (projectId: string, body: { workspaceMembershipId: string; role: 'manager' | 'member' }) =>
     unwrap(client.POST('/v1/projects/{projectId}/members', {
@@ -215,7 +163,7 @@ export const api = {
   updateProjectMember: (
     projectId: string,
     projectMembershipId: string,
-    body: { role: 'manager' | 'member'; expectedRevision: number },
+    body: { role: 'owner' | 'manager' | 'member'; expectedRevision: number },
   ) => unwrap(client.PATCH('/v1/projects/{projectId}/members/{projectMembershipId}', {
     params: {
       path: { projectId, projectMembershipId },
@@ -234,97 +182,136 @@ export const api = {
   leaveProject: (projectId: string, expectedRevision: number) => unwrap(client.POST('/v1/projects/{projectId}/leave', {
     params: { path: { projectId }, header: { 'idempotency-key': commandKey() } }, body: { expectedRevision },
   })),
-
-  listArtifacts: (workspaceId: string, projectId?: string) => unwrap(client.GET('/v1/workspaces/{workspaceId}/artifacts', {
-    params: { path: { workspaceId }, query: projectId ? { projectId } : {} },
+  listProjectWorkItems: (projectId: string) => unwrap(client.GET('/v1/projects/{projectId}/work-items', {
+    params: { path: { projectId } },
   })),
-  listArtifactTrash: (workspaceId: string) => unwrap(client.GET('/v1/workspaces/{workspaceId}/artifacts/trash', {
-    params: { path: { workspaceId } },
-  })),
-  getArtifactCleanupStatus: (workspaceId: string) => unwrap(client.GET('/v1/workspaces/{workspaceId}/artifacts/cleanup-status', {
-    params: { path: { workspaceId } },
-  })),
-  createMarkdownArtifact: (workspaceId: string, body: JsonRequestBody<'/v1/workspaces/{workspaceId}/artifacts/markdown', 'post'>) =>
-    unwrap(client.POST('/v1/workspaces/{workspaceId}/artifacts/markdown', {
-      params: { path: { workspaceId }, header: { 'idempotency-key': commandKey() } }, body,
+  createWorkItem: (projectId: string, body: CreateWorkItemInput) =>
+    unwrap(client.POST('/v1/projects/{projectId}/work-items', {
+      params: { path: { projectId }, header: { 'idempotency-key': commandKey() } }, body,
     })),
-  createFileArtifact: async (workspaceId: string, file: File, name: string, projectIds: string[] = []) => {
-    const body = new FormData();
-    body.append('name', name);
-    body.append('projectIds', JSON.stringify(projectIds));
-    body.append('file', file);
-    return unwrapResponse<Artifact>(await fetch(`/v1/workspaces/${workspaceId}/artifacts/files`, {
-      method: 'POST', credentials: 'include', headers: { 'idempotency-key': commandKey() }, body,
-    }));
-  },
-  getArtifact: (artifactId: string) => unwrap(client.GET('/v1/artifacts/{artifactId}', {
-    params: { path: { artifactId } },
-  })),
-  flushArtifactDraft: (artifactId: string) => unwrap(client.POST('/v1/artifacts/{artifactId}/draft/flush', {
-    params: { path: { artifactId } },
-  })),
-  renameArtifact: (artifactId: string, body: JsonRequestBody<'/v1/artifacts/{artifactId}', 'patch'>) =>
-    unwrap(client.PATCH('/v1/artifacts/{artifactId}', {
-      params: { path: { artifactId }, header: { 'idempotency-key': commandKey() } }, body,
+  createWorkItemFromMessage: (messageId: string, body: CreateWorkItemFromMessageInput) =>
+    unwrap(client.POST('/v1/messages/{messageId}/work-item', {
+      params: { path: { messageId }, header: { 'idempotency-key': commandKey() } }, body,
     })),
-  deleteArtifact: (artifactId: string, expectedRevision: number) => unwrap(client.DELETE('/v1/artifacts/{artifactId}', {
-    params: { path: { artifactId }, header: { 'idempotency-key': commandKey() } }, body: { expectedRevision },
+  getWorkItem: (workItemId: string) => unwrap(client.GET('/v1/work-items/{workItemId}', {
+    params: { path: { workItemId } },
   })),
-  restoreArtifact: (artifactId: string, expectedRevision: number) => unwrap(client.POST('/v1/artifacts/{artifactId}/restore', {
-    params: { path: { artifactId }, header: { 'idempotency-key': commandKey() } }, body: { expectedRevision },
+  updateWorkItemDetails: (workItemId: string, description: string, expectedRevision: number) => unwrap(client.PATCH('/v1/work-items/{workItemId}', {
+    params: { path: { workItemId }, header: { 'idempotency-key': commandKey() } },
+    body: { description, expectedRevision },
   })),
-  saveArtifactSnapshot: (artifactId: string, body: JsonRequestBody<'/v1/artifacts/{artifactId}/snapshots', 'post'>) =>
-    unwrap(client.POST('/v1/artifacts/{artifactId}/snapshots', {
-      params: { path: { artifactId }, header: { 'idempotency-key': commandKey() } }, body,
+  listWorkItemComments: (workItemId: string) => unwrap(client.GET('/v1/work-items/{workItemId}/comments', {
+    params: { path: { workItemId } },
+  })),
+  postWorkItemComment: (
+    workItemId: string,
+    body: string,
+    mentionedActorIds: string[] = [],
+    workItemIds: string[] = [],
+    artifactSelections: Array<{ artifactId: string; artifactVersionId: string }> = [],
+  ) =>
+    unwrap(client.POST('/v1/work-items/{workItemId}/comments', {
+      params: { path: { workItemId }, header: { 'idempotency-key': commandKey() } },
+      body: { body, mentionedActorIds, workItemIds, artifactSelections },
     })),
-  replaceFileArtifactCurrent: async (
-    artifactId: string,
-    file: File,
-    expectedCurrentRevision: number,
+  submitWorkItemResult: (workItemId: string, artifactVersionIds: string[], expectedRevision: number) =>
+    unwrap(client.POST('/v1/work-items/{workItemId}/submissions', {
+      params: { path: { workItemId }, header: { 'idempotency-key': commandKey() } },
+      body: { artifactVersionIds, expectedRevision },
+    })),
+  assignWorkItem: (
+    workItemId: string,
+    assigneeProjectMembershipIds: string[] | string | null,
+    expectedRevision: number,
+    expectedAssignmentRevision: number,
   ) => {
-    const body = new FormData();
-    body.append('expectedCurrentRevision', String(expectedCurrentRevision));
-    body.append('file', file);
-    return unwrapResponse<Artifact>(await fetch(`/v1/artifacts/${artifactId}/current/file`, {
-      method: 'PUT', credentials: 'include', headers: { 'idempotency-key': commandKey() }, body,
+    const ids = Array.isArray(assigneeProjectMembershipIds)
+      ? assigneeProjectMembershipIds
+      : (assigneeProjectMembershipIds ? [assigneeProjectMembershipIds] : []);
+    return unwrap(client.POST('/v1/work-items/{workItemId}/assignment', {
+      params: { path: { workItemId }, header: { 'idempotency-key': commandKey() } },
+      body: {
+        assigneeProjectMembershipId: ids[0] ?? null,
+        assigneeProjectMembershipIds: ids,
+        expectedRevision,
+        expectedAssignmentRevision,
+      },
     }));
   },
-  listArtifactSnapshots: (artifactId: string) => unwrap(client.GET('/v1/artifacts/{artifactId}/snapshots', {
-    params: { path: { artifactId } },
-  })),
-  renameArtifactSnapshot: (
-    artifactId: string,
-    snapshotId: string,
-    body: JsonRequestBody<'/v1/artifacts/{artifactId}/snapshots/{snapshotId}', 'patch'>,
-  ) => unwrap(client.PATCH('/v1/artifacts/{artifactId}/snapshots/{snapshotId}', {
-    params: { path: { artifactId, snapshotId }, header: { 'idempotency-key': commandKey() } }, body,
-  })),
-  deleteArtifactSnapshot: (artifactId: string, snapshotId: string, expectedRevision: number) =>
-    unwrap(client.DELETE('/v1/artifacts/{artifactId}/snapshots/{snapshotId}', {
-      params: { path: { artifactId, snapshotId }, header: { 'idempotency-key': commandKey() } },
+  blockWorkItem: (workItemId: string, reason: string, expectedRevision: number) =>
+    unwrap(client.POST('/v1/work-items/{workItemId}/block', {
+      params: { path: { workItemId }, header: { 'idempotency-key': commandKey() } },
+      body: { reason, expectedRevision },
+    })),
+  unblockWorkItem: (workItemId: string, expectedRevision: number) =>
+    unwrap(client.POST('/v1/work-items/{workItemId}/unblock', {
+      params: { path: { workItemId }, header: { 'idempotency-key': commandKey() } },
       body: { expectedRevision },
     })),
-  restoreArtifactSnapshot: (artifactId: string, snapshotId: string, expectedCurrentRevision: number) =>
-    unwrap(client.POST('/v1/artifacts/{artifactId}/snapshots/{snapshotId}/restore', {
-      params: { path: { artifactId, snapshotId }, header: { 'idempotency-key': commandKey() } },
-      body: { expectedCurrentRevision },
+  completeWorkItem: (workItemId: string, expectedRevision: number) =>
+    unwrap(client.POST('/v1/work-items/{workItemId}/complete', {
+      params: { path: { workItemId }, header: { 'idempotency-key': commandKey() } },
+      body: { expectedRevision },
     })),
-  getArtifactSnapshotContent: async (artifactId: string, snapshotId: string) => {
-    const response = await fetch(`/v1/artifacts/${artifactId}/snapshots/${snapshotId}/download`, {
-      credentials: 'include',
-    });
-    if (!response.ok) throw new ApiError(response.status, 'ARTIFACT_SNAPSHOT_READ_FAILED', `读取历史快照失败（${response.status}）`);
-    return response.blob();
-  },
-  associateArtifact: (projectId: string, artifactId: string) => unwrap(client.PUT('/v1/projects/{projectId}/artifacts/{artifactId}', {
-    params: { path: { projectId, artifactId }, header: { 'idempotency-key': commandKey() } },
-  })),
-  dissociateArtifact: (projectId: string, artifactId: string) => unwrap(client.DELETE('/v1/projects/{projectId}/artifacts/{artifactId}', {
-    params: { path: { projectId, artifactId }, header: { 'idempotency-key': commandKey() } },
-  })),
-  artifactSnapshotDownloadUrl: (artifactId: string, snapshotId: string) => `/v1/artifacts/${artifactId}/snapshots/${snapshotId}/download`,
-  artifactCurrentDownloadUrl: (artifactId: string) => `/v1/artifacts/${artifactId}/current/download`,
+  cancelWorkItem: (workItemId: string, reason: string | undefined, expectedRevision: number) =>
+    unwrap(client.POST('/v1/work-items/{workItemId}/cancel', {
+      params: { path: { workItemId }, header: { 'idempotency-key': commandKey() } },
+      body: { ...(reason ? { reason } : {}), expectedRevision },
+    })),
 
+  listProjectResources: (projectId: string) => requestJson<{ items: ProjectResource[] }>(`/v1/projects/${projectId}/resources`),
+  listProjectResourceTrash: (projectId: string) => requestJson<{ items: ProjectResource[] }>(`/v1/projects/${projectId}/resources/trash`),
+  uploadProjectResource: async (projectId: string, file: File, options: { parentResourceId?: string | null; path?: string } = {}) => {
+    const body = new FormData(); body.append('file', file);
+    if (options.parentResourceId) body.append('parentResourceId', options.parentResourceId);
+    if (options.path) body.append('path', options.path);
+    return requestJson<ProjectResource>(`/v1/projects/${projectId}/resources`, { method: 'POST', body });
+  },
+  createProjectResourceFolder: async (projectId: string, body: { name: string; parentResourceId?: string | null }) =>
+    requestJson<ProjectResource>(`/v1/projects/${projectId}/resources/folders`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  updateProjectResource: async (resourceId: string, body: { name?: string; parentResourceId?: string | null }) =>
+    requestJson<ProjectResource>(`/v1/project-resources/${resourceId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  getProjectResource: (projectId: string, resourceId: string) => requestJson<ProjectResource>(`/v1/projects/${projectId}/resources/${resourceId}`),
+  updateProjectResourceInProject: async (projectId: string, resourceId: string, body: { name?: string; parentResourceId?: string | null }) =>
+    requestJson<ProjectResource>(`/v1/projects/${projectId}/resources/${resourceId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  replaceProjectResource: async (resourceId: string, file: File, expectedRevision: number) => {
+    const body = new FormData(); body.append('file', file); body.append('expectedRevision', String(expectedRevision));
+    return requestJson<ProjectResource>(`/v1/project-resources/${resourceId}/content`, { method: 'PUT', body });
+  },
+  deleteProjectResource: (resourceId: string) => requestJson<ProjectResource>(`/v1/project-resources/${resourceId}`, { method: 'DELETE' }),
+  restoreProjectResource: (resourceId: string) => requestJson<ProjectResource>(`/v1/project-resources/${resourceId}/restore`, { method: 'POST' }),
+  downloadProjectResource: async (resourceId: string) => {
+    return requestBlob(`/v1/project-resources/${resourceId}/download`);
+  },
+  listProjectLinks: (projectId: string) => requestJson<{ items: ProjectLink[] }>(`/v1/projects/${projectId}/links`),
+  listProjectLinkTrash: (projectId: string) => requestJson<{ items: ProjectLink[] }>(`/v1/projects/${projectId}/links/trash`),
+  createProjectLink: async (projectId: string, body: { locator: string; name: string; description?: string | null }) =>
+    requestJson<ProjectLink>(`/v1/projects/${projectId}/links`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  updateProjectLink: async (linkId: string, body: { name?: string; description?: string | null }) =>
+    requestJson<ProjectLink>(`/v1/project-links/${linkId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  updateProjectLinkInProject: async (projectId: string, linkId: string, body: { name?: string; description?: string | null }) =>
+    requestJson<ProjectLink>(`/v1/projects/${projectId}/links/${linkId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  deleteProjectLink: (linkId: string) => requestJson<ProjectLink>(`/v1/project-links/${linkId}`, { method: 'DELETE' }),
+  restoreProjectLink: (linkId: string) => requestJson<ProjectLink>(`/v1/project-links/${linkId}/restore`, { method: 'POST' }),
+  listProjectArtifactsV2: (projectId: string) => requestJson<{ items: ArtifactV2[] }>(`/v1/projects/${projectId}/artifacts`),
+  listProjectArtifactTrashV2: (projectId: string) => requestJson<{ items: ArtifactV2[] }>(`/v1/projects/${projectId}/artifacts/trash`),
+  getArtifactV2: (artifactId: string) => requestJson<ArtifactV2>(`/v1/artifact-v2/${artifactId}`),
+  listArtifactVersionsV2: (artifactId: string) => requestJson<{ items: ArtifactVersionV2[] }>(`/v1/artifact-v2/${artifactId}/versions`),
+  publishArtifactV2: async (projectId: string, file: File, fields: Record<string, string | string[] | object | undefined> = {}) => {
+    const body = new FormData(); body.append('file', file);
+    for (const [key, value] of Object.entries(fields)) if (value !== undefined) body.append(key, typeof value === 'string' ? value : JSON.stringify(value));
+    return requestJson<ArtifactV2PublishResult>(`/v1/projects/${projectId}/artifacts`, {
+      method: 'POST', credentials: 'include', headers: { 'idempotency-key': commandKey() }, body,
+    });
+  },
+  downloadArtifactVersionV2: async (versionId: string) => {
+    return requestBlob(`/v1/artifact-versions/${versionId}/download`);
+  },
+  getArtifactVersionContextV2: (versionId: string) => requestJson<ArtifactVersionContextV2>(`/v1/artifact-versions/${versionId}/context`),
+  updateArtifactV2: async (artifactId: string, body: { name?: string; projectPath?: string }) =>
+    requestJson<ArtifactV2>(`/v1/artifact-v2/${artifactId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  deleteArtifactV2: (artifactId: string) => requestJson<ArtifactV2>(`/v1/artifact-v2/${artifactId}`, { method: 'DELETE' }),
+  deleteArtifactVersionV2: (versionId: string) => requestJson<ArtifactVersionV2>(`/v1/artifact-versions/${versionId}`, { method: 'DELETE' }),
   listAgents: (workspaceId: string, cursor?: string) => unwrap(client.GET('/v1/workspaces/{workspaceId}/agents', {
     params: { path: { workspaceId }, query: { limit: 100, ...(cursor ? { cursor } : {}) } },
   })),
@@ -413,19 +400,19 @@ export const api = {
   listConversations: (workspaceId: string, cursor?: string, lifecycleStatus: 'active' | 'archived' = 'active') => unwrap(client.GET('/v1/workspaces/{workspaceId}/conversations', {
     params: { path: { workspaceId }, query: { limit: 100, lifecycleStatus, ...(cursor ? { cursor } : {}) } },
   })),
-  createConversation: (workspaceId: string, body:
-    | { kind: 'channel'; title?: string }
-    | { kind: 'dm'; title?: string; directWorkspaceMembershipIds: string[] }
+  createConversation: (
+    workspaceId: string,
+    body: JsonRequestBody<'/v1/workspaces/{workspaceId}/conversations', 'post'>,
   ) => unwrap(client.POST('/v1/workspaces/{workspaceId}/conversations', {
     params: { path: { workspaceId }, header: { 'idempotency-key': commandKey() } }, body,
   })),
   listProjectConversations: (projectId: string, cursor?: string, lifecycleStatus: 'active' | 'archived' = 'active') => unwrap(client.GET('/v1/projects/{projectId}/conversations', {
     params: { path: { projectId }, query: { limit: 100, lifecycleStatus, ...(cursor ? { cursor } : {}) } },
   })),
-  createProjectConversation: (projectId: string, body: {
-    kind: 'channel';
-    title?: string;
-  }) => unwrap(client.POST('/v1/projects/{projectId}/conversations', {
+  createProjectConversation: (
+    projectId: string,
+    body: JsonRequestBody<'/v1/projects/{projectId}/conversations', 'post'>,
+  ) => unwrap(client.POST('/v1/projects/{projectId}/conversations', {
     params: { path: { projectId }, header: { 'idempotency-key': commandKey() } }, body,
   })),
   getConversation: (conversationId: string) => unwrap(client.GET('/v1/conversations/{conversationId}', {
@@ -461,8 +448,27 @@ export const api = {
   listParticipants: (conversationId: string) => unwrap(client.GET('/v1/conversations/{conversationId}/participants', {
     params: { path: { conversationId } },
   })),
+  addConversationParticipant: (conversationId: string, scopeMembershipId: string, expectedRevision: number) =>
+    unwrap(client.PUT('/v1/conversations/{conversationId}/participants/{scopeMembershipId}', {
+      params: {
+        path: { conversationId, scopeMembershipId },
+        header: { 'idempotency-key': commandKey() },
+      },
+      body: { expectedRevision },
+    })),
+  removeConversationParticipant: (conversationId: string, scopeMembershipId: string, expectedRevision: number) =>
+    unwrap(client.DELETE('/v1/conversations/{conversationId}/participants/{scopeMembershipId}', {
+      params: {
+        path: { conversationId, scopeMembershipId },
+        header: { 'idempotency-key': commandKey() },
+      },
+      body: { expectedRevision },
+    })),
   listAgentRequests: (conversationId: string) => unwrap(client.GET('/v1/conversations/{conversationId}/agent-requests', {
     params: { path: { conversationId }, query: { limit: 200 } },
+  })),
+  listAgentActivity: (workspaceId: string, agentId?: string) => unwrap(client.GET('/v1/workspaces/{workspaceId}/agent-activity', {
+    params: { path: { workspaceId }, query: { ...(agentId ? { agentId } : {}), limit: 200 } },
   })),
   cancelAgentRequest: (agentRequestId: string, expectedVersion: number) =>
     unwrap(client.POST('/v1/agent-requests/{agentRequestId}/cancel', {
@@ -486,24 +492,3 @@ export const api = {
     params: { path: { workspaceId }, query: { after, limit: 200 } },
   })),
 };
-
-export function errorMessage(error: unknown): string {
-  if (error instanceof ApiError) {
-    const known: Record<string, string> = {
-      INVALID_LOGIN: '邮箱或密码错误。',
-      EMAIL_NOT_VERIFIED: '请先完成邮箱验证。',
-      EMAIL_ALREADY_REGISTERED: '该邮箱已经注册，请直接登录。',
-      INVALID_VERIFICATION_CODE: '验证码不正确。',
-      VERIFICATION_CODE_EXPIRED: '验证码已过期，请重新发送。',
-      STALE_REVISION: '内容已经发生变化，请刷新后重试。',
-      CONVERSATION_VERSION_CONFLICT: '会话参与者已经变化，请刷新后重试。',
-      WORKSPACE_MEMBERSHIP_REQUIRED: '你已经不再是这个 Workspace 的成员。',
-      COMPUTER_OFFLINE: '这台计算机当前离线，请重新连接后再创建 Agent。',
-      RUNTIME_UNAVAILABLE_ON_COMPUTER: '所选运行时在这台计算机上尚未就绪，请检查安装或登录状态后重试。',
-      COMPUTER_NOT_FOUND: '这台计算机不存在、已停用或不属于当前账号。',
-      CONVERSATION_CLOSED: '对方已不再是成员，这个私聊只能查看历史消息。',
-    };
-    return known[error.code] ?? `${error.message}（${error.code}）`;
-  }
-  return error instanceof Error ? error.message : '发生未知错误。';
-}
