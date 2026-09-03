@@ -740,7 +740,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/workspaces/{workspaceId}/artifacts": {
+    "/v1/projects/{projectId}/resources": {
         parameters: {
             query?: never;
             header?: never;
@@ -749,12 +749,10 @@ export interface paths {
         };
         get: {
             parameters: {
-                query?: {
-                    projectId?: string;
-                };
+                query?: never;
                 header?: never;
                 path: {
-                    workspaceId: string;
+                    projectId: string;
                 };
                 cookie?: never;
             };
@@ -769,53 +767,24 @@ export interface paths {
                         "application/json": {
                             items: {
                                 /** Format: uuid */
-                                id: string;
+                                resourceId: string;
                                 /** Format: uuid */
-                                workspaceId: string;
+                                projectId: string;
+                                parentResourceId: string | null;
                                 name: string;
-                                artifactType: "markdown" | "file";
-                                currentState: {
-                                    /** Format: uuid */
-                                    artifactId: string;
-                                    currentRevision: number;
-                                    contentDigest: string;
-                                    mediaType: string;
-                                    byteLength: number;
-                                    /** Format: uuid */
-                                    updatedByMembershipId: string;
-                                    updatedAt: number;
-                                };
-                                latestSnapshot: {
-                                    /** Format: uuid */
-                                    snapshotId: string;
-                                    /** Format: uuid */
-                                    artifactId: string;
-                                    label: string | null;
-                                    parentSnapshotId: string | null;
-                                    contentDigest: string;
-                                    mediaType: string;
-                                    byteLength: number;
-                                    /** Format: uuid */
-                                    createdByActorId: string;
-                                    /** Format: uuid */
-                                    createdByMembershipId: string;
-                                    createdByDisplayName: string;
-                                    revision: number;
-                                    status: "active" | "deleted";
-                                    deletedAt: number | null;
-                                    createdAt: number;
-                                    updatedAt: number;
-                                } | null;
-                                projectIds: string[];
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                revision: number;
+                                path: string;
+                                kind: "file" | "directory";
                                 status: "active" | "deleted" | "purged";
-                                deletedAt: number | null;
-                                purgeAfter: number | null;
-                                purgedAt: number | null;
+                                revision: number;
+                                digest: string | null;
+                                mediaType: string | null;
+                                byteLength: number | null;
+                                /** Format: uuid */
+                                createdByActorId: string;
                                 createdAt: number;
                                 updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
                             }[];
                         };
                     };
@@ -823,14 +792,55 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            resourceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            parentResourceId: string | null;
+                            name: string;
+                            path: string;
+                            kind: "file" | "directory";
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            digest: string | null;
+                            mediaType: string | null;
+                            byteLength: number | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/v1/workspaces/{workspaceId}/artifacts/trash": {
+    "/v1/projects/{projectId}/resources/trash": {
         parameters: {
             query?: never;
             header?: never;
@@ -842,7 +852,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    workspaceId: string;
+                    projectId: string;
                 };
                 cookie?: never;
             };
@@ -857,53 +867,24 @@ export interface paths {
                         "application/json": {
                             items: {
                                 /** Format: uuid */
-                                id: string;
+                                resourceId: string;
                                 /** Format: uuid */
-                                workspaceId: string;
+                                projectId: string;
+                                parentResourceId: string | null;
                                 name: string;
-                                artifactType: "markdown" | "file";
-                                currentState: {
-                                    /** Format: uuid */
-                                    artifactId: string;
-                                    currentRevision: number;
-                                    contentDigest: string;
-                                    mediaType: string;
-                                    byteLength: number;
-                                    /** Format: uuid */
-                                    updatedByMembershipId: string;
-                                    updatedAt: number;
-                                };
-                                latestSnapshot: {
-                                    /** Format: uuid */
-                                    snapshotId: string;
-                                    /** Format: uuid */
-                                    artifactId: string;
-                                    label: string | null;
-                                    parentSnapshotId: string | null;
-                                    contentDigest: string;
-                                    mediaType: string;
-                                    byteLength: number;
-                                    /** Format: uuid */
-                                    createdByActorId: string;
-                                    /** Format: uuid */
-                                    createdByMembershipId: string;
-                                    createdByDisplayName: string;
-                                    revision: number;
-                                    status: "active" | "deleted";
-                                    deletedAt: number | null;
-                                    createdAt: number;
-                                    updatedAt: number;
-                                } | null;
-                                projectIds: string[];
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                revision: number;
+                                path: string;
+                                kind: "file" | "directory";
                                 status: "active" | "deleted" | "purged";
-                                deletedAt: number | null;
-                                purgeAfter: number | null;
-                                purgedAt: number | null;
+                                revision: number;
+                                digest: string | null;
+                                mediaType: string | null;
+                                byteLength: number | null;
+                                /** Format: uuid */
+                                createdByActorId: string;
                                 createdAt: number;
                                 updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
                             }[];
                         };
                     };
@@ -918,7 +899,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/workspaces/{workspaceId}/artifacts/cleanup-status": {
+    "/v1/projects/{projectId}/resources/{resourceId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -930,244 +911,8 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    workspaceId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            deletedCount: number;
-                            expiredDeletedCount: number;
-                            stagedBlobCount: number;
-                            expiredStagedBlobCount: number;
-                            nextPurgeAt: number | null;
-                            checkedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workspaces/{workspaceId}/artifacts/markdown": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    workspaceId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        name: string;
-                        projectIds?: string[];
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            id: string;
-                            /** Format: uuid */
-                            workspaceId: string;
-                            name: string;
-                            artifactType: "markdown" | "file";
-                            currentState: {
-                                /** Format: uuid */
-                                artifactId: string;
-                                currentRevision: number;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                updatedByMembershipId: string;
-                                updatedAt: number;
-                            };
-                            latestSnapshot: {
-                                /** Format: uuid */
-                                snapshotId: string;
-                                /** Format: uuid */
-                                artifactId: string;
-                                label: string | null;
-                                parentSnapshotId: string | null;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                createdByActorId: string;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdByDisplayName: string;
-                                revision: number;
-                                status: "active" | "deleted";
-                                deletedAt: number | null;
-                                createdAt: number;
-                                updatedAt: number;
-                            } | null;
-                            projectIds: string[];
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            revision: number;
-                            status: "active" | "deleted" | "purged";
-                            deletedAt: number | null;
-                            purgeAfter: number | null;
-                            purgedAt: number | null;
-                            createdAt: number;
-                            updatedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workspaces/{workspaceId}/artifacts/files": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    workspaceId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "multipart/form-data": {
-                        /** Format: binary */
-                        file: string;
-                        name?: string;
-                        /** @description JSON array of Project UUIDs. */
-                        projectIds?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            id: string;
-                            /** Format: uuid */
-                            workspaceId: string;
-                            name: string;
-                            artifactType: "markdown" | "file";
-                            currentState: {
-                                /** Format: uuid */
-                                artifactId: string;
-                                currentRevision: number;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                updatedByMembershipId: string;
-                                updatedAt: number;
-                            };
-                            latestSnapshot: {
-                                /** Format: uuid */
-                                snapshotId: string;
-                                /** Format: uuid */
-                                artifactId: string;
-                                label: string | null;
-                                parentSnapshotId: string | null;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                createdByActorId: string;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdByDisplayName: string;
-                                revision: number;
-                                status: "active" | "deleted";
-                                deletedAt: number | null;
-                                createdAt: number;
-                                updatedAt: number;
-                            } | null;
-                            projectIds: string[];
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            revision: number;
-                            status: "active" | "deleted" | "purged";
-                            deletedAt: number | null;
-                            purgeAfter: number | null;
-                            purgedAt: number | null;
-                            createdAt: number;
-                            updatedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/artifacts/{artifactId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    artifactId: string;
+                    projectId: string;
+                    resourceId: string;
                 };
                 cookie?: never;
             };
@@ -1181,53 +926,24 @@ export interface paths {
                     content: {
                         "application/json": {
                             /** Format: uuid */
-                            id: string;
+                            resourceId: string;
                             /** Format: uuid */
-                            workspaceId: string;
+                            projectId: string;
+                            parentResourceId: string | null;
                             name: string;
-                            artifactType: "markdown" | "file";
-                            currentState: {
-                                /** Format: uuid */
-                                artifactId: string;
-                                currentRevision: number;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                updatedByMembershipId: string;
-                                updatedAt: number;
-                            };
-                            latestSnapshot: {
-                                /** Format: uuid */
-                                snapshotId: string;
-                                /** Format: uuid */
-                                artifactId: string;
-                                label: string | null;
-                                parentSnapshotId: string | null;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                createdByActorId: string;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdByDisplayName: string;
-                                revision: number;
-                                status: "active" | "deleted";
-                                deletedAt: number | null;
-                                createdAt: number;
-                                updatedAt: number;
-                            } | null;
-                            projectIds: string[];
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            revision: number;
+                            path: string;
+                            kind: "file" | "directory";
                             status: "active" | "deleted" | "purged";
-                            deletedAt: number | null;
-                            purgeAfter: number | null;
-                            purgedAt: number | null;
+                            revision: number;
+                            digest: string | null;
+                            mediaType: string | null;
+                            byteLength: number | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
                             createdAt: number;
                             updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
                         };
                     };
                 };
@@ -1238,181 +954,10 @@ export interface paths {
         delete: {
             parameters: {
                 query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    artifactId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        expectedRevision: number;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            id: string;
-                            /** Format: uuid */
-                            workspaceId: string;
-                            name: string;
-                            artifactType: "markdown" | "file";
-                            currentState: {
-                                /** Format: uuid */
-                                artifactId: string;
-                                currentRevision: number;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                updatedByMembershipId: string;
-                                updatedAt: number;
-                            };
-                            latestSnapshot: {
-                                /** Format: uuid */
-                                snapshotId: string;
-                                /** Format: uuid */
-                                artifactId: string;
-                                label: string | null;
-                                parentSnapshotId: string | null;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                createdByActorId: string;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdByDisplayName: string;
-                                revision: number;
-                                status: "active" | "deleted";
-                                deletedAt: number | null;
-                                createdAt: number;
-                                updatedAt: number;
-                            } | null;
-                            projectIds: string[];
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            revision: number;
-                            status: "active" | "deleted" | "purged";
-                            deletedAt: number | null;
-                            purgeAfter: number | null;
-                            purgedAt: number | null;
-                            createdAt: number;
-                            updatedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        patch: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    artifactId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        name: string;
-                        expectedRevision: number;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            id: string;
-                            /** Format: uuid */
-                            workspaceId: string;
-                            name: string;
-                            artifactType: "markdown" | "file";
-                            currentState: {
-                                /** Format: uuid */
-                                artifactId: string;
-                                currentRevision: number;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                updatedByMembershipId: string;
-                                updatedAt: number;
-                            };
-                            latestSnapshot: {
-                                /** Format: uuid */
-                                snapshotId: string;
-                                /** Format: uuid */
-                                artifactId: string;
-                                label: string | null;
-                                parentSnapshotId: string | null;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                createdByActorId: string;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdByDisplayName: string;
-                                revision: number;
-                                status: "active" | "deleted";
-                                deletedAt: number | null;
-                                createdAt: number;
-                                updatedAt: number;
-                            } | null;
-                            projectIds: string[];
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            revision: number;
-                            status: "active" | "deleted" | "purged";
-                            deletedAt: number | null;
-                            purgeAfter: number | null;
-                            purgedAt: number | null;
-                            createdAt: number;
-                            updatedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        trace?: never;
-    };
-    "/v1/artifacts/{artifactId}/draft/flush": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: {
-            parameters: {
-                query?: never;
                 header?: never;
                 path: {
-                    artifactId: string;
+                    projectId: string;
+                    resourceId: string;
                 };
                 cookie?: never;
             };
@@ -1426,88 +971,46 @@ export interface paths {
                     content: {
                         "application/json": {
                             /** Format: uuid */
-                            id: string;
+                            resourceId: string;
                             /** Format: uuid */
-                            workspaceId: string;
+                            projectId: string;
+                            parentResourceId: string | null;
                             name: string;
-                            artifactType: "markdown" | "file";
-                            currentState: {
-                                /** Format: uuid */
-                                artifactId: string;
-                                currentRevision: number;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                updatedByMembershipId: string;
-                                updatedAt: number;
-                            };
-                            latestSnapshot: {
-                                /** Format: uuid */
-                                snapshotId: string;
-                                /** Format: uuid */
-                                artifactId: string;
-                                label: string | null;
-                                parentSnapshotId: string | null;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                createdByActorId: string;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdByDisplayName: string;
-                                revision: number;
-                                status: "active" | "deleted";
-                                deletedAt: number | null;
-                                createdAt: number;
-                                updatedAt: number;
-                            } | null;
-                            projectIds: string[];
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            revision: number;
+                            path: string;
+                            kind: "file" | "directory";
                             status: "active" | "deleted" | "purged";
-                            deletedAt: number | null;
-                            purgeAfter: number | null;
-                            purgedAt: number | null;
+                            revision: number;
+                            digest: string | null;
+                            mediaType: string | null;
+                            byteLength: number | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
                             createdAt: number;
                             updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
                         };
                     };
                 };
             };
         };
-        delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/artifacts/{artifactId}/restore": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: {
+        patch: {
             parameters: {
                 query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
+                header?: never;
                 path: {
-                    artifactId: string;
+                    projectId: string;
+                    resourceId: string;
                 };
                 cookie?: never;
             };
             requestBody: {
                 content: {
                     "application/json": {
-                        expectedRevision: number;
+                        name?: string;
+                        parentResourceId?: string | null;
                     };
                 };
             };
@@ -1520,65 +1023,32 @@ export interface paths {
                     content: {
                         "application/json": {
                             /** Format: uuid */
-                            id: string;
+                            resourceId: string;
                             /** Format: uuid */
-                            workspaceId: string;
+                            projectId: string;
+                            parentResourceId: string | null;
                             name: string;
-                            artifactType: "markdown" | "file";
-                            currentState: {
-                                /** Format: uuid */
-                                artifactId: string;
-                                currentRevision: number;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                updatedByMembershipId: string;
-                                updatedAt: number;
-                            };
-                            latestSnapshot: {
-                                /** Format: uuid */
-                                snapshotId: string;
-                                /** Format: uuid */
-                                artifactId: string;
-                                label: string | null;
-                                parentSnapshotId: string | null;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                createdByActorId: string;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdByDisplayName: string;
-                                revision: number;
-                                status: "active" | "deleted";
-                                deletedAt: number | null;
-                                createdAt: number;
-                                updatedAt: number;
-                            } | null;
-                            projectIds: string[];
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            revision: number;
+                            path: string;
+                            kind: "file" | "directory";
                             status: "active" | "deleted" | "purged";
-                            deletedAt: number | null;
-                            purgeAfter: number | null;
-                            purgedAt: number | null;
+                            revision: number;
+                            digest: string | null;
+                            mediaType: string | null;
+                            byteLength: number | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
                             createdAt: number;
                             updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
                         };
                     };
                 };
             };
         };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
-    "/v1/artifacts/{artifactId}/snapshots": {
+    "/v1/projects/{projectId}/resources/{resourceId}/download": {
         parameters: {
             query?: never;
             header?: never;
@@ -1590,7 +1060,518 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    artifactId: string;
+                    projectId: string;
+                    resourceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/resources/{resourceId}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    resourceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            resourceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            parentResourceId: string | null;
+                            name: string;
+                            path: string;
+                            kind: "file" | "directory";
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            digest: string | null;
+                            mediaType: string | null;
+                            byteLength: number | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/resources/{resourceId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    resourceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            resourceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            parentResourceId: string | null;
+                            name: string;
+                            path: string;
+                            kind: "file" | "directory";
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            digest: string | null;
+                            mediaType: string | null;
+                            byteLength: number | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/resources/folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name: string;
+                        parentResourceId?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            resourceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            parentResourceId: string | null;
+                            name: string;
+                            path: string;
+                            kind: "file" | "directory";
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            digest: string | null;
+                            mediaType: string | null;
+                            byteLength: number | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/project-resources/{resourceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    resourceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            resourceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            parentResourceId: string | null;
+                            name: string;
+                            path: string;
+                            kind: "file" | "directory";
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            digest: string | null;
+                            mediaType: string | null;
+                            byteLength: number | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    resourceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            resourceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            parentResourceId: string | null;
+                            name: string;
+                            path: string;
+                            kind: "file" | "directory";
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            digest: string | null;
+                            mediaType: string | null;
+                            byteLength: number | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    resourceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name?: string;
+                        parentResourceId?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            resourceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            parentResourceId: string | null;
+                            name: string;
+                            path: string;
+                            kind: "file" | "directory";
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            digest: string | null;
+                            mediaType: string | null;
+                            byteLength: number | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/v1/project-resources/{resourceId}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    resourceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/project-resources/{resourceId}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    resourceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            resourceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            parentResourceId: string | null;
+                            name: string;
+                            path: string;
+                            kind: "file" | "directory";
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            digest: string | null;
+                            mediaType: string | null;
+                            byteLength: number | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/project-resources/{resourceId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    resourceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            resourceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            parentResourceId: string | null;
+                            name: string;
+                            path: string;
+                            kind: "file" | "directory";
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            digest: string | null;
+                            mediaType: string | null;
+                            byteLength: number | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
                 };
                 cookie?: never;
             };
@@ -1605,24 +1586,506 @@ export interface paths {
                         "application/json": {
                             items: {
                                 /** Format: uuid */
-                                snapshotId: string;
+                                linkId: string;
                                 /** Format: uuid */
-                                artifactId: string;
-                                label: string | null;
-                                parentSnapshotId: string | null;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
+                                projectId: string;
+                                locator: string;
+                                name: string;
+                                description: string | null;
+                                status: "active" | "deleted" | "purged";
+                                revision: number;
                                 /** Format: uuid */
                                 createdByActorId: string;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdByDisplayName: string;
-                                revision: number;
-                                status: "active" | "deleted";
-                                deletedAt: number | null;
                                 createdAt: number;
                                 updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        locator: string;
+                        name: string;
+                        description?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            linkId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            locator: string;
+                            name: string;
+                            description: string | null;
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/links/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                linkId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                locator: string;
+                                name: string;
+                                description: string | null;
+                                status: "active" | "deleted" | "purged";
+                                revision: number;
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/links/{linkId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    linkId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            linkId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            locator: string;
+                            name: string;
+                            description: string | null;
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    linkId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name?: string;
+                        description?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            linkId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            locator: string;
+                            name: string;
+                            description: string | null;
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/links/{linkId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    linkId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            linkId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            locator: string;
+                            name: string;
+                            description: string | null;
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/project-links/{linkId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    linkId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            linkId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            locator: string;
+                            name: string;
+                            description: string | null;
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    linkId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name?: string;
+                        description?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            linkId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            locator: string;
+                            name: string;
+                            description: string | null;
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/v1/project-links/{linkId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    linkId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            linkId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            locator: string;
+                            name: string;
+                            description: string | null;
+                            status: "active" | "deleted" | "purged";
+                            revision: number;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                artifactId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                name: string;
+                                projectPath: string;
+                                status: "active" | "deleted" | "purged";
+                                latestVersionId: string | null;
+                                latestVersion: {
+                                    /** Format: uuid */
+                                    versionId: string;
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    byteLength: number;
+                                    digest: string;
+                                    parentVersionId: string | null;
+                                    status: "active" | "deleted" | "purged";
+                                    /** Format: uuid */
+                                    createdByActorId: string;
+                                    createdAt: number;
+                                    taskId: string | null;
+                                    messageId: string | null;
+                                    publishBatchId: string | null;
+                                    note: string | null;
+                                    preview: {
+                                        status: "pending" | "ready" | "failed";
+                                        errorMessage: string | null;
+                                    };
+                                    deletedAt: number | null;
+                                    purgeAfter: number | null;
+                                } | null;
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                                derivationParentVersionIds: string[];
+                                contentBase64?: string;
+                                mediaType?: string;
                             }[];
                         };
                     };
@@ -1637,15 +2100,303 @@ export interface paths {
                     "idempotency-key": string;
                 };
                 path: {
-                    artifactId: string;
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            artifact: {
+                                /** Format: uuid */
+                                artifactId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                name: string;
+                                projectPath: string;
+                                status: "active" | "deleted" | "purged";
+                                latestVersionId: string | null;
+                                latestVersion: {
+                                    /** Format: uuid */
+                                    versionId: string;
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    byteLength: number;
+                                    digest: string;
+                                    parentVersionId: string | null;
+                                    status: "active" | "deleted" | "purged";
+                                    /** Format: uuid */
+                                    createdByActorId: string;
+                                    createdAt: number;
+                                    taskId: string | null;
+                                    messageId: string | null;
+                                    publishBatchId: string | null;
+                                    note: string | null;
+                                    preview: {
+                                        status: "pending" | "ready" | "failed";
+                                        errorMessage: string | null;
+                                    };
+                                    deletedAt: number | null;
+                                    purgeAfter: number | null;
+                                } | null;
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                                derivationParentVersionIds: string[];
+                                contentBase64?: string;
+                                mediaType?: string;
+                            };
+                            version: {
+                                /** Format: uuid */
+                                versionId: string;
+                                /** Format: uuid */
+                                artifactId: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            };
+                            created: boolean;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            artifact: {
+                                /** Format: uuid */
+                                artifactId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                name: string;
+                                projectPath: string;
+                                status: "active" | "deleted" | "purged";
+                                latestVersionId: string | null;
+                                latestVersion: {
+                                    /** Format: uuid */
+                                    versionId: string;
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    byteLength: number;
+                                    digest: string;
+                                    parentVersionId: string | null;
+                                    status: "active" | "deleted" | "purged";
+                                    /** Format: uuid */
+                                    createdByActorId: string;
+                                    createdAt: number;
+                                    taskId: string | null;
+                                    messageId: string | null;
+                                    publishBatchId: string | null;
+                                    note: string | null;
+                                    preview: {
+                                        status: "pending" | "ready" | "failed";
+                                        errorMessage: string | null;
+                                    };
+                                    deletedAt: number | null;
+                                    purgeAfter: number | null;
+                                } | null;
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                                derivationParentVersionIds: string[];
+                                contentBase64?: string;
+                                mediaType?: string;
+                            };
+                            version: {
+                                /** Format: uuid */
+                                versionId: string;
+                                /** Format: uuid */
+                                artifactId: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            };
+                            created: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/artifacts/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                artifactId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                name: string;
+                                projectPath: string;
+                                status: "active" | "deleted" | "purged";
+                                latestVersionId: string | null;
+                                latestVersion: {
+                                    /** Format: uuid */
+                                    versionId: string;
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    byteLength: number;
+                                    digest: string;
+                                    parentVersionId: string | null;
+                                    status: "active" | "deleted" | "purged";
+                                    /** Format: uuid */
+                                    createdByActorId: string;
+                                    createdAt: number;
+                                    taskId: string | null;
+                                    messageId: string | null;
+                                    publishBatchId: string | null;
+                                    note: string | null;
+                                    preview: {
+                                        status: "pending" | "ready" | "failed";
+                                        errorMessage: string | null;
+                                    };
+                                    deletedAt: number | null;
+                                    purgeAfter: number | null;
+                                } | null;
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                                derivationParentVersionIds: string[];
+                                contentBase64?: string;
+                                mediaType?: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/artifacts/from-resource": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
                 };
                 cookie?: never;
             };
             requestBody: {
                 content: {
                     "application/json": {
-                        expectedCurrentRevision: number;
-                        label: string | null;
+                        /** Format: uuid */
+                        resourceId: string;
+                        /** Format: uuid */
+                        artifactId?: string;
+                        artifactName?: string;
+                        artifactPath?: string;
+                        /** Format: uuid */
+                        expectedLatestVersionId?: string;
+                        /** Format: uuid */
+                        taskId?: string;
+                        /** Format: uuid */
+                        messageId?: string;
+                        /** Format: uuid */
+                        publishBatchId?: string;
+                        note?: string;
                     };
                 };
             };
@@ -1659,77 +2410,158 @@ export interface paths {
                         "application/json": {
                             artifact: {
                                 /** Format: uuid */
-                                id: string;
+                                artifactId: string;
                                 /** Format: uuid */
-                                workspaceId: string;
+                                projectId: string;
                                 name: string;
-                                artifactType: "markdown" | "file";
-                                currentState: {
+                                projectPath: string;
+                                status: "active" | "deleted" | "purged";
+                                latestVersionId: string | null;
+                                latestVersion: {
+                                    /** Format: uuid */
+                                    versionId: string;
                                     /** Format: uuid */
                                     artifactId: string;
-                                    currentRevision: number;
-                                    contentDigest: string;
+                                    version: number;
+                                    fileName: string;
                                     mediaType: string;
                                     byteLength: number;
-                                    /** Format: uuid */
-                                    updatedByMembershipId: string;
-                                    updatedAt: number;
-                                };
-                                latestSnapshot: {
-                                    /** Format: uuid */
-                                    snapshotId: string;
-                                    /** Format: uuid */
-                                    artifactId: string;
-                                    label: string | null;
-                                    parentSnapshotId: string | null;
-                                    contentDigest: string;
-                                    mediaType: string;
-                                    byteLength: number;
+                                    digest: string;
+                                    parentVersionId: string | null;
+                                    status: "active" | "deleted" | "purged";
                                     /** Format: uuid */
                                     createdByActorId: string;
-                                    /** Format: uuid */
-                                    createdByMembershipId: string;
-                                    createdByDisplayName: string;
-                                    revision: number;
-                                    status: "active" | "deleted";
-                                    deletedAt: number | null;
                                     createdAt: number;
-                                    updatedAt: number;
+                                    taskId: string | null;
+                                    messageId: string | null;
+                                    publishBatchId: string | null;
+                                    note: string | null;
+                                    preview: {
+                                        status: "pending" | "ready" | "failed";
+                                        errorMessage: string | null;
+                                    };
+                                    deletedAt: number | null;
+                                    purgeAfter: number | null;
                                 } | null;
-                                projectIds: string[];
                                 /** Format: uuid */
-                                createdByMembershipId: string;
-                                revision: number;
-                                status: "active" | "deleted" | "purged";
+                                createdByActorId: string;
+                                createdAt: number;
+                                updatedAt: number;
                                 deletedAt: number | null;
                                 purgeAfter: number | null;
-                                purgedAt: number | null;
-                                createdAt: number;
-                                updatedAt: number;
+                                derivationParentVersionIds: string[];
+                                contentBase64?: string;
+                                mediaType?: string;
                             };
-                            snapshot: {
+                            version: {
                                 /** Format: uuid */
-                                snapshotId: string;
+                                versionId: string;
                                 /** Format: uuid */
                                 artifactId: string;
-                                label: string | null;
-                                parentSnapshotId: string | null;
-                                contentDigest: string;
+                                version: number;
+                                fileName: string;
                                 mediaType: string;
                                 byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
                                 /** Format: uuid */
                                 createdByActorId: string;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdByDisplayName: string;
-                                revision: number;
-                                status: "active" | "deleted";
-                                deletedAt: number | null;
                                 createdAt: number;
-                                updatedAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
                             };
                             created: boolean;
-                            labelChanged: boolean;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            artifact: {
+                                /** Format: uuid */
+                                artifactId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                name: string;
+                                projectPath: string;
+                                status: "active" | "deleted" | "purged";
+                                latestVersionId: string | null;
+                                latestVersion: {
+                                    /** Format: uuid */
+                                    versionId: string;
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    byteLength: number;
+                                    digest: string;
+                                    parentVersionId: string | null;
+                                    status: "active" | "deleted" | "purged";
+                                    /** Format: uuid */
+                                    createdByActorId: string;
+                                    createdAt: number;
+                                    taskId: string | null;
+                                    messageId: string | null;
+                                    publishBatchId: string | null;
+                                    note: string | null;
+                                    preview: {
+                                        status: "pending" | "ready" | "failed";
+                                        errorMessage: string | null;
+                                    };
+                                    deletedAt: number | null;
+                                    purgeAfter: number | null;
+                                } | null;
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                                derivationParentVersionIds: string[];
+                                contentBase64?: string;
+                                mediaType?: string;
+                            };
+                            version: {
+                                /** Format: uuid */
+                                versionId: string;
+                                /** Format: uuid */
+                                artifactId: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            };
+                            created: boolean;
                         };
                     };
                 };
@@ -1741,291 +2573,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/artifacts/{artifactId}/current/file": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    artifactId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "multipart/form-data": {
-                        /** Format: binary */
-                        file: string;
-                        expectedCurrentRevision: number;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            id: string;
-                            /** Format: uuid */
-                            workspaceId: string;
-                            name: string;
-                            artifactType: "markdown" | "file";
-                            currentState: {
-                                /** Format: uuid */
-                                artifactId: string;
-                                currentRevision: number;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                updatedByMembershipId: string;
-                                updatedAt: number;
-                            };
-                            latestSnapshot: {
-                                /** Format: uuid */
-                                snapshotId: string;
-                                /** Format: uuid */
-                                artifactId: string;
-                                label: string | null;
-                                parentSnapshotId: string | null;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                createdByActorId: string;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdByDisplayName: string;
-                                revision: number;
-                                status: "active" | "deleted";
-                                deletedAt: number | null;
-                                createdAt: number;
-                                updatedAt: number;
-                            } | null;
-                            projectIds: string[];
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            revision: number;
-                            status: "active" | "deleted" | "purged";
-                            deletedAt: number | null;
-                            purgeAfter: number | null;
-                            purgedAt: number | null;
-                            createdAt: number;
-                            updatedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/artifacts/{artifactId}/snapshots/{snapshotId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    artifactId: string;
-                    snapshotId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            snapshotId: string;
-                            /** Format: uuid */
-                            artifactId: string;
-                            label: string | null;
-                            parentSnapshotId: string | null;
-                            contentDigest: string;
-                            mediaType: string;
-                            byteLength: number;
-                            /** Format: uuid */
-                            createdByActorId: string;
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            createdByDisplayName: string;
-                            revision: number;
-                            status: "active" | "deleted";
-                            deletedAt: number | null;
-                            createdAt: number;
-                            updatedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    artifactId: string;
-                    snapshotId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        expectedRevision: number;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            id: string;
-                            /** Format: uuid */
-                            workspaceId: string;
-                            name: string;
-                            artifactType: "markdown" | "file";
-                            currentState: {
-                                /** Format: uuid */
-                                artifactId: string;
-                                currentRevision: number;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                updatedByMembershipId: string;
-                                updatedAt: number;
-                            };
-                            latestSnapshot: {
-                                /** Format: uuid */
-                                snapshotId: string;
-                                /** Format: uuid */
-                                artifactId: string;
-                                label: string | null;
-                                parentSnapshotId: string | null;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
-                                /** Format: uuid */
-                                createdByActorId: string;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdByDisplayName: string;
-                                revision: number;
-                                status: "active" | "deleted";
-                                deletedAt: number | null;
-                                createdAt: number;
-                                updatedAt: number;
-                            } | null;
-                            projectIds: string[];
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            revision: number;
-                            status: "active" | "deleted" | "purged";
-                            deletedAt: number | null;
-                            purgeAfter: number | null;
-                            purgedAt: number | null;
-                            createdAt: number;
-                            updatedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        patch: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    artifactId: string;
-                    snapshotId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        label: string | null;
-                        expectedRevision: number;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            snapshotId: string;
-                            /** Format: uuid */
-                            artifactId: string;
-                            label: string | null;
-                            parentSnapshotId: string | null;
-                            contentDigest: string;
-                            mediaType: string;
-                            byteLength: number;
-                            /** Format: uuid */
-                            createdByActorId: string;
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            createdByDisplayName: string;
-                            revision: number;
-                            status: "active" | "deleted";
-                            deletedAt: number | null;
-                            createdAt: number;
-                            updatedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        trace?: never;
-    };
-    "/v1/artifacts/{artifactId}/snapshots/{snapshotId}/restore": {
+    "/v1/projects/{projectId}/artifacts/from-resources": {
         parameters: {
             query?: never;
             header?: never;
@@ -2037,19 +2585,367 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
+                header?: never;
                 path: {
-                    artifactId: string;
-                    snapshotId: string;
+                    projectId: string;
                 };
                 cookie?: never;
             };
             requestBody: {
                 content: {
                     "application/json": {
-                        expectedCurrentRevision: number;
+                        items?: {
+                            /** Format: uuid */
+                            resourceId: string;
+                            /** Format: uuid */
+                            artifactId?: string;
+                            artifactName?: string;
+                            artifactPath?: string;
+                            /** Format: uuid */
+                            expectedLatestVersionId?: string;
+                            /** Format: uuid */
+                            taskId?: string;
+                            /** Format: uuid */
+                            messageId?: string;
+                            note?: string;
+                        }[];
+                        resourceIds?: string[];
+                        /** Format: uuid */
+                        publishBatchId?: string;
+                        artifactPathPrefix?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            publishBatchId: string | null;
+                            results: {
+                                /** Format: uuid */
+                                resourceId: string;
+                                ok: boolean;
+                                result?: {
+                                    artifact: {
+                                        /** Format: uuid */
+                                        artifactId: string;
+                                        /** Format: uuid */
+                                        projectId: string;
+                                        name: string;
+                                        projectPath: string;
+                                        status: "active" | "deleted" | "purged";
+                                        latestVersionId: string | null;
+                                        latestVersion: {
+                                            /** Format: uuid */
+                                            versionId: string;
+                                            /** Format: uuid */
+                                            artifactId: string;
+                                            version: number;
+                                            fileName: string;
+                                            mediaType: string;
+                                            byteLength: number;
+                                            digest: string;
+                                            parentVersionId: string | null;
+                                            status: "active" | "deleted" | "purged";
+                                            /** Format: uuid */
+                                            createdByActorId: string;
+                                            createdAt: number;
+                                            taskId: string | null;
+                                            messageId: string | null;
+                                            publishBatchId: string | null;
+                                            note: string | null;
+                                            preview: {
+                                                status: "pending" | "ready" | "failed";
+                                                errorMessage: string | null;
+                                            };
+                                            deletedAt: number | null;
+                                            purgeAfter: number | null;
+                                        } | null;
+                                        /** Format: uuid */
+                                        createdByActorId: string;
+                                        createdAt: number;
+                                        updatedAt: number;
+                                        deletedAt: number | null;
+                                        purgeAfter: number | null;
+                                        derivationParentVersionIds: string[];
+                                        contentBase64?: string;
+                                        mediaType?: string;
+                                    };
+                                    version: {
+                                        /** Format: uuid */
+                                        versionId: string;
+                                        /** Format: uuid */
+                                        artifactId: string;
+                                        version: number;
+                                        fileName: string;
+                                        mediaType: string;
+                                        byteLength: number;
+                                        digest: string;
+                                        parentVersionId: string | null;
+                                        status: "active" | "deleted" | "purged";
+                                        /** Format: uuid */
+                                        createdByActorId: string;
+                                        createdAt: number;
+                                        taskId: string | null;
+                                        messageId: string | null;
+                                        publishBatchId: string | null;
+                                        note: string | null;
+                                        preview: {
+                                            status: "pending" | "ready" | "failed";
+                                            errorMessage: string | null;
+                                        };
+                                        deletedAt: number | null;
+                                        purgeAfter: number | null;
+                                    };
+                                    created: boolean;
+                                };
+                                error?: {
+                                    code: string;
+                                    message: string;
+                                };
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/artifact-held-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/artifact-held-drafts/{draftId}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    draftId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/artifact-v2/{artifactId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    artifactId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            artifactId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            name: string;
+                            projectPath: string;
+                            status: "active" | "deleted" | "purged";
+                            latestVersionId: string | null;
+                            latestVersion: {
+                                /** Format: uuid */
+                                versionId: string;
+                                /** Format: uuid */
+                                artifactId: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            } | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                            derivationParentVersionIds: string[];
+                            contentBase64?: string;
+                            mediaType?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    artifactId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            artifactId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            name: string;
+                            projectPath: string;
+                            status: "active" | "deleted" | "purged";
+                            latestVersionId: string | null;
+                            latestVersion: {
+                                /** Format: uuid */
+                                versionId: string;
+                                /** Format: uuid */
+                                artifactId: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            } | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                            derivationParentVersionIds: string[];
+                            contentBase64?: string;
+                            mediaType?: string;
+                        };
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    artifactId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name?: string;
+                        projectPath?: string;
                     };
                 };
             };
@@ -2062,53 +2958,252 @@ export interface paths {
                     content: {
                         "application/json": {
                             /** Format: uuid */
-                            id: string;
+                            artifactId: string;
                             /** Format: uuid */
-                            workspaceId: string;
+                            projectId: string;
                             name: string;
-                            artifactType: "markdown" | "file";
-                            currentState: {
+                            projectPath: string;
+                            status: "active" | "deleted" | "purged";
+                            latestVersionId: string | null;
+                            latestVersion: {
+                                /** Format: uuid */
+                                versionId: string;
                                 /** Format: uuid */
                                 artifactId: string;
-                                currentRevision: number;
-                                contentDigest: string;
+                                version: number;
+                                fileName: string;
                                 mediaType: string;
                                 byteLength: number;
-                                /** Format: uuid */
-                                updatedByMembershipId: string;
-                                updatedAt: number;
-                            };
-                            latestSnapshot: {
-                                /** Format: uuid */
-                                snapshotId: string;
-                                /** Format: uuid */
-                                artifactId: string;
-                                label: string | null;
-                                parentSnapshotId: string | null;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
                                 /** Format: uuid */
                                 createdByActorId: string;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdByDisplayName: string;
-                                revision: number;
-                                status: "active" | "deleted";
-                                deletedAt: number | null;
                                 createdAt: number;
-                                updatedAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
                             } | null;
-                            projectIds: string[];
                             /** Format: uuid */
-                            createdByMembershipId: string;
-                            revision: number;
-                            status: "active" | "deleted" | "purged";
-                            deletedAt: number | null;
-                            purgeAfter: number | null;
-                            purgedAt: number | null;
+                            createdByActorId: string;
                             createdAt: number;
                             updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                            derivationParentVersionIds: string[];
+                            contentBase64?: string;
+                            mediaType?: string;
+                        };
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/v1/artifact-v2/{artifactId}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    artifactId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                versionId: string;
+                                /** Format: uuid */
+                                artifactId: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/artifact-v2/{artifactId}/versions/{versionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    artifactId: string;
+                    versionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            versionId: string;
+                            /** Format: uuid */
+                            artifactId: string;
+                            version: number;
+                            fileName: string;
+                            mediaType: string;
+                            byteLength: number;
+                            digest: string;
+                            parentVersionId: string | null;
+                            status: "active" | "deleted" | "purged";
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            taskId: string | null;
+                            messageId: string | null;
+                            publishBatchId: string | null;
+                            note: string | null;
+                            preview: {
+                                status: "pending" | "ready" | "failed";
+                                errorMessage: string | null;
+                            };
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/artifact-v2/{artifactId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    artifactId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            artifactId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            name: string;
+                            projectPath: string;
+                            status: "active" | "deleted" | "purged";
+                            latestVersionId: string | null;
+                            latestVersion: {
+                                /** Format: uuid */
+                                versionId: string;
+                                /** Format: uuid */
+                                artifactId: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            } | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                            derivationParentVersionIds: string[];
+                            contentBase64?: string;
+                            mediaType?: string;
                         };
                     };
                 };
@@ -2120,7 +3215,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/artifacts/{artifactId}/snapshots/{snapshotId}/download": {
+    "/v1/artifact-versions/{versionId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2132,8 +3227,115 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    artifactId: string;
-                    snapshotId: string;
+                    versionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            versionId: string;
+                            /** Format: uuid */
+                            artifactId: string;
+                            version: number;
+                            fileName: string;
+                            mediaType: string;
+                            byteLength: number;
+                            digest: string;
+                            parentVersionId: string | null;
+                            status: "active" | "deleted" | "purged";
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            taskId: string | null;
+                            messageId: string | null;
+                            publishBatchId: string | null;
+                            note: string | null;
+                            preview: {
+                                status: "pending" | "ready" | "failed";
+                                errorMessage: string | null;
+                            };
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    versionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            versionId: string;
+                            /** Format: uuid */
+                            artifactId: string;
+                            version: number;
+                            fileName: string;
+                            mediaType: string;
+                            byteLength: number;
+                            digest: string;
+                            parentVersionId: string | null;
+                            status: "active" | "deleted" | "purged";
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            taskId: string | null;
+                            messageId: string | null;
+                            publishBatchId: string | null;
+                            note: string | null;
+                            preview: {
+                                status: "pending" | "ready" | "failed";
+                                errorMessage: string | null;
+                            };
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/artifact-versions/{versionId}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    versionId: string;
                 };
                 cookie?: never;
             };
@@ -2156,7 +3358,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/artifacts/{artifactId}/current/download": {
+    "/v1/artifact-versions/{versionId}/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -2168,7 +3370,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    artifactId: string;
+                    versionId: string;
                 };
                 cookie?: never;
             };
@@ -2185,6 +3387,103 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/artifact-versions/{versionId}/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    versionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/artifact-versions/{versionId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    versionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            versionId: string;
+                            /** Format: uuid */
+                            artifactId: string;
+                            version: number;
+                            fileName: string;
+                            mediaType: string;
+                            byteLength: number;
+                            digest: string;
+                            parentVersionId: string | null;
+                            status: "active" | "deleted" | "purged";
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            taskId: string | null;
+                            messageId: string | null;
+                            publishBatchId: string | null;
+                            note: string | null;
+                            preview: {
+                                status: "pending" | "ready" | "failed";
+                                errorMessage: string | null;
+                            };
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -2198,13 +3497,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put: {
+        get: {
             parameters: {
                 query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
+                header?: never;
                 path: {
                     projectId: string;
                     artifactId: string;
@@ -2221,65 +3517,499 @@ export interface paths {
                     content: {
                         "application/json": {
                             /** Format: uuid */
-                            id: string;
+                            artifactId: string;
                             /** Format: uuid */
-                            workspaceId: string;
+                            projectId: string;
                             name: string;
-                            artifactType: "markdown" | "file";
-                            currentState: {
+                            projectPath: string;
+                            status: "active" | "deleted" | "purged";
+                            latestVersionId: string | null;
+                            latestVersion: {
+                                /** Format: uuid */
+                                versionId: string;
                                 /** Format: uuid */
                                 artifactId: string;
-                                currentRevision: number;
-                                contentDigest: string;
+                                version: number;
+                                fileName: string;
                                 mediaType: string;
                                 byteLength: number;
-                                /** Format: uuid */
-                                updatedByMembershipId: string;
-                                updatedAt: number;
-                            };
-                            latestSnapshot: {
-                                /** Format: uuid */
-                                snapshotId: string;
-                                /** Format: uuid */
-                                artifactId: string;
-                                label: string | null;
-                                parentSnapshotId: string | null;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
                                 /** Format: uuid */
                                 createdByActorId: string;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdByDisplayName: string;
-                                revision: number;
-                                status: "active" | "deleted";
-                                deletedAt: number | null;
                                 createdAt: number;
-                                updatedAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
                             } | null;
-                            projectIds: string[];
                             /** Format: uuid */
-                            createdByMembershipId: string;
-                            revision: number;
-                            status: "active" | "deleted" | "purged";
-                            deletedAt: number | null;
-                            purgeAfter: number | null;
-                            purgedAt: number | null;
+                            createdByActorId: string;
                             createdAt: number;
                             updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                            derivationParentVersionIds: string[];
+                            contentBase64?: string;
+                            mediaType?: string;
                         };
                     };
                 };
             };
         };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    artifactId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name?: string;
+                        projectPath?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            artifactId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            name: string;
+                            projectPath: string;
+                            status: "active" | "deleted" | "purged";
+                            latestVersionId: string | null;
+                            latestVersion: {
+                                /** Format: uuid */
+                                versionId: string;
+                                /** Format: uuid */
+                                artifactId: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            } | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                            derivationParentVersionIds: string[];
+                            contentBase64?: string;
+                            mediaType?: string;
+                        };
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/artifacts/{artifactId}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    artifactId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                versionId: string;
+                                /** Format: uuid */
+                                artifactId: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/artifacts/{artifactId}/versions/{versionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    artifactId: string;
+                    versionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            versionId: string;
+                            /** Format: uuid */
+                            artifactId: string;
+                            version: number;
+                            fileName: string;
+                            mediaType: string;
+                            byteLength: number;
+                            digest: string;
+                            parentVersionId: string | null;
+                            status: "active" | "deleted" | "purged";
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            taskId: string | null;
+                            messageId: string | null;
+                            publishBatchId: string | null;
+                            note: string | null;
+                            preview: {
+                                status: "pending" | "ready" | "failed";
+                                errorMessage: string | null;
+                            };
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
         post?: never;
         delete: {
             parameters: {
                 query?: never;
-                header: {
-                    "idempotency-key": string;
+                header?: never;
+                path: {
+                    projectId: string;
+                    artifactId: string;
+                    versionId: string;
                 };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            versionId: string;
+                            /** Format: uuid */
+                            artifactId: string;
+                            version: number;
+                            fileName: string;
+                            mediaType: string;
+                            byteLength: number;
+                            digest: string;
+                            parentVersionId: string | null;
+                            status: "active" | "deleted" | "purged";
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            taskId: string | null;
+                            messageId: string | null;
+                            publishBatchId: string | null;
+                            note: string | null;
+                            preview: {
+                                status: "pending" | "ready" | "failed";
+                                errorMessage: string | null;
+                            };
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/artifacts/{artifactId}/versions/{versionId}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    artifactId: string;
+                    versionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/artifacts/{artifactId}/versions/{versionId}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    artifactId: string;
+                    versionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/artifacts/{artifactId}/versions/{versionId}/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    artifactId: string;
+                    versionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/artifacts/{artifactId}/versions/{versionId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    artifactId: string;
+                    versionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            versionId: string;
+                            /** Format: uuid */
+                            artifactId: string;
+                            version: number;
+                            fileName: string;
+                            mediaType: string;
+                            byteLength: number;
+                            digest: string;
+                            parentVersionId: string | null;
+                            status: "active" | "deleted" | "purged";
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            taskId: string | null;
+                            messageId: string | null;
+                            publishBatchId: string | null;
+                            note: string | null;
+                            preview: {
+                                status: "pending" | "ready" | "failed";
+                                errorMessage: string | null;
+                            };
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{projectId}/artifacts/{artifactId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
                 path: {
                     projectId: string;
                     artifactId: string;
@@ -2296,58 +4026,54 @@ export interface paths {
                     content: {
                         "application/json": {
                             /** Format: uuid */
-                            id: string;
+                            artifactId: string;
                             /** Format: uuid */
-                            workspaceId: string;
+                            projectId: string;
                             name: string;
-                            artifactType: "markdown" | "file";
-                            currentState: {
+                            projectPath: string;
+                            status: "active" | "deleted" | "purged";
+                            latestVersionId: string | null;
+                            latestVersion: {
+                                /** Format: uuid */
+                                versionId: string;
                                 /** Format: uuid */
                                 artifactId: string;
-                                currentRevision: number;
-                                contentDigest: string;
+                                version: number;
+                                fileName: string;
                                 mediaType: string;
                                 byteLength: number;
-                                /** Format: uuid */
-                                updatedByMembershipId: string;
-                                updatedAt: number;
-                            };
-                            latestSnapshot: {
-                                /** Format: uuid */
-                                snapshotId: string;
-                                /** Format: uuid */
-                                artifactId: string;
-                                label: string | null;
-                                parentSnapshotId: string | null;
-                                contentDigest: string;
-                                mediaType: string;
-                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
                                 /** Format: uuid */
                                 createdByActorId: string;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdByDisplayName: string;
-                                revision: number;
-                                status: "active" | "deleted";
-                                deletedAt: number | null;
                                 createdAt: number;
-                                updatedAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
                             } | null;
-                            projectIds: string[];
                             /** Format: uuid */
-                            createdByMembershipId: string;
-                            revision: number;
-                            status: "active" | "deleted" | "purged";
-                            deletedAt: number | null;
-                            purgeAfter: number | null;
-                            purgedAt: number | null;
+                            createdByActorId: string;
                             createdAt: number;
                             updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                            derivationParentVersionIds: string[];
+                            contentBase64?: string;
+                            mediaType?: string;
                         };
                     };
                 };
             };
         };
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2444,21 +4170,10 @@ export interface paths {
                                 revision: number;
                                 contextVersion: number;
                                 membershipId: string | null;
-                                role: ("manager" | "member") | null;
+                                role: ("owner" | "manager" | "member") | null;
                                 governanceOnly: boolean;
                                 activeMemberCount: number;
                                 conversationCount: number;
-                                repository: {
-                                    /** Format: uuid */
-                                    id: string;
-                                    cloneUrl: string;
-                                    repositoryIdentity: string;
-                                    defaultBranch: string;
-                                    revision: number;
-                                } | null;
-                                connectedComputerCount: number;
-                                readyComputerCount: number;
-                                workingCopySummary: "connected" | "not_connected" | "mismatch" | "computer_offline";
                                 /** Format: uuid */
                                 createdByMembershipId: string;
                                 createdAt: number;
@@ -2487,11 +4202,6 @@ export interface paths {
                     "application/json": {
                         name: string;
                         description?: string | null;
-                        repository?: {
-                            cloneUrl: string;
-                            /** @default main */
-                            defaultBranch: string;
-                        };
                     };
                 };
             };
@@ -2512,21 +4222,10 @@ export interface paths {
                             revision: number;
                             contextVersion: number;
                             membershipId: string | null;
-                            role: ("manager" | "member") | null;
+                            role: ("owner" | "manager" | "member") | null;
                             governanceOnly: boolean;
                             activeMemberCount: number;
                             conversationCount: number;
-                            repository: {
-                                /** Format: uuid */
-                                id: string;
-                                cloneUrl: string;
-                                repositoryIdentity: string;
-                                defaultBranch: string;
-                                revision: number;
-                            } | null;
-                            connectedComputerCount: number;
-                            readyComputerCount: number;
-                            workingCopySummary: "connected" | "not_connected" | "mismatch" | "computer_offline";
                             /** Format: uuid */
                             createdByMembershipId: string;
                             createdAt: number;
@@ -2576,21 +4275,10 @@ export interface paths {
                             revision: number;
                             contextVersion: number;
                             membershipId: string | null;
-                            role: ("manager" | "member") | null;
+                            role: ("owner" | "manager" | "member") | null;
                             governanceOnly: boolean;
                             activeMemberCount: number;
                             conversationCount: number;
-                            repository: {
-                                /** Format: uuid */
-                                id: string;
-                                cloneUrl: string;
-                                repositoryIdentity: string;
-                                defaultBranch: string;
-                                revision: number;
-                            } | null;
-                            connectedComputerCount: number;
-                            readyComputerCount: number;
-                            workingCopySummary: "connected" | "not_connected" | "mismatch" | "computer_offline";
                             /** Format: uuid */
                             createdByMembershipId: string;
                             createdAt: number;
@@ -2642,21 +4330,10 @@ export interface paths {
                             revision: number;
                             contextVersion: number;
                             membershipId: string | null;
-                            role: ("manager" | "member") | null;
+                            role: ("owner" | "manager" | "member") | null;
                             governanceOnly: boolean;
                             activeMemberCount: number;
                             conversationCount: number;
-                            repository: {
-                                /** Format: uuid */
-                                id: string;
-                                cloneUrl: string;
-                                repositoryIdentity: string;
-                                defaultBranch: string;
-                                revision: number;
-                            } | null;
-                            connectedComputerCount: number;
-                            readyComputerCount: number;
-                            workingCopySummary: "connected" | "not_connected" | "mismatch" | "computer_offline";
                             /** Format: uuid */
                             createdByMembershipId: string;
                             createdAt: number;
@@ -2666,386 +4343,6 @@ export interface paths {
                 };
             };
         };
-        trace?: never;
-    };
-    "/v1/projects/{projectId}/repository": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    projectId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        cloneUrl: string;
-                        defaultBranch: string;
-                        expectedProjectRevision: number;
-                        expectedRepositoryRevision?: number;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            id: string;
-                            /** Format: uuid */
-                            workspaceId: string;
-                            name: string;
-                            description: string | null;
-                            revision: number;
-                            contextVersion: number;
-                            membershipId: string | null;
-                            role: ("manager" | "member") | null;
-                            governanceOnly: boolean;
-                            activeMemberCount: number;
-                            conversationCount: number;
-                            repository: {
-                                /** Format: uuid */
-                                id: string;
-                                cloneUrl: string;
-                                repositoryIdentity: string;
-                                defaultBranch: string;
-                                revision: number;
-                            } | null;
-                            connectedComputerCount: number;
-                            readyComputerCount: number;
-                            workingCopySummary: "connected" | "not_connected" | "mismatch" | "computer_offline";
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            createdAt: number;
-                            updatedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        post?: never;
-        delete: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    projectId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        expectedProjectRevision: number;
-                        expectedRepositoryRevision: number;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            id: string;
-                            /** Format: uuid */
-                            workspaceId: string;
-                            name: string;
-                            description: string | null;
-                            revision: number;
-                            contextVersion: number;
-                            membershipId: string | null;
-                            role: ("manager" | "member") | null;
-                            governanceOnly: boolean;
-                            activeMemberCount: number;
-                            conversationCount: number;
-                            repository: {
-                                /** Format: uuid */
-                                id: string;
-                                cloneUrl: string;
-                                repositoryIdentity: string;
-                                defaultBranch: string;
-                                revision: number;
-                            } | null;
-                            connectedComputerCount: number;
-                            readyComputerCount: number;
-                            workingCopySummary: "connected" | "not_connected" | "mismatch" | "computer_offline";
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            createdAt: number;
-                            updatedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{projectId}/resource-links": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    projectId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            items: {
-                                /** Format: uuid */
-                                id: string;
-                                /** Format: uuid */
-                                projectId: string;
-                                title: string;
-                                /** Format: uri */
-                                url: string;
-                                description: string | null;
-                                revision: number;
-                                /** Format: uuid */
-                                createdByMembershipId: string;
-                                createdAt: number;
-                                updatedAt: number;
-                            }[];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    projectId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        title: string;
-                        url: string;
-                        description?: string | null;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            id: string;
-                            /** Format: uuid */
-                            projectId: string;
-                            title: string;
-                            /** Format: uri */
-                            url: string;
-                            description: string | null;
-                            revision: number;
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            createdAt: number;
-                            updatedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/projects/{projectId}/resource-links/{linkId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    projectId: string;
-                    linkId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        expectedRevision: number;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            id: string;
-                            deletedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        patch: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    projectId: string;
-                    linkId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        title: string;
-                        url: string;
-                        description?: string | null;
-                        expectedRevision: number;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            id: string;
-                            /** Format: uuid */
-                            projectId: string;
-                            title: string;
-                            /** Format: uri */
-                            url: string;
-                            description: string | null;
-                            revision: number;
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            createdAt: number;
-                            updatedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        trace?: never;
-    };
-    "/v1/projects/{projectId}/working-copies": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    projectId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            items: {
-                                /** Format: uuid */
-                                computerId: string;
-                                computerName: string;
-                                connectionStatus: "online" | "offline";
-                                availability: "ready" | "unavailable" | "mismatch";
-                                branch: string | null;
-                                headCommit: string | null;
-                                dirty: boolean | null;
-                                checkedAt: number;
-                            }[];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/v1/projects/{projectId}/members": {
@@ -3085,7 +4382,8 @@ export interface paths {
                                 actorId: string;
                                 actorType: "human" | "agent";
                                 displayName: string;
-                                role: "manager" | "member";
+                                role: "owner" | "manager" | "member";
+                                sponsoredByProjectMembershipId: string | null;
                                 revision: number;
                                 joinedAt: number;
                             }[];
@@ -3132,7 +4430,8 @@ export interface paths {
                             actorId: string;
                             actorType: "human" | "agent";
                             displayName: string;
-                            role: "manager" | "member";
+                            role: "owner" | "manager" | "member";
+                            sponsoredByProjectMembershipId: string | null;
                             revision: number;
                             joinedAt: number;
                         };
@@ -3210,7 +4509,7 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        role: "manager" | "member";
+                        role: "owner" | "manager" | "member";
                         expectedRevision: number;
                     };
                 };
@@ -3231,7 +4530,8 @@ export interface paths {
                             actorId: string;
                             actorType: "human" | "agent";
                             displayName: string;
-                            role: "manager" | "member";
+                            role: "owner" | "manager" | "member";
+                            sponsoredByProjectMembershipId: string | null;
                             revision: number;
                             joinedAt: number;
                         };
@@ -3292,7 +4592,1515 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/workspaces/{workspaceId}/invitations": {
+    "/v1/projects/{projectId}/work-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                /** Format: uuid */
+                                workspaceId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                taskNumber: number;
+                                description: string;
+                                relatedWorkItemReferences: {
+                                    /** Format: uuid */
+                                    workItemId: string;
+                                    taskNumber: number;
+                                }[];
+                                sourceConversationId: string | null;
+                                sourceMessageId: string | null;
+                                sourceThreadId: string | null;
+                                lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                                blockerReason: string | null;
+                                cancellationReason: string | null;
+                                assignee: {
+                                    /** Format: uuid */
+                                    projectMembershipId: string;
+                                    /** Format: uuid */
+                                    workspaceMembershipId: string;
+                                    /** Format: uuid */
+                                    actorId: string;
+                                    actorType: "human" | "agent";
+                                    displayName: string;
+                                } | null;
+                                assignees: {
+                                    /** Format: uuid */
+                                    projectMembershipId: string;
+                                    /** Format: uuid */
+                                    workspaceMembershipId: string;
+                                    /** Format: uuid */
+                                    actorId: string;
+                                    actorType: "human" | "agent";
+                                    displayName: string;
+                                }[];
+                                currentSubmission: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    commentId: string | null;
+                                    /** Format: uuid */
+                                    submittedByMembershipId: string;
+                                    /** Format: uuid */
+                                    submittedByProjectMembershipId: string;
+                                    /** Format: uuid */
+                                    submittedByActorId: string;
+                                    submittedByDisplayName: string;
+                                    assignmentRevision: number;
+                                    artifactReferences: {
+                                        /** Format: uuid */
+                                        artifactId: string;
+                                        /** Format: uuid */
+                                        artifactVersionId: string;
+                                        artifactName: string;
+                                        version: number;
+                                        fileName: string;
+                                        mediaType: string;
+                                        contentDigest: string;
+                                        byteLength: number;
+                                        contentAvailable: boolean;
+                                        artifactStatus: "active" | "deleted" | "purged";
+                                    }[];
+                                    createdAt: number;
+                                } | null;
+                                assignmentRevision: number;
+                                commentFrontier: number;
+                                revision: number;
+                                /** Format: uuid */
+                                createdByMembershipId: string;
+                                /** Format: uuid */
+                                createdByProjectMembershipId: string;
+                                createdByDisplayName: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                completedAt: number | null;
+                                cancelledAt: number | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        description: string;
+                        assigneeProjectMembershipId?: string | null;
+                        assigneeProjectMembershipIds?: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            taskNumber: number;
+                            description: string;
+                            relatedWorkItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            sourceConversationId: string | null;
+                            sourceMessageId: string | null;
+                            sourceThreadId: string | null;
+                            lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                            blockerReason: string | null;
+                            cancellationReason: string | null;
+                            assignee: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            } | null;
+                            assignees: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            currentSubmission: {
+                                /** Format: uuid */
+                                id: string;
+                                commentId: string | null;
+                                /** Format: uuid */
+                                submittedByMembershipId: string;
+                                /** Format: uuid */
+                                submittedByProjectMembershipId: string;
+                                /** Format: uuid */
+                                submittedByActorId: string;
+                                submittedByDisplayName: string;
+                                assignmentRevision: number;
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                createdAt: number;
+                            } | null;
+                            assignmentRevision: number;
+                            commentFrontier: number;
+                            revision: number;
+                            /** Format: uuid */
+                            createdByMembershipId: string;
+                            /** Format: uuid */
+                            createdByProjectMembershipId: string;
+                            createdByDisplayName: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            completedAt: number | null;
+                            cancelledAt: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/messages/{messageId}/work-item": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    messageId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        description?: string;
+                        assigneeProjectMembershipId?: string | null;
+                        assigneeProjectMembershipIds?: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            taskNumber: number;
+                            description: string;
+                            relatedWorkItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            sourceConversationId: string | null;
+                            sourceMessageId: string | null;
+                            sourceThreadId: string | null;
+                            lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                            blockerReason: string | null;
+                            cancellationReason: string | null;
+                            assignee: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            } | null;
+                            assignees: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            currentSubmission: {
+                                /** Format: uuid */
+                                id: string;
+                                commentId: string | null;
+                                /** Format: uuid */
+                                submittedByMembershipId: string;
+                                /** Format: uuid */
+                                submittedByProjectMembershipId: string;
+                                /** Format: uuid */
+                                submittedByActorId: string;
+                                submittedByDisplayName: string;
+                                assignmentRevision: number;
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                createdAt: number;
+                            } | null;
+                            assignmentRevision: number;
+                            commentFrontier: number;
+                            revision: number;
+                            /** Format: uuid */
+                            createdByMembershipId: string;
+                            /** Format: uuid */
+                            createdByProjectMembershipId: string;
+                            createdByDisplayName: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            completedAt: number | null;
+                            cancelledAt: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/work-items/{workItemId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            taskNumber: number;
+                            description: string;
+                            relatedWorkItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            sourceConversationId: string | null;
+                            sourceMessageId: string | null;
+                            sourceThreadId: string | null;
+                            lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                            blockerReason: string | null;
+                            cancellationReason: string | null;
+                            assignee: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            } | null;
+                            assignees: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            currentSubmission: {
+                                /** Format: uuid */
+                                id: string;
+                                commentId: string | null;
+                                /** Format: uuid */
+                                submittedByMembershipId: string;
+                                /** Format: uuid */
+                                submittedByProjectMembershipId: string;
+                                /** Format: uuid */
+                                submittedByActorId: string;
+                                submittedByDisplayName: string;
+                                assignmentRevision: number;
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                createdAt: number;
+                            } | null;
+                            assignmentRevision: number;
+                            commentFrontier: number;
+                            revision: number;
+                            /** Format: uuid */
+                            createdByMembershipId: string;
+                            /** Format: uuid */
+                            createdByProjectMembershipId: string;
+                            createdByDisplayName: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            completedAt: number | null;
+                            cancelledAt: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        description: string;
+                        expectedRevision: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            taskNumber: number;
+                            description: string;
+                            relatedWorkItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            sourceConversationId: string | null;
+                            sourceMessageId: string | null;
+                            sourceThreadId: string | null;
+                            lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                            blockerReason: string | null;
+                            cancellationReason: string | null;
+                            assignee: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            } | null;
+                            assignees: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            currentSubmission: {
+                                /** Format: uuid */
+                                id: string;
+                                commentId: string | null;
+                                /** Format: uuid */
+                                submittedByMembershipId: string;
+                                /** Format: uuid */
+                                submittedByProjectMembershipId: string;
+                                /** Format: uuid */
+                                submittedByActorId: string;
+                                submittedByDisplayName: string;
+                                assignmentRevision: number;
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                createdAt: number;
+                            } | null;
+                            assignmentRevision: number;
+                            commentFrontier: number;
+                            revision: number;
+                            /** Format: uuid */
+                            createdByMembershipId: string;
+                            /** Format: uuid */
+                            createdByProjectMembershipId: string;
+                            createdByDisplayName: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            completedAt: number | null;
+                            cancelledAt: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/v1/work-items/{workItemId}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                /** Format: uuid */
+                                workspaceId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                /** Format: uuid */
+                                workItemId: string;
+                                /** Format: uuid */
+                                authorActorId: string;
+                                /** Format: uuid */
+                                authorMembershipId: string;
+                                /** Format: uuid */
+                                authorProjectMembershipId: string;
+                                authorActorType: "human" | "agent";
+                                authorDisplayName: string;
+                                body: string;
+                                mentionedActorIds: string[];
+                                mentions: {
+                                    /** Format: uuid */
+                                    actorId: string;
+                                    actorType: "human" | "agent";
+                                    displayName: string;
+                                }[];
+                                workItemReferences: {
+                                    /** Format: uuid */
+                                    workItemId: string;
+                                    taskNumber: number;
+                                }[];
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                position: number;
+                                createdAt: number;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        body: string;
+                        mentionedActorIds?: string[];
+                        workItemIds?: string[];
+                        artifactSelections?: {
+                            /** Format: uuid */
+                            artifactId: string;
+                            /** Format: uuid */
+                            artifactVersionId: string;
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            /** Format: uuid */
+                            workItemId: string;
+                            /** Format: uuid */
+                            authorActorId: string;
+                            /** Format: uuid */
+                            authorMembershipId: string;
+                            /** Format: uuid */
+                            authorProjectMembershipId: string;
+                            authorActorType: "human" | "agent";
+                            authorDisplayName: string;
+                            body: string;
+                            mentionedActorIds: string[];
+                            mentions: {
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            workItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            artifactReferences: {
+                                /** Format: uuid */
+                                artifactId: string;
+                                /** Format: uuid */
+                                artifactVersionId: string;
+                                artifactName: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                contentDigest: string;
+                                byteLength: number;
+                                contentAvailable: boolean;
+                                artifactStatus: "active" | "deleted" | "purged";
+                            }[];
+                            position: number;
+                            createdAt: number;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/work-items/{workItemId}/submissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        artifactVersionIds: string[];
+                        expectedRevision: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            taskNumber: number;
+                            description: string;
+                            relatedWorkItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            sourceConversationId: string | null;
+                            sourceMessageId: string | null;
+                            sourceThreadId: string | null;
+                            lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                            blockerReason: string | null;
+                            cancellationReason: string | null;
+                            assignee: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            } | null;
+                            assignees: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            currentSubmission: {
+                                /** Format: uuid */
+                                id: string;
+                                commentId: string | null;
+                                /** Format: uuid */
+                                submittedByMembershipId: string;
+                                /** Format: uuid */
+                                submittedByProjectMembershipId: string;
+                                /** Format: uuid */
+                                submittedByActorId: string;
+                                submittedByDisplayName: string;
+                                assignmentRevision: number;
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                createdAt: number;
+                            } | null;
+                            assignmentRevision: number;
+                            commentFrontier: number;
+                            revision: number;
+                            /** Format: uuid */
+                            createdByMembershipId: string;
+                            /** Format: uuid */
+                            createdByProjectMembershipId: string;
+                            createdByDisplayName: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            completedAt: number | null;
+                            cancelledAt: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/work-items/{workItemId}/assignment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        assigneeProjectMembershipId: string | null;
+                        assigneeProjectMembershipIds?: string[];
+                        expectedRevision: number;
+                        expectedAssignmentRevision: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            taskNumber: number;
+                            description: string;
+                            relatedWorkItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            sourceConversationId: string | null;
+                            sourceMessageId: string | null;
+                            sourceThreadId: string | null;
+                            lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                            blockerReason: string | null;
+                            cancellationReason: string | null;
+                            assignee: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            } | null;
+                            assignees: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            currentSubmission: {
+                                /** Format: uuid */
+                                id: string;
+                                commentId: string | null;
+                                /** Format: uuid */
+                                submittedByMembershipId: string;
+                                /** Format: uuid */
+                                submittedByProjectMembershipId: string;
+                                /** Format: uuid */
+                                submittedByActorId: string;
+                                submittedByDisplayName: string;
+                                assignmentRevision: number;
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                createdAt: number;
+                            } | null;
+                            assignmentRevision: number;
+                            commentFrontier: number;
+                            revision: number;
+                            /** Format: uuid */
+                            createdByMembershipId: string;
+                            /** Format: uuid */
+                            createdByProjectMembershipId: string;
+                            createdByDisplayName: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            completedAt: number | null;
+                            cancelledAt: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/work-items/{workItemId}/block": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        reason: string;
+                        expectedRevision: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            taskNumber: number;
+                            description: string;
+                            relatedWorkItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            sourceConversationId: string | null;
+                            sourceMessageId: string | null;
+                            sourceThreadId: string | null;
+                            lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                            blockerReason: string | null;
+                            cancellationReason: string | null;
+                            assignee: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            } | null;
+                            assignees: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            currentSubmission: {
+                                /** Format: uuid */
+                                id: string;
+                                commentId: string | null;
+                                /** Format: uuid */
+                                submittedByMembershipId: string;
+                                /** Format: uuid */
+                                submittedByProjectMembershipId: string;
+                                /** Format: uuid */
+                                submittedByActorId: string;
+                                submittedByDisplayName: string;
+                                assignmentRevision: number;
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                createdAt: number;
+                            } | null;
+                            assignmentRevision: number;
+                            commentFrontier: number;
+                            revision: number;
+                            /** Format: uuid */
+                            createdByMembershipId: string;
+                            /** Format: uuid */
+                            createdByProjectMembershipId: string;
+                            createdByDisplayName: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            completedAt: number | null;
+                            cancelledAt: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/work-items/{workItemId}/unblock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        expectedRevision: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            taskNumber: number;
+                            description: string;
+                            relatedWorkItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            sourceConversationId: string | null;
+                            sourceMessageId: string | null;
+                            sourceThreadId: string | null;
+                            lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                            blockerReason: string | null;
+                            cancellationReason: string | null;
+                            assignee: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            } | null;
+                            assignees: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            currentSubmission: {
+                                /** Format: uuid */
+                                id: string;
+                                commentId: string | null;
+                                /** Format: uuid */
+                                submittedByMembershipId: string;
+                                /** Format: uuid */
+                                submittedByProjectMembershipId: string;
+                                /** Format: uuid */
+                                submittedByActorId: string;
+                                submittedByDisplayName: string;
+                                assignmentRevision: number;
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                createdAt: number;
+                            } | null;
+                            assignmentRevision: number;
+                            commentFrontier: number;
+                            revision: number;
+                            /** Format: uuid */
+                            createdByMembershipId: string;
+                            /** Format: uuid */
+                            createdByProjectMembershipId: string;
+                            createdByDisplayName: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            completedAt: number | null;
+                            cancelledAt: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/work-items/{workItemId}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        expectedRevision: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            taskNumber: number;
+                            description: string;
+                            relatedWorkItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            sourceConversationId: string | null;
+                            sourceMessageId: string | null;
+                            sourceThreadId: string | null;
+                            lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                            blockerReason: string | null;
+                            cancellationReason: string | null;
+                            assignee: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            } | null;
+                            assignees: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            currentSubmission: {
+                                /** Format: uuid */
+                                id: string;
+                                commentId: string | null;
+                                /** Format: uuid */
+                                submittedByMembershipId: string;
+                                /** Format: uuid */
+                                submittedByProjectMembershipId: string;
+                                /** Format: uuid */
+                                submittedByActorId: string;
+                                submittedByDisplayName: string;
+                                assignmentRevision: number;
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                createdAt: number;
+                            } | null;
+                            assignmentRevision: number;
+                            commentFrontier: number;
+                            revision: number;
+                            /** Format: uuid */
+                            createdByMembershipId: string;
+                            /** Format: uuid */
+                            createdByProjectMembershipId: string;
+                            createdByDisplayName: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            completedAt: number | null;
+                            cancelledAt: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/work-items/{workItemId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        reason?: string;
+                        expectedRevision: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            taskNumber: number;
+                            description: string;
+                            relatedWorkItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            sourceConversationId: string | null;
+                            sourceMessageId: string | null;
+                            sourceThreadId: string | null;
+                            lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                            blockerReason: string | null;
+                            cancellationReason: string | null;
+                            assignee: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            } | null;
+                            assignees: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            currentSubmission: {
+                                /** Format: uuid */
+                                id: string;
+                                commentId: string | null;
+                                /** Format: uuid */
+                                submittedByMembershipId: string;
+                                /** Format: uuid */
+                                submittedByProjectMembershipId: string;
+                                /** Format: uuid */
+                                submittedByActorId: string;
+                                submittedByDisplayName: string;
+                                assignmentRevision: number;
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                createdAt: number;
+                            } | null;
+                            assignmentRevision: number;
+                            commentFrontier: number;
+                            revision: number;
+                            /** Format: uuid */
+                            createdByMembershipId: string;
+                            /** Format: uuid */
+                            createdByProjectMembershipId: string;
+                            createdByDisplayName: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            completedAt: number | null;
+                            cancelledAt: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/join-links": {
         parameters: {
             query?: never;
             header?: never;
@@ -3325,16 +6133,16 @@ export interface paths {
                                 id: string;
                                 /** Format: uuid */
                                 workspaceId: string;
-                                verifiedEmail: string;
-                                membershipRole: "owner" | "member";
-                                status: "pending" | "accepted" | "revoked";
+                                status: "active" | "revoked";
                                 revision: number;
                                 /** Format: uuid */
-                                invitedByMembershipId: string;
-                                acceptedMembershipId: string | null;
+                                createdByMembershipId: string;
+                                useCount: number;
                                 createdAt: number;
                                 updatedAt: number;
-                                terminalAt: number | null;
+                                lastUsedAt: number | null;
+                                revokedAt: number | null;
+                                token: string | null;
                             }[];
                             nextCursor: string | null;
                         };
@@ -3346,22 +6154,13 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
+                header?: never;
                 path: {
                     workspaceId: string;
                 };
                 cookie?: never;
             };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        verifiedEmail: string;
-                        membershipRole: "owner" | "member";
-                    };
-                };
-            };
+            requestBody?: never;
             responses: {
                 /** @description Default Response */
                 201: {
@@ -3374,16 +6173,16 @@ export interface paths {
                             id: string;
                             /** Format: uuid */
                             workspaceId: string;
-                            verifiedEmail: string;
-                            membershipRole: "owner" | "member";
-                            status: "pending" | "accepted" | "revoked";
+                            status: "active" | "revoked";
                             revision: number;
                             /** Format: uuid */
-                            invitedByMembershipId: string;
-                            acceptedMembershipId: string | null;
+                            createdByMembershipId: string;
+                            useCount: number;
                             createdAt: number;
                             updatedAt: number;
-                            terminalAt: number | null;
+                            lastUsedAt: number | null;
+                            revokedAt: number | null;
+                            token: string;
                         };
                     };
                 };
@@ -3395,7 +6194,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/invitations/{invitationId}/accept": {
+    "/v1/workspace-join-links/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    token: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            workspaceId: string;
+                            workspaceName: string;
+                            status: "active" | "revoked";
+                            alreadyMember: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspace-join-links/{token}/accept": {
         parameters: {
             query?: never;
             header?: never;
@@ -3411,17 +6253,11 @@ export interface paths {
                     "idempotency-key": string;
                 };
                 path: {
-                    invitationId: string;
+                    token: string;
                 };
                 cookie?: never;
             };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        expectedRevision: number;
-                    };
-                };
-            };
+            requestBody?: never;
             responses: {
                 /** @description Default Response */
                 200: {
@@ -3450,7 +6286,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/invitations/{invitationId}/revoke": {
+    "/v1/workspace-join-links/{joinLinkId}/revoke": {
         parameters: {
             query?: never;
             header?: never;
@@ -3466,7 +6302,7 @@ export interface paths {
                     "idempotency-key": string;
                 };
                 path: {
-                    invitationId: string;
+                    joinLinkId: string;
                 };
                 cookie?: never;
             };
@@ -3489,16 +6325,16 @@ export interface paths {
                             id: string;
                             /** Format: uuid */
                             workspaceId: string;
-                            verifiedEmail: string;
-                            membershipRole: "owner" | "member";
-                            status: "pending" | "accepted" | "revoked";
+                            status: "active" | "revoked";
                             revision: number;
                             /** Format: uuid */
-                            invitedByMembershipId: string;
-                            acceptedMembershipId: string | null;
+                            createdByMembershipId: string;
+                            useCount: number;
                             createdAt: number;
                             updatedAt: number;
-                            terminalAt: number | null;
+                            lastUsedAt: number | null;
+                            revokedAt: number | null;
+                            token: string | null;
                         };
                     };
                 };
@@ -3955,330 +6791,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/computers/self/projects": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        workspaceId: string;
-                        name: string;
-                        description?: string | null;
-                        repository: {
-                            cloneUrl: string;
-                            repositoryIdentity: string;
-                            defaultBranch: string;
-                        };
-                        workingCopy: {
-                            repositoryIdentity: string;
-                            availability: "ready" | "unavailable" | "mismatch";
-                            branch: string | null;
-                            headCommit: string | null;
-                            dirty: boolean | null;
-                        };
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            id: string;
-                            /** Format: uuid */
-                            workspaceId: string;
-                            name: string;
-                            description: string | null;
-                            revision: number;
-                            contextVersion: number;
-                            membershipId: string | null;
-                            role: ("manager" | "member") | null;
-                            governanceOnly: boolean;
-                            activeMemberCount: number;
-                            conversationCount: number;
-                            repository: {
-                                /** Format: uuid */
-                                id: string;
-                                cloneUrl: string;
-                                repositoryIdentity: string;
-                                defaultBranch: string;
-                                revision: number;
-                            } | null;
-                            connectedComputerCount: number;
-                            readyComputerCount: number;
-                            workingCopySummary: "connected" | "not_connected" | "mismatch" | "computer_offline";
-                            /** Format: uuid */
-                            createdByMembershipId: string;
-                            createdAt: number;
-                            updatedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/computers/self/projects/{projectId}/repository": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    projectId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            projectId: string;
-                            /** Format: uuid */
-                            workspaceId: string;
-                            repository: {
-                                /** Format: uuid */
-                                id: string;
-                                cloneUrl: string;
-                                repositoryIdentity: string;
-                                defaultBranch: string;
-                                revision: number;
-                            };
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/computers/self/projects/{projectId}/working-copy": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    projectId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        repositoryId: string;
-                        repositoryIdentity: string;
-                        availability: "ready" | "unavailable" | "mismatch";
-                        branch: string | null;
-                        headCommit: string | null;
-                        dirty: boolean | null;
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            computerId: string;
-                            computerName: string;
-                            connectionStatus: "online" | "offline";
-                            availability: "ready" | "unavailable" | "mismatch";
-                            branch: string | null;
-                            headCommit: string | null;
-                            dirty: boolean | null;
-                            checkedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        post?: never;
-        delete: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    projectId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            projectId: string;
-                            /** Format: uuid */
-                            computerId: string;
-                            removedAt: number;
-                        };
-                    };
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/computers/self/agent-requests": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: {
-            parameters: {
-                query?: {
-                    limit?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Default Response */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            items: {
-                                /** Format: uuid */
-                                id: string;
-                                /** Format: uuid */
-                                workspaceId: string;
-                                /** Format: uuid */
-                                sourceMessageId: string;
-                                /** Format: uuid */
-                                targetAgentId: string;
-                                /** Format: uuid */
-                                resultConversationId: string;
-                                resultThreadId: string | null;
-                                status: "pending" | "accepted" | "rejected" | "cancelled";
-                                version: number;
-                                intake: {
-                                    disposition: "ready" | "waiting" | "blocked";
-                                    reasons: ("runtime_unavailable" | "project_working_copy_unavailable" | "agent_suspended" | "authority_revoked")[];
-                                } | null;
-                                terminalReason: {
-                                    code: "requestor_cancelled" | "authority_revoked" | "intake_rejected";
-                                    detail: string | null;
-                                } | null;
-                                run: {
-                                    /** Format: uuid */
-                                    id: string;
-                                    status: "active" | "terminal";
-                                    outcome: "publish" | "no_output" | "discard" | "cancelled" | "failed" | null;
-                                    deadlineAt: number;
-                                    /** Format: uuid */
-                                    contextSnapshotId: string;
-                                    policyVersion: number;
-                                    workspaceContextVersion: number;
-                                    projectId: string | null;
-                                    projectContextVersion: number | null;
-                                    conversationContextVersion: number;
-                                    triggerFrontier: {
-                                        kind: "timeline" | "thread";
-                                        /** Format: uuid */
-                                        conversationId: string;
-                                        threadId: string | null;
-                                        rootMessageId: string | null;
-                                        position: number;
-                                    };
-                                    sourceCount: number;
-                                    attempt: {
-                                        /** Format: uuid */
-                                        id: string;
-                                        status: "running" | "finished" | "failed" | "cancelled";
-                                        failureReason: {
-                                            /** @enum {string} */
-                                            code: "runtime_failure";
-                                            message: string;
-                                        } | null;
-                                    } | null;
-                                } | null;
-                                createdAt: number;
-                                updatedAt: number;
-                                terminalAt: number | null;
-                            }[];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/workspaces/{workspaceId}/agents": {
         parameters: {
             query?: never;
@@ -4488,6 +7000,67 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/agent-activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    agentId?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    workspaceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                eventId: string;
+                                /** Format: uuid */
+                                turnId: string;
+                                sequence: number;
+                                eventType: "turn_started" | "thought" | "tool" | "plan" | "message" | "turn_completed" | "turn_failed";
+                                title: string;
+                                status: "pending" | "in_progress" | "completed" | "failed";
+                                /** Format: uuid */
+                                workspaceId: string;
+                                /** Format: uuid */
+                                agentId: string;
+                                agentName: string;
+                                turnStatus: "active" | "completed" | "failed";
+                                turnStartedAt: number;
+                                turnUpdatedAt: number;
+                                turnFinishedAt: number | null;
+                                createdAt: number;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5655,7 +8228,22 @@ export interface paths {
                                 /** Format: uuid */
                                 workspaceId: string;
                                 projectId: string | null;
+                                scope: {
+                                    /** @enum {string} */
+                                    type: "workspace_general";
+                                } | {
+                                    /** @enum {string} */
+                                    type: "direct_message";
+                                } | {
+                                    /** @enum {string} */
+                                    type: "project_group";
+                                    /** Format: uuid */
+                                    projectId: string;
+                                    membershipMode: "project_all" | "explicit";
+                                };
                                 kind: "channel" | "dm";
+                                visibility: "public" | "private";
+                                accessMode: "content" | "governance";
                                 title: string | null;
                                 lifecycleStatus: "active" | "archived";
                                 revision: number;
@@ -5690,8 +8278,11 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        kind: "channel" | "dm";
+                        /** @enum {string} */
+                        kind: "dm";
                         title?: string;
+                        /** @enum {string} */
+                        visibility?: "private";
                         directWorkspaceMembershipIds?: string[];
                     };
                 };
@@ -5709,7 +8300,22 @@ export interface paths {
                             /** Format: uuid */
                             workspaceId: string;
                             projectId: string | null;
+                            scope: {
+                                /** @enum {string} */
+                                type: "workspace_general";
+                            } | {
+                                /** @enum {string} */
+                                type: "direct_message";
+                            } | {
+                                /** @enum {string} */
+                                type: "project_group";
+                                /** Format: uuid */
+                                projectId: string;
+                                membershipMode: "project_all" | "explicit";
+                            };
                             kind: "channel" | "dm";
+                            visibility: "public" | "private";
+                            accessMode: "content" | "governance";
                             title: string | null;
                             lifecycleStatus: "active" | "archived";
                             revision: number;
@@ -5768,7 +8374,22 @@ export interface paths {
                                 /** Format: uuid */
                                 workspaceId: string;
                                 projectId: string | null;
+                                scope: {
+                                    /** @enum {string} */
+                                    type: "workspace_general";
+                                } | {
+                                    /** @enum {string} */
+                                    type: "direct_message";
+                                } | {
+                                    /** @enum {string} */
+                                    type: "project_group";
+                                    /** Format: uuid */
+                                    projectId: string;
+                                    membershipMode: "project_all" | "explicit";
+                                };
                                 kind: "channel" | "dm";
+                                visibility: "public" | "private";
+                                accessMode: "content" | "governance";
                                 title: string | null;
                                 lifecycleStatus: "active" | "archived";
                                 revision: number;
@@ -5806,6 +8427,7 @@ export interface paths {
                         /** @enum {string} */
                         kind: "channel";
                         title?: string;
+                        participantProjectMembershipIds: string[];
                     };
                 };
             };
@@ -5822,7 +8444,22 @@ export interface paths {
                             /** Format: uuid */
                             workspaceId: string;
                             projectId: string | null;
+                            scope: {
+                                /** @enum {string} */
+                                type: "workspace_general";
+                            } | {
+                                /** @enum {string} */
+                                type: "direct_message";
+                            } | {
+                                /** @enum {string} */
+                                type: "project_group";
+                                /** Format: uuid */
+                                projectId: string;
+                                membershipMode: "project_all" | "explicit";
+                            };
                             kind: "channel" | "dm";
+                            visibility: "public" | "private";
+                            accessMode: "content" | "governance";
                             title: string | null;
                             lifecycleStatus: "active" | "archived";
                             revision: number;
@@ -5876,7 +8513,22 @@ export interface paths {
                             /** Format: uuid */
                             workspaceId: string;
                             projectId: string | null;
+                            scope: {
+                                /** @enum {string} */
+                                type: "workspace_general";
+                            } | {
+                                /** @enum {string} */
+                                type: "direct_message";
+                            } | {
+                                /** @enum {string} */
+                                type: "project_group";
+                                /** Format: uuid */
+                                projectId: string;
+                                membershipMode: "project_all" | "explicit";
+                            };
                             kind: "channel" | "dm";
+                            visibility: "public" | "private";
+                            accessMode: "content" | "governance";
                             title: string | null;
                             lifecycleStatus: "active" | "archived";
                             revision: number;
@@ -5942,7 +8594,22 @@ export interface paths {
                             /** Format: uuid */
                             workspaceId: string;
                             projectId: string | null;
+                            scope: {
+                                /** @enum {string} */
+                                type: "workspace_general";
+                            } | {
+                                /** @enum {string} */
+                                type: "direct_message";
+                            } | {
+                                /** @enum {string} */
+                                type: "project_group";
+                                /** Format: uuid */
+                                projectId: string;
+                                membershipMode: "project_all" | "explicit";
+                            };
                             kind: "channel" | "dm";
+                            visibility: "public" | "private";
+                            accessMode: "content" | "governance";
                             title: string | null;
                             lifecycleStatus: "active" | "archived";
                             revision: number;
@@ -6006,7 +8673,22 @@ export interface paths {
                             /** Format: uuid */
                             workspaceId: string;
                             projectId: string | null;
+                            scope: {
+                                /** @enum {string} */
+                                type: "workspace_general";
+                            } | {
+                                /** @enum {string} */
+                                type: "direct_message";
+                            } | {
+                                /** @enum {string} */
+                                type: "project_group";
+                                /** Format: uuid */
+                                projectId: string;
+                                membershipMode: "project_all" | "explicit";
+                            };
                             kind: "channel" | "dm";
+                            visibility: "public" | "private";
+                            accessMode: "content" | "governance";
                             title: string | null;
                             lifecycleStatus: "active" | "archived";
                             revision: number;
@@ -6068,6 +8750,7 @@ export interface paths {
                                 projectId: string | null;
                                 threadId: string | null;
                                 threadRootMessageId: string | null;
+                                replyToMessageId: string | null;
                                 /** Format: uuid */
                                 authorActorId: string;
                                 /** Format: uuid */
@@ -6104,14 +8787,20 @@ export interface paths {
                                     /** Format: uuid */
                                     artifactId: string;
                                     /** Format: uuid */
-                                    artifactSnapshotId: string;
+                                    artifactVersionId: string;
                                     artifactName: string;
-                                    snapshotLabel: string | null;
-                                    snapshotCreatedAt: number;
+                                    version: number;
+                                    fileName: string;
                                     mediaType: string;
                                     contentDigest: string;
                                     byteLength: number;
                                     contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                workItemReferences: {
+                                    /** Format: uuid */
+                                    workItemId: string;
+                                    taskNumber: number;
                                 }[];
                                 createdAt: number;
                             }[];
@@ -6140,8 +8829,10 @@ export interface paths {
                         artifactSelections?: {
                             /** Format: uuid */
                             artifactId: string;
-                            snapshotId: string | null;
+                            /** Format: uuid */
+                            artifactVersionId: string;
                         }[];
+                        workItemIds?: string[];
                     };
                 };
             };
@@ -6162,6 +8853,7 @@ export interface paths {
                             projectId: string | null;
                             threadId: string | null;
                             threadRootMessageId: string | null;
+                            replyToMessageId: string | null;
                             /** Format: uuid */
                             authorActorId: string;
                             /** Format: uuid */
@@ -6198,14 +8890,20 @@ export interface paths {
                                 /** Format: uuid */
                                 artifactId: string;
                                 /** Format: uuid */
-                                artifactSnapshotId: string;
+                                artifactVersionId: string;
                                 artifactName: string;
-                                snapshotLabel: string | null;
-                                snapshotCreatedAt: number;
+                                version: number;
+                                fileName: string;
                                 mediaType: string;
                                 contentDigest: string;
                                 byteLength: number;
                                 contentAvailable: boolean;
+                                artifactStatus: "active" | "deleted" | "purged";
+                            }[];
+                            workItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
                             }[];
                             createdAt: number;
                         };
@@ -6247,8 +8945,10 @@ export interface paths {
                         artifactSelections?: {
                             /** Format: uuid */
                             artifactId: string;
-                            snapshotId: string | null;
+                            /** Format: uuid */
+                            artifactVersionId: string;
                         }[];
+                        workItemIds?: string[];
                     };
                 };
             };
@@ -6269,6 +8969,7 @@ export interface paths {
                             projectId: string | null;
                             threadId: string | null;
                             threadRootMessageId: string | null;
+                            replyToMessageId: string | null;
                             /** Format: uuid */
                             authorActorId: string;
                             /** Format: uuid */
@@ -6305,14 +9006,20 @@ export interface paths {
                                 /** Format: uuid */
                                 artifactId: string;
                                 /** Format: uuid */
-                                artifactSnapshotId: string;
+                                artifactVersionId: string;
                                 artifactName: string;
-                                snapshotLabel: string | null;
-                                snapshotCreatedAt: number;
+                                version: number;
+                                fileName: string;
                                 mediaType: string;
                                 contentDigest: string;
                                 byteLength: number;
                                 contentAvailable: boolean;
+                                artifactStatus: "active" | "deleted" | "purged";
+                            }[];
+                            workItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
                             }[];
                             createdAt: number;
                         };
@@ -6353,6 +9060,8 @@ export interface paths {
                         "application/json": {
                             items: {
                                 /** Format: uuid */
+                                scopeMembershipId: string;
+                                /** Format: uuid */
                                 workspaceMembershipId: string;
                                 projectMembershipId: string | null;
                                 /** Format: uuid */
@@ -6369,6 +9078,101 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversationId}/participants/{scopeMembershipId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    conversationId: string;
+                    scopeMembershipId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        expectedRevision: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            scopeMembershipId: string;
+                            /** Format: uuid */
+                            workspaceMembershipId: string;
+                            projectMembershipId: string | null;
+                            /** Format: uuid */
+                            actorId: string;
+                            actorType: "human" | "agent";
+                            displayName: string;
+                            joinedAt: number;
+                        };
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    conversationId: string;
+                    scopeMembershipId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        expectedRevision: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            scopeMembershipId: string;
+                            revision: number;
+                            contextVersion: number;
+                            removedAt: number;
+                            cancelledAgentRequestIds: string[];
+                            cancelledRunIds: string[];
+                        };
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -6418,7 +9222,7 @@ export interface paths {
                                 version: number;
                                 intake: {
                                     disposition: "ready" | "waiting" | "blocked";
-                                    reasons: ("runtime_unavailable" | "project_working_copy_unavailable" | "agent_suspended" | "authority_revoked")[];
+                                    reasons: ("runtime_unavailable" | "agent_suspended" | "authority_revoked")[];
                                 } | null;
                                 terminalReason: {
                                     code: "requestor_cancelled" | "authority_revoked" | "intake_rejected";
@@ -6514,7 +9318,7 @@ export interface paths {
                             version: number;
                             intake: {
                                 disposition: "ready" | "waiting" | "blocked";
-                                reasons: ("runtime_unavailable" | "project_working_copy_unavailable" | "agent_suspended" | "authority_revoked")[];
+                                reasons: ("runtime_unavailable" | "agent_suspended" | "authority_revoked")[];
                             } | null;
                             terminalReason: {
                                 code: "requestor_cancelled" | "authority_revoked" | "intake_rejected";
@@ -6619,7 +9423,7 @@ export interface paths {
                             version: number;
                             intake: {
                                 disposition: "ready" | "waiting" | "blocked";
-                                reasons: ("runtime_unavailable" | "project_working_copy_unavailable" | "agent_suspended" | "authority_revoked")[];
+                                reasons: ("runtime_unavailable" | "agent_suspended" | "authority_revoked")[];
                             } | null;
                             terminalReason: {
                                 code: "requestor_cancelled" | "authority_revoked" | "intake_rejected";
@@ -6660,85 +9464,6 @@ export interface paths {
                             } | null;
                             createdAt: number;
                             updatedAt: number;
-                            terminalAt: number | null;
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agent-requests/{agentRequestId}/accept": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: {
-            parameters: {
-                query?: never;
-                header: {
-                    "idempotency-key": string;
-                };
-                path: {
-                    agentRequestId: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        expectedVersion: number;
-                        budget?: {
-                            maxWallTimeMs?: number;
-                            maxContextBytes?: number;
-                            maxToolCalls?: number;
-                        };
-                    };
-                };
-            };
-            responses: {
-                /** @description Default Response */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: uuid */
-                            id: string;
-                            /** Format: uuid */
-                            workspaceId: string;
-                            /** Format: uuid */
-                            agentRequestId: string;
-                            /** Format: uuid */
-                            agentId: string;
-                            /** Format: uuid */
-                            agentMembershipId: string;
-                            projectId: string | null;
-                            agentProjectMembershipId: string | null;
-                            /** Format: uuid */
-                            bindingId: string;
-                            bindingRevision: number;
-                            /** Format: uuid */
-                            policyVersionId: string;
-                            policyVersion: number;
-                            budget: {
-                                maxWallTimeMs: number;
-                                maxContextBytes: number;
-                                maxToolCalls: number;
-                            };
-                            status: "active" | "terminal";
-                            outcome: "publish" | "no_output" | "discard" | "cancelled" | "failed" | null;
-                            deadlineAt: number;
-                            createdAt: number;
                             terminalAt: number | null;
                         };
                     };
@@ -6882,9 +9607,6 @@ export interface paths {
                             workspaceContextVersion: number;
                             projectId: string | null;
                             projectContextVersion: number | null;
-                            repositoryId: string | null;
-                            repositoryIdentity: string | null;
-                            repositoryBaseCommit: string | null;
                             conversationContextVersion: number;
                             changeCursor: number;
                             sources: {
@@ -7014,13 +9736,9 @@ export interface paths {
                                 kind: "workspace_scratch";
                             } | {
                                 /** @enum {string} */
-                                kind: "project_repository";
+                                kind: "project_scratch";
                                 /** Format: uuid */
                                 projectId: string;
-                                /** Format: uuid */
-                                repositoryId: string;
-                                repositoryIdentity: string;
-                                baseCommit: string;
                             };
                             runContext: {
                                 /** Format: uuid */
@@ -7070,9 +9788,6 @@ export interface paths {
                                 workspaceContextVersion: number;
                                 projectId: string | null;
                                 projectContextVersion: number | null;
-                                repositoryId: string | null;
-                                repositoryIdentity: string | null;
-                                repositoryBaseCommit: string | null;
                                 conversationContextVersion: number;
                                 changeCursor: number;
                                 sources: {
@@ -7129,14 +9844,48 @@ export interface paths {
                             /** Format: uuid */
                             agentId: string;
                             highestSequence: number;
-                            targets: {
+                            targets: ({
+                                /** @enum {string} */
+                                kind: "discussion";
                                 /** Format: uuid */
                                 conversationId: string;
                                 threadId: string | null;
+                                workItemId: null;
                                 target: string;
                                 pendingCount: number;
                                 firstSequence: number;
                                 lastSequence: number;
+                                requiresAction: boolean;
+                            } | {
+                                /** @enum {string} */
+                                kind: "work_item";
+                                conversationId: null;
+                                threadId: null;
+                                /** Format: uuid */
+                                workItemId: string;
+                                target: string;
+                                pendingCount: number;
+                                firstSequence: number;
+                                lastSequence: number;
+                                /** @enum {boolean} */
+                                requiresAction: true;
+                            })[];
+                            sessionTriggers: {
+                                session: {
+                                    kind: "mention" | "work_item";
+                                    /** Format: uuid */
+                                    key: string;
+                                };
+                                /** Format: uuid */
+                                inboxItemId: string;
+                                sequence: number;
+                                target: string | null;
+                                agentRequestId: string | null;
+                                messageId: string | null;
+                                conversationId: string | null;
+                                threadId: string | null;
+                                workItemId: string | null;
+                                requiresAction: boolean;
                             }[];
                         };
                     };
@@ -7151,7 +9900,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/computers/self/agent-inbox-wakes": {
+    "/v1/computers/self/agents/{agentId}/session-input": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    kind: "mention" | "work_item";
+                    key: string;
+                };
+                header?: never;
+                path: {
+                    agentId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            agentId: string;
+                            session: {
+                                kind: "mention" | "work_item";
+                                /** Format: uuid */
+                                key: string;
+                            };
+                            target: string | null;
+                            projectId: string | null;
+                            initialDiscussionFrontier: number | null;
+                            discussion: {
+                                target: string;
+                                /** Format: uuid */
+                                agentRequestId: string;
+                                initialDiscussionFrontier: number;
+                                sessionWindow: {
+                                    mode: "dm" | "isolated";
+                                    acceptedMessages: number;
+                                    /** @enum {number} */
+                                    maxMessages: 10;
+                                    status: "accepting" | "frozen" | "completed";
+                                };
+                            } | null;
+                            sessionWindow: {
+                                mode: "dm" | "isolated";
+                                acceptedMessages: number;
+                                /** @enum {number} */
+                                maxMessages: 10;
+                                status: "accepting" | "frozen" | "completed";
+                            };
+                            contextHash: string;
+                            contextJsonl: string;
+                            referencedWorkItemIds: string[];
+                            runtimeId: string;
+                            runtimeBindingRevision: number;
+                            runtimeConfiguration: {
+                                model: string | null;
+                                reasoningEffort: ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra") | null;
+                                mode: string | null;
+                            };
+                            developerInstructions: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agents/{agentId}/activity": {
         parameters: {
             query?: never;
             header?: never;
@@ -7159,6 +9992,107 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    agentId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        eventId: string;
+                        /** Format: uuid */
+                        turnId: string;
+                        sequence: number;
+                        eventType: "turn_started" | "thought" | "tool" | "plan" | "message" | "turn_completed" | "turn_failed";
+                        title: string;
+                        status: "pending" | "in_progress" | "completed" | "failed";
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            eventId: string;
+                            /** Format: uuid */
+                            turnId: string;
+                            sequence: number;
+                            eventType: "turn_started" | "thought" | "tool" | "plan" | "message" | "turn_completed" | "turn_failed";
+                            title: string;
+                            status: "pending" | "in_progress" | "completed" | "failed";
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            agentId: string;
+                            agentName: string;
+                            turnStatus: "active" | "completed" | "failed";
+                            turnStartedAt: number;
+                            turnUpdatedAt: number;
+                            turnFinishedAt: number | null;
+                            createdAt: number;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agent-inbox-wakes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            events: {
+                                /** @enum {string} */
+                                type: "agent.inbox_changed";
+                                /** Format: uuid */
+                                agentId: string;
+                                wakeSequence: number;
+                            }[];
+                            cursor: {
+                                [key: string]: number;
+                            };
+                        };
+                    };
+                };
+            };
+        };
         put?: never;
         post: {
             parameters: {
@@ -7189,11 +10123,677 @@ export interface paths {
                                 type: "agent.inbox_changed";
                                 /** Format: uuid */
                                 agentId: string;
-                                highestSequence: number;
+                                wakeSequence: number;
                             }[];
                             cursor: {
                                 [key: string]: number;
                             };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agents/{agentId}/work-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    projectId?: string;
+                };
+                header?: never;
+                path: {
+                    agentId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                /** Format: uuid */
+                                workspaceId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                taskNumber: number;
+                                description: string;
+                                relatedWorkItemReferences: {
+                                    /** Format: uuid */
+                                    workItemId: string;
+                                    taskNumber: number;
+                                }[];
+                                sourceConversationId: string | null;
+                                sourceMessageId: string | null;
+                                sourceThreadId: string | null;
+                                lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                                blockerReason: string | null;
+                                cancellationReason: string | null;
+                                assignee: {
+                                    /** Format: uuid */
+                                    projectMembershipId: string;
+                                    /** Format: uuid */
+                                    workspaceMembershipId: string;
+                                    /** Format: uuid */
+                                    actorId: string;
+                                    actorType: "human" | "agent";
+                                    displayName: string;
+                                } | null;
+                                assignees: {
+                                    /** Format: uuid */
+                                    projectMembershipId: string;
+                                    /** Format: uuid */
+                                    workspaceMembershipId: string;
+                                    /** Format: uuid */
+                                    actorId: string;
+                                    actorType: "human" | "agent";
+                                    displayName: string;
+                                }[];
+                                currentSubmission: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    commentId: string | null;
+                                    /** Format: uuid */
+                                    submittedByMembershipId: string;
+                                    /** Format: uuid */
+                                    submittedByProjectMembershipId: string;
+                                    /** Format: uuid */
+                                    submittedByActorId: string;
+                                    submittedByDisplayName: string;
+                                    assignmentRevision: number;
+                                    artifactReferences: {
+                                        /** Format: uuid */
+                                        artifactId: string;
+                                        /** Format: uuid */
+                                        artifactVersionId: string;
+                                        artifactName: string;
+                                        version: number;
+                                        fileName: string;
+                                        mediaType: string;
+                                        contentDigest: string;
+                                        byteLength: number;
+                                        contentAvailable: boolean;
+                                        artifactStatus: "active" | "deleted" | "purged";
+                                    }[];
+                                    createdAt: number;
+                                } | null;
+                                assignmentRevision: number;
+                                commentFrontier: number;
+                                revision: number;
+                                /** Format: uuid */
+                                createdByMembershipId: string;
+                                /** Format: uuid */
+                                createdByProjectMembershipId: string;
+                                createdByDisplayName: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                completedAt: number | null;
+                                cancelledAt: number | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agents/{agentId}/work-items/{workItemId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    agentId: string;
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            taskNumber: number;
+                            description: string;
+                            relatedWorkItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            sourceConversationId: string | null;
+                            sourceMessageId: string | null;
+                            sourceThreadId: string | null;
+                            lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                            blockerReason: string | null;
+                            cancellationReason: string | null;
+                            assignee: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            } | null;
+                            assignees: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            currentSubmission: {
+                                /** Format: uuid */
+                                id: string;
+                                commentId: string | null;
+                                /** Format: uuid */
+                                submittedByMembershipId: string;
+                                /** Format: uuid */
+                                submittedByProjectMembershipId: string;
+                                /** Format: uuid */
+                                submittedByActorId: string;
+                                submittedByDisplayName: string;
+                                assignmentRevision: number;
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                createdAt: number;
+                            } | null;
+                            assignmentRevision: number;
+                            commentFrontier: number;
+                            revision: number;
+                            /** Format: uuid */
+                            createdByMembershipId: string;
+                            /** Format: uuid */
+                            createdByProjectMembershipId: string;
+                            createdByDisplayName: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            completedAt: number | null;
+                            cancelledAt: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agents/{agentId}/work-items/{workItemId}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    agentId: string;
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                /** Format: uuid */
+                                workspaceId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                /** Format: uuid */
+                                workItemId: string;
+                                /** Format: uuid */
+                                authorActorId: string;
+                                /** Format: uuid */
+                                authorMembershipId: string;
+                                /** Format: uuid */
+                                authorProjectMembershipId: string;
+                                authorActorType: "human" | "agent";
+                                authorDisplayName: string;
+                                body: string;
+                                mentionedActorIds: string[];
+                                mentions: {
+                                    /** Format: uuid */
+                                    actorId: string;
+                                    actorType: "human" | "agent";
+                                    displayName: string;
+                                }[];
+                                workItemReferences: {
+                                    /** Format: uuid */
+                                    workItemId: string;
+                                    taskNumber: number;
+                                }[];
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                position: number;
+                                createdAt: number;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    agentId: string;
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        body: string;
+                        mentionedActorIds?: string[];
+                        workItemIds?: string[];
+                        artifactSelections?: {
+                            /** Format: uuid */
+                            artifactId: string;
+                            /** Format: uuid */
+                            artifactVersionId: string;
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            /** Format: uuid */
+                            workItemId: string;
+                            /** Format: uuid */
+                            authorActorId: string;
+                            /** Format: uuid */
+                            authorMembershipId: string;
+                            /** Format: uuid */
+                            authorProjectMembershipId: string;
+                            authorActorType: "human" | "agent";
+                            authorDisplayName: string;
+                            body: string;
+                            mentionedActorIds: string[];
+                            mentions: {
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            workItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            artifactReferences: {
+                                /** Format: uuid */
+                                artifactId: string;
+                                /** Format: uuid */
+                                artifactVersionId: string;
+                                artifactName: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                contentDigest: string;
+                                byteLength: number;
+                                contentAvailable: boolean;
+                                artifactStatus: "active" | "deleted" | "purged";
+                            }[];
+                            position: number;
+                            createdAt: number;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agents/{agentId}/work-items/{workItemId}/block": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    agentId: string;
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        reason: string;
+                        expectedRevision: number;
+                        expectedAssignmentRevision: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            taskNumber: number;
+                            description: string;
+                            relatedWorkItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            sourceConversationId: string | null;
+                            sourceMessageId: string | null;
+                            sourceThreadId: string | null;
+                            lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                            blockerReason: string | null;
+                            cancellationReason: string | null;
+                            assignee: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            } | null;
+                            assignees: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            currentSubmission: {
+                                /** Format: uuid */
+                                id: string;
+                                commentId: string | null;
+                                /** Format: uuid */
+                                submittedByMembershipId: string;
+                                /** Format: uuid */
+                                submittedByProjectMembershipId: string;
+                                /** Format: uuid */
+                                submittedByActorId: string;
+                                submittedByDisplayName: string;
+                                assignmentRevision: number;
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                createdAt: number;
+                            } | null;
+                            assignmentRevision: number;
+                            commentFrontier: number;
+                            revision: number;
+                            /** Format: uuid */
+                            createdByMembershipId: string;
+                            /** Format: uuid */
+                            createdByProjectMembershipId: string;
+                            createdByDisplayName: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            completedAt: number | null;
+                            cancelledAt: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agents/{agentId}/work-items/{workItemId}/submissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    agentId: string;
+                    workItemId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        commentId?: string | null;
+                        artifactVersionIds?: string[];
+                        expectedRevision: number;
+                        expectedAssignmentRevision: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            workspaceId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            taskNumber: number;
+                            description: string;
+                            relatedWorkItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
+                            }[];
+                            sourceConversationId: string | null;
+                            sourceMessageId: string | null;
+                            sourceThreadId: string | null;
+                            lifecycleStatus: "open" | "blocked" | "completed" | "cancelled";
+                            blockerReason: string | null;
+                            cancellationReason: string | null;
+                            assignee: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            } | null;
+                            assignees: {
+                                /** Format: uuid */
+                                projectMembershipId: string;
+                                /** Format: uuid */
+                                workspaceMembershipId: string;
+                                /** Format: uuid */
+                                actorId: string;
+                                actorType: "human" | "agent";
+                                displayName: string;
+                            }[];
+                            currentSubmission: {
+                                /** Format: uuid */
+                                id: string;
+                                commentId: string | null;
+                                /** Format: uuid */
+                                submittedByMembershipId: string;
+                                /** Format: uuid */
+                                submittedByProjectMembershipId: string;
+                                /** Format: uuid */
+                                submittedByActorId: string;
+                                submittedByDisplayName: string;
+                                assignmentRevision: number;
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                createdAt: number;
+                            } | null;
+                            assignmentRevision: number;
+                            commentFrontier: number;
+                            revision: number;
+                            /** Format: uuid */
+                            createdByMembershipId: string;
+                            /** Format: uuid */
+                            createdByProjectMembershipId: string;
+                            createdByDisplayName: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            completedAt: number | null;
+                            cancelledAt: number | null;
                         };
                     };
                 };
@@ -7228,12 +10828,11 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        /** Format: uuid */
-                        attemptId: string;
-                        /** Format: uuid */
-                        conversationId: string;
-                        threadId: string | null;
+                        target: string;
                         receipt: string;
+                        /** Format: uuid */
+                        agentRequestId: string;
+                        initialDiscussionFrontier?: number;
                     };
                 };
             };
@@ -7247,21 +10846,26 @@ export interface paths {
                         "application/json": {
                             /** Format: uuid */
                             agentId: string;
-                            /** Format: uuid */
-                            runId: string;
-                            /** Format: uuid */
-                            attemptId: string;
                             receipt: string;
                             target: string;
+                            /** @enum {string} */
+                            targetKind: "discussion";
+                            sessionWindow: {
+                                mode: "dm" | "isolated";
+                                acceptedMessages: number;
+                                /** @enum {number} */
+                                maxMessages: 10;
+                                status: "accepting" | "frozen" | "completed";
+                            };
                             attention: {
                                 /** Format: uuid */
                                 inboxItemId: string;
                                 sequence: number;
-                                attentionKind: "direct_message" | "mention";
-                                /** Format: uuid */
-                                agentRequestId: string;
-                                /** Format: uuid */
-                                messageId: string;
+                                attentionKind: "direct_message" | "mention" | "work_item_assignment" | "work_item_mention";
+                                agentRequestId: string | null;
+                                messageId: string | null;
+                                workItemId: string | null;
+                                workItemCommentId: string | null;
                             }[];
                             discussion: {
                                 /** Format: uuid */
@@ -7279,6 +10883,7 @@ export interface paths {
                                     projectId: string | null;
                                     threadId: string | null;
                                     threadRootMessageId: string | null;
+                                    replyToMessageId: string | null;
                                     /** Format: uuid */
                                     authorActorId: string;
                                     /** Format: uuid */
@@ -7315,14 +10920,20 @@ export interface paths {
                                         /** Format: uuid */
                                         artifactId: string;
                                         /** Format: uuid */
-                                        artifactSnapshotId: string;
+                                        artifactVersionId: string;
                                         artifactName: string;
-                                        snapshotLabel: string | null;
-                                        snapshotCreatedAt: number;
+                                        version: number;
+                                        fileName: string;
                                         mediaType: string;
                                         contentDigest: string;
                                         byteLength: number;
                                         contentAvailable: boolean;
+                                        artifactStatus: "active" | "deleted" | "purged";
+                                    }[];
+                                    workItemReferences: {
+                                        /** Format: uuid */
+                                        workItemId: string;
+                                        taskNumber: number;
                                     }[];
                                     createdAt: number;
                                 } | null;
@@ -7336,6 +10947,7 @@ export interface paths {
                                     projectId: string | null;
                                     threadId: string | null;
                                     threadRootMessageId: string | null;
+                                    replyToMessageId: string | null;
                                     /** Format: uuid */
                                     authorActorId: string;
                                     /** Format: uuid */
@@ -7372,14 +10984,20 @@ export interface paths {
                                         /** Format: uuid */
                                         artifactId: string;
                                         /** Format: uuid */
-                                        artifactSnapshotId: string;
+                                        artifactVersionId: string;
                                         artifactName: string;
-                                        snapshotLabel: string | null;
-                                        snapshotCreatedAt: number;
+                                        version: number;
+                                        fileName: string;
                                         mediaType: string;
                                         contentDigest: string;
                                         byteLength: number;
                                         contentAvailable: boolean;
+                                        artifactStatus: "active" | "deleted" | "purged";
+                                    }[];
+                                    workItemReferences: {
+                                        /** Format: uuid */
+                                        workItemId: string;
+                                        taskNumber: number;
                                     }[];
                                     createdAt: number;
                                 }[];
@@ -7405,7 +11023,6 @@ export interface paths {
         get: {
             parameters: {
                 query: {
-                    attemptId: string;
                     conversationId: string;
                     threadId?: string;
                     before?: number;
@@ -7437,6 +11054,7 @@ export interface paths {
                                 projectId: string | null;
                                 threadId: string | null;
                                 threadRootMessageId: string | null;
+                                replyToMessageId: string | null;
                                 /** Format: uuid */
                                 authorActorId: string;
                                 /** Format: uuid */
@@ -7473,14 +11091,20 @@ export interface paths {
                                     /** Format: uuid */
                                     artifactId: string;
                                     /** Format: uuid */
-                                    artifactSnapshotId: string;
+                                    artifactVersionId: string;
                                     artifactName: string;
-                                    snapshotLabel: string | null;
-                                    snapshotCreatedAt: number;
+                                    version: number;
+                                    fileName: string;
                                     mediaType: string;
                                     contentDigest: string;
                                     byteLength: number;
                                     contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                workItemReferences: {
+                                    /** Format: uuid */
+                                    workItemId: string;
+                                    taskNumber: number;
                                 }[];
                                 createdAt: number;
                             }[];
@@ -7505,78 +11129,246 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** Format: uuid */
-                        attemptId: string;
-                        /** Format: uuid */
                         conversationId: string;
                         threadId: string | null;
                         receipt: string;
+                        /** Format: uuid */
+                        draftId: string;
+                        expectedDiscussionFrontier: number;
                         body: string;
+                        artifactVersionIds?: string[];
+                        mentionedActorIds?: string[];
+                        workItemIds?: string[];
+                        mode: "check" | "override";
                     };
                 };
             };
             responses: {
                 /** @description Default Response */
-                201: {
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
                         "application/json": {
-                            /** Format: uuid */
-                            id: string;
-                            /** Format: uuid */
-                            workspaceId: string;
-                            /** Format: uuid */
-                            conversationId: string;
-                            projectId: string | null;
-                            threadId: string | null;
-                            threadRootMessageId: string | null;
-                            /** Format: uuid */
-                            authorActorId: string;
-                            /** Format: uuid */
-                            authorMembershipId: string;
-                            authorProjectMembershipId: string | null;
-                            authorActorType: "human" | "agent";
-                            authorDisplayName: string;
-                            authorDeleted: boolean;
-                            body: string;
-                            conversationVersion: number;
-                            scopePosition: number;
-                            producingRunId: string | null;
-                            producingAttemptId: string | null;
-                            mentions: {
-                                /** Format: uuid */
-                                actorId: string;
-                                actorType: "human" | "agent";
-                                displayName: string;
-                            }[];
-                            mentionOutcomes: {
+                            /** @enum {string} */
+                            status: "published";
+                            message: {
                                 /** Format: uuid */
                                 id: string;
                                 /** Format: uuid */
-                                targetReference: string;
-                                targetAgentId: string | null;
-                                outcome: "requested" | "not_requested";
+                                workspaceId: string;
+                                /** Format: uuid */
+                                conversationId: string;
+                                projectId: string | null;
+                                threadId: string | null;
+                                threadRootMessageId: string | null;
+                                replyToMessageId: string | null;
+                                /** Format: uuid */
+                                authorActorId: string;
+                                /** Format: uuid */
+                                authorMembershipId: string;
+                                authorProjectMembershipId: string | null;
+                                authorActorType: "human" | "agent";
+                                authorDisplayName: string;
+                                authorDeleted: boolean;
+                                body: string;
+                                conversationVersion: number;
+                                scopePosition: number;
+                                producingRunId: string | null;
+                                producingAttemptId: string | null;
+                                mentions: {
+                                    /** Format: uuid */
+                                    actorId: string;
+                                    actorType: "human" | "agent";
+                                    displayName: string;
+                                }[];
+                                mentionOutcomes: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    /** Format: uuid */
+                                    targetReference: string;
+                                    targetAgentId: string | null;
+                                    outcome: "requested" | "not_requested";
+                                    agentRequestId: string | null;
+                                    reason: {
+                                        code: "target_not_in_workspace" | "target_not_in_project" | "target_not_requestable" | "target_cannot_access_scope" | "target_unavailable";
+                                        visibility: "exact" | "summary";
+                                    } | null;
+                                }[];
+                                artifactReferences: {
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    /** Format: uuid */
+                                    artifactVersionId: string;
+                                    artifactName: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    contentDigest: string;
+                                    byteLength: number;
+                                    contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                workItemReferences: {
+                                    /** Format: uuid */
+                                    workItemId: string;
+                                    taskNumber: number;
+                                }[];
+                                createdAt: number;
+                            };
+                        } | {
+                            /** @enum {string} */
+                            status: "held";
+                            /** Format: uuid */
+                            draftId: string;
+                            expectedDiscussionFrontier: number;
+                            currentDiscussionFrontier: number;
+                            attention: {
+                                /** Format: uuid */
+                                inboxItemId: string;
+                                sequence: number;
+                                attentionKind: "direct_message" | "mention" | "work_item_assignment" | "work_item_mention";
                                 agentRequestId: string | null;
-                                reason: {
-                                    code: "target_not_in_workspace" | "target_not_in_project" | "target_not_requestable" | "target_cannot_access_scope" | "target_unavailable";
-                                    visibility: "exact" | "summary";
+                                messageId: string | null;
+                                workItemId: string | null;
+                                workItemCommentId: string | null;
+                            }[];
+                            discussionDelta: {
+                                /** Format: uuid */
+                                conversationId: string;
+                                threadId: string | null;
+                                sincePositionExclusive: number;
+                                throughPosition: number;
+                                rootMessage: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    /** Format: uuid */
+                                    workspaceId: string;
+                                    /** Format: uuid */
+                                    conversationId: string;
+                                    projectId: string | null;
+                                    threadId: string | null;
+                                    threadRootMessageId: string | null;
+                                    replyToMessageId: string | null;
+                                    /** Format: uuid */
+                                    authorActorId: string;
+                                    /** Format: uuid */
+                                    authorMembershipId: string;
+                                    authorProjectMembershipId: string | null;
+                                    authorActorType: "human" | "agent";
+                                    authorDisplayName: string;
+                                    authorDeleted: boolean;
+                                    body: string;
+                                    conversationVersion: number;
+                                    scopePosition: number;
+                                    producingRunId: string | null;
+                                    producingAttemptId: string | null;
+                                    mentions: {
+                                        /** Format: uuid */
+                                        actorId: string;
+                                        actorType: "human" | "agent";
+                                        displayName: string;
+                                    }[];
+                                    mentionOutcomes: {
+                                        /** Format: uuid */
+                                        id: string;
+                                        /** Format: uuid */
+                                        targetReference: string;
+                                        targetAgentId: string | null;
+                                        outcome: "requested" | "not_requested";
+                                        agentRequestId: string | null;
+                                        reason: {
+                                            code: "target_not_in_workspace" | "target_not_in_project" | "target_not_requestable" | "target_cannot_access_scope" | "target_unavailable";
+                                            visibility: "exact" | "summary";
+                                        } | null;
+                                    }[];
+                                    artifactReferences: {
+                                        /** Format: uuid */
+                                        artifactId: string;
+                                        /** Format: uuid */
+                                        artifactVersionId: string;
+                                        artifactName: string;
+                                        version: number;
+                                        fileName: string;
+                                        mediaType: string;
+                                        contentDigest: string;
+                                        byteLength: number;
+                                        contentAvailable: boolean;
+                                        artifactStatus: "active" | "deleted" | "purged";
+                                    }[];
+                                    workItemReferences: {
+                                        /** Format: uuid */
+                                        workItemId: string;
+                                        taskNumber: number;
+                                    }[];
+                                    createdAt: number;
                                 } | null;
-                            }[];
-                            artifactReferences: {
-                                /** Format: uuid */
-                                artifactId: string;
-                                /** Format: uuid */
-                                artifactSnapshotId: string;
-                                artifactName: string;
-                                snapshotLabel: string | null;
-                                snapshotCreatedAt: number;
-                                mediaType: string;
-                                contentDigest: string;
-                                byteLength: number;
-                                contentAvailable: boolean;
-                            }[];
-                            createdAt: number;
+                                messages: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    /** Format: uuid */
+                                    workspaceId: string;
+                                    /** Format: uuid */
+                                    conversationId: string;
+                                    projectId: string | null;
+                                    threadId: string | null;
+                                    threadRootMessageId: string | null;
+                                    replyToMessageId: string | null;
+                                    /** Format: uuid */
+                                    authorActorId: string;
+                                    /** Format: uuid */
+                                    authorMembershipId: string;
+                                    authorProjectMembershipId: string | null;
+                                    authorActorType: "human" | "agent";
+                                    authorDisplayName: string;
+                                    authorDeleted: boolean;
+                                    body: string;
+                                    conversationVersion: number;
+                                    scopePosition: number;
+                                    producingRunId: string | null;
+                                    producingAttemptId: string | null;
+                                    mentions: {
+                                        /** Format: uuid */
+                                        actorId: string;
+                                        actorType: "human" | "agent";
+                                        displayName: string;
+                                    }[];
+                                    mentionOutcomes: {
+                                        /** Format: uuid */
+                                        id: string;
+                                        /** Format: uuid */
+                                        targetReference: string;
+                                        targetAgentId: string | null;
+                                        outcome: "requested" | "not_requested";
+                                        agentRequestId: string | null;
+                                        reason: {
+                                            code: "target_not_in_workspace" | "target_not_in_project" | "target_not_requestable" | "target_cannot_access_scope" | "target_unavailable";
+                                            visibility: "exact" | "summary";
+                                        } | null;
+                                    }[];
+                                    artifactReferences: {
+                                        /** Format: uuid */
+                                        artifactId: string;
+                                        /** Format: uuid */
+                                        artifactVersionId: string;
+                                        artifactName: string;
+                                        version: number;
+                                        fileName: string;
+                                        mediaType: string;
+                                        contentDigest: string;
+                                        byteLength: number;
+                                        contentAvailable: boolean;
+                                        artifactStatus: "active" | "deleted" | "purged";
+                                    }[];
+                                    workItemReferences: {
+                                        /** Format: uuid */
+                                        workItemId: string;
+                                        taskNumber: number;
+                                    }[];
+                                    createdAt: number;
+                                }[];
+                            };
                         };
                     };
                 };
@@ -7598,7 +11390,6 @@ export interface paths {
         get: {
             parameters: {
                 query: {
-                    attemptId: string;
                     conversationId: string;
                     threadId?: string;
                 };
@@ -7627,6 +11418,7 @@ export interface paths {
                             projectId: string | null;
                             threadId: string | null;
                             threadRootMessageId: string | null;
+                            replyToMessageId: string | null;
                             /** Format: uuid */
                             authorActorId: string;
                             /** Format: uuid */
@@ -7663,14 +11455,20 @@ export interface paths {
                                 /** Format: uuid */
                                 artifactId: string;
                                 /** Format: uuid */
-                                artifactSnapshotId: string;
+                                artifactVersionId: string;
                                 artifactName: string;
-                                snapshotLabel: string | null;
-                                snapshotCreatedAt: number;
+                                version: number;
+                                fileName: string;
                                 mediaType: string;
                                 contentDigest: string;
                                 byteLength: number;
                                 contentAvailable: boolean;
+                                artifactStatus: "active" | "deleted" | "purged";
+                            }[];
+                            workItemReferences: {
+                                /** Format: uuid */
+                                workItemId: string;
+                                taskNumber: number;
                             }[];
                             createdAt: number;
                         };
@@ -7680,6 +11478,907 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agents/{agentId}/inbox/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    agentId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        receipt: string;
+                        target: string;
+                        expectedDiscussionFrontier?: number;
+                        /** Format: uuid */
+                        draftId?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "completed";
+                            receipt: string;
+                            handledAt: number;
+                        } | {
+                            /** @enum {string} */
+                            status: "review_required";
+                            expectedDiscussionFrontier: number;
+                            currentDiscussionFrontier: number;
+                            attention: {
+                                /** Format: uuid */
+                                inboxItemId: string;
+                                sequence: number;
+                                attentionKind: "direct_message" | "mention" | "work_item_assignment" | "work_item_mention";
+                                agentRequestId: string | null;
+                                messageId: string | null;
+                                workItemId: string | null;
+                                workItemCommentId: string | null;
+                            }[];
+                            discussionDelta: {
+                                /** Format: uuid */
+                                conversationId: string;
+                                threadId: string | null;
+                                sincePositionExclusive: number;
+                                throughPosition: number;
+                                rootMessage: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    /** Format: uuid */
+                                    workspaceId: string;
+                                    /** Format: uuid */
+                                    conversationId: string;
+                                    projectId: string | null;
+                                    threadId: string | null;
+                                    threadRootMessageId: string | null;
+                                    replyToMessageId: string | null;
+                                    /** Format: uuid */
+                                    authorActorId: string;
+                                    /** Format: uuid */
+                                    authorMembershipId: string;
+                                    authorProjectMembershipId: string | null;
+                                    authorActorType: "human" | "agent";
+                                    authorDisplayName: string;
+                                    authorDeleted: boolean;
+                                    body: string;
+                                    conversationVersion: number;
+                                    scopePosition: number;
+                                    producingRunId: string | null;
+                                    producingAttemptId: string | null;
+                                    mentions: {
+                                        /** Format: uuid */
+                                        actorId: string;
+                                        actorType: "human" | "agent";
+                                        displayName: string;
+                                    }[];
+                                    mentionOutcomes: {
+                                        /** Format: uuid */
+                                        id: string;
+                                        /** Format: uuid */
+                                        targetReference: string;
+                                        targetAgentId: string | null;
+                                        outcome: "requested" | "not_requested";
+                                        agentRequestId: string | null;
+                                        reason: {
+                                            code: "target_not_in_workspace" | "target_not_in_project" | "target_not_requestable" | "target_cannot_access_scope" | "target_unavailable";
+                                            visibility: "exact" | "summary";
+                                        } | null;
+                                    }[];
+                                    artifactReferences: {
+                                        /** Format: uuid */
+                                        artifactId: string;
+                                        /** Format: uuid */
+                                        artifactVersionId: string;
+                                        artifactName: string;
+                                        version: number;
+                                        fileName: string;
+                                        mediaType: string;
+                                        contentDigest: string;
+                                        byteLength: number;
+                                        contentAvailable: boolean;
+                                        artifactStatus: "active" | "deleted" | "purged";
+                                    }[];
+                                    workItemReferences: {
+                                        /** Format: uuid */
+                                        workItemId: string;
+                                        taskNumber: number;
+                                    }[];
+                                    createdAt: number;
+                                } | null;
+                                messages: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    /** Format: uuid */
+                                    workspaceId: string;
+                                    /** Format: uuid */
+                                    conversationId: string;
+                                    projectId: string | null;
+                                    threadId: string | null;
+                                    threadRootMessageId: string | null;
+                                    replyToMessageId: string | null;
+                                    /** Format: uuid */
+                                    authorActorId: string;
+                                    /** Format: uuid */
+                                    authorMembershipId: string;
+                                    authorProjectMembershipId: string | null;
+                                    authorActorType: "human" | "agent";
+                                    authorDisplayName: string;
+                                    authorDeleted: boolean;
+                                    body: string;
+                                    conversationVersion: number;
+                                    scopePosition: number;
+                                    producingRunId: string | null;
+                                    producingAttemptId: string | null;
+                                    mentions: {
+                                        /** Format: uuid */
+                                        actorId: string;
+                                        actorType: "human" | "agent";
+                                        displayName: string;
+                                    }[];
+                                    mentionOutcomes: {
+                                        /** Format: uuid */
+                                        id: string;
+                                        /** Format: uuid */
+                                        targetReference: string;
+                                        targetAgentId: string | null;
+                                        outcome: "requested" | "not_requested";
+                                        agentRequestId: string | null;
+                                        reason: {
+                                            code: "target_not_in_workspace" | "target_not_in_project" | "target_not_requestable" | "target_cannot_access_scope" | "target_unavailable";
+                                            visibility: "exact" | "summary";
+                                        } | null;
+                                    }[];
+                                    artifactReferences: {
+                                        /** Format: uuid */
+                                        artifactId: string;
+                                        /** Format: uuid */
+                                        artifactVersionId: string;
+                                        artifactName: string;
+                                        version: number;
+                                        fileName: string;
+                                        mediaType: string;
+                                        contentDigest: string;
+                                        byteLength: number;
+                                        contentAvailable: boolean;
+                                        artifactStatus: "active" | "deleted" | "purged";
+                                    }[];
+                                    workItemReferences: {
+                                        /** Format: uuid */
+                                        workItemId: string;
+                                        taskNumber: number;
+                                    }[];
+                                    createdAt: number;
+                                }[];
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agents/{agentId}/projects/{projectId}/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    agentId: string;
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                resourceId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                parentResourceId: string | null;
+                                name: string;
+                                path: string;
+                                kind: "file" | "directory";
+                                status: "active" | "deleted" | "purged";
+                                revision: number;
+                                digest: string | null;
+                                mediaType: string | null;
+                                byteLength: number | null;
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agents/{agentId}/projects/{projectId}/resources/{resourceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    agentId: string;
+                    projectId: string;
+                    resourceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            resource: {
+                                /** Format: uuid */
+                                resourceId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                parentResourceId: string | null;
+                                name: string;
+                                path: string;
+                                kind: "file" | "directory";
+                                status: "active" | "deleted" | "purged";
+                                revision: number;
+                                digest: string | null;
+                                mediaType: string | null;
+                                byteLength: number | null;
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            };
+                            contentBase64?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agents/{agentId}/projects/{projectId}/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    agentId: string;
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                linkId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                locator: string;
+                                name: string;
+                                description: string | null;
+                                status: "active" | "deleted" | "purged";
+                                revision: number;
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agents/{agentId}/projects/{projectId}/artifacts/{artifactId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    agentId: string;
+                    projectId: string;
+                    artifactId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            artifactId: string;
+                            /** Format: uuid */
+                            projectId: string;
+                            name: string;
+                            projectPath: string;
+                            status: "active" | "deleted" | "purged";
+                            latestVersionId: string | null;
+                            latestVersion: {
+                                /** Format: uuid */
+                                versionId: string;
+                                /** Format: uuid */
+                                artifactId: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            } | null;
+                            /** Format: uuid */
+                            createdByActorId: string;
+                            createdAt: number;
+                            updatedAt: number;
+                            deletedAt: number | null;
+                            purgeAfter: number | null;
+                            derivationParentVersionIds: string[];
+                            contentBase64?: string;
+                            mediaType?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agents/{agentId}/projects/{projectId}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    agentId: string;
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            artifact: {
+                                /** Format: uuid */
+                                artifactId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                name: string;
+                                projectPath: string;
+                                status: "active" | "deleted" | "purged";
+                                latestVersionId: string | null;
+                                latestVersion: {
+                                    /** Format: uuid */
+                                    versionId: string;
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    byteLength: number;
+                                    digest: string;
+                                    parentVersionId: string | null;
+                                    status: "active" | "deleted" | "purged";
+                                    /** Format: uuid */
+                                    createdByActorId: string;
+                                    createdAt: number;
+                                    taskId: string | null;
+                                    messageId: string | null;
+                                    publishBatchId: string | null;
+                                    note: string | null;
+                                    preview: {
+                                        status: "pending" | "ready" | "failed";
+                                        errorMessage: string | null;
+                                    };
+                                    deletedAt: number | null;
+                                    purgeAfter: number | null;
+                                } | null;
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                                derivationParentVersionIds: string[];
+                                contentBase64?: string;
+                                mediaType?: string;
+                            };
+                            version: {
+                                /** Format: uuid */
+                                versionId: string;
+                                /** Format: uuid */
+                                artifactId: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            };
+                            created: boolean;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            artifact: {
+                                /** Format: uuid */
+                                artifactId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                name: string;
+                                projectPath: string;
+                                status: "active" | "deleted" | "purged";
+                                latestVersionId: string | null;
+                                latestVersion: {
+                                    /** Format: uuid */
+                                    versionId: string;
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    byteLength: number;
+                                    digest: string;
+                                    parentVersionId: string | null;
+                                    status: "active" | "deleted" | "purged";
+                                    /** Format: uuid */
+                                    createdByActorId: string;
+                                    createdAt: number;
+                                    taskId: string | null;
+                                    messageId: string | null;
+                                    publishBatchId: string | null;
+                                    note: string | null;
+                                    preview: {
+                                        status: "pending" | "ready" | "failed";
+                                        errorMessage: string | null;
+                                    };
+                                    deletedAt: number | null;
+                                    purgeAfter: number | null;
+                                } | null;
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                                derivationParentVersionIds: string[];
+                                contentBase64?: string;
+                                mediaType?: string;
+                            };
+                            version: {
+                                /** Format: uuid */
+                                versionId: string;
+                                /** Format: uuid */
+                                artifactId: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            };
+                            created: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agents/{agentId}/projects/{projectId}/artifact-held-drafts/{draftId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    agentId: string;
+                    projectId: string;
+                    draftId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        mode?: "retry" | "force";
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            artifact: {
+                                /** Format: uuid */
+                                artifactId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                name: string;
+                                projectPath: string;
+                                status: "active" | "deleted" | "purged";
+                                latestVersionId: string | null;
+                                latestVersion: {
+                                    /** Format: uuid */
+                                    versionId: string;
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    byteLength: number;
+                                    digest: string;
+                                    parentVersionId: string | null;
+                                    status: "active" | "deleted" | "purged";
+                                    /** Format: uuid */
+                                    createdByActorId: string;
+                                    createdAt: number;
+                                    taskId: string | null;
+                                    messageId: string | null;
+                                    publishBatchId: string | null;
+                                    note: string | null;
+                                    preview: {
+                                        status: "pending" | "ready" | "failed";
+                                        errorMessage: string | null;
+                                    };
+                                    deletedAt: number | null;
+                                    purgeAfter: number | null;
+                                } | null;
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                                derivationParentVersionIds: string[];
+                                contentBase64?: string;
+                                mediaType?: string;
+                            };
+                            version: {
+                                /** Format: uuid */
+                                versionId: string;
+                                /** Format: uuid */
+                                artifactId: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            };
+                            created: boolean;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            artifact: {
+                                /** Format: uuid */
+                                artifactId: string;
+                                /** Format: uuid */
+                                projectId: string;
+                                name: string;
+                                projectPath: string;
+                                status: "active" | "deleted" | "purged";
+                                latestVersionId: string | null;
+                                latestVersion: {
+                                    /** Format: uuid */
+                                    versionId: string;
+                                    /** Format: uuid */
+                                    artifactId: string;
+                                    version: number;
+                                    fileName: string;
+                                    mediaType: string;
+                                    byteLength: number;
+                                    digest: string;
+                                    parentVersionId: string | null;
+                                    status: "active" | "deleted" | "purged";
+                                    /** Format: uuid */
+                                    createdByActorId: string;
+                                    createdAt: number;
+                                    taskId: string | null;
+                                    messageId: string | null;
+                                    publishBatchId: string | null;
+                                    note: string | null;
+                                    preview: {
+                                        status: "pending" | "ready" | "failed";
+                                        errorMessage: string | null;
+                                    };
+                                    deletedAt: number | null;
+                                    purgeAfter: number | null;
+                                } | null;
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                                derivationParentVersionIds: string[];
+                                contentBase64?: string;
+                                mediaType?: string;
+                            };
+                            version: {
+                                /** Format: uuid */
+                                versionId: string;
+                                /** Format: uuid */
+                                artifactId: string;
+                                version: number;
+                                fileName: string;
+                                mediaType: string;
+                                byteLength: number;
+                                digest: string;
+                                parentVersionId: string | null;
+                                status: "active" | "deleted" | "purged";
+                                /** Format: uuid */
+                                createdByActorId: string;
+                                createdAt: number;
+                                taskId: string | null;
+                                messageId: string | null;
+                                publishBatchId: string | null;
+                                note: string | null;
+                                preview: {
+                                    status: "pending" | "ready" | "failed";
+                                    errorMessage: string | null;
+                                };
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                            };
+                            created: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/computers/self/agents/{agentId}/projects/{projectId}/artifact-held-drafts/{draftId}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "idempotency-key": string;
+                };
+                path: {
+                    agentId: string;
+                    projectId: string;
+                    draftId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -8009,6 +12708,8 @@ export interface paths {
                         disposition: "publish" | "no_output" | "discard";
                         messages: {
                             body: string;
+                            mentionedActorIds?: string[];
+                            workItemIds?: string[];
                             privateGrantIds?: string[];
                         }[];
                         artifactPublications: {
@@ -8016,11 +12717,25 @@ export interface paths {
                             stagedBlobId: string;
                             /** Format: uuid */
                             artifactId?: string;
-                            name: string;
-                            artifactType: "markdown" | "file";
-                            projectIds?: string[];
-                            expectedCurrentRevision?: number;
-                            expectedContentDigest?: string;
+                            fileName?: string;
+                            artifactName?: string;
+                            artifactPath?: string;
+                            /** Format: uuid */
+                            expectedLatestVersionId?: string;
+                            parentVersionIds?: string[];
+                            sourceResourceRefs?: {
+                                /** Format: uuid */
+                                resourceId: string;
+                                revision?: number;
+                                digest?: string;
+                            }[];
+                            /** Format: uuid */
+                            taskId?: string;
+                            /** Format: uuid */
+                            messageId?: string;
+                            /** Format: uuid */
+                            publishBatchId?: string;
+                            note?: string;
                             attachToMessageIndexes?: number[];
                             privateGrantIds?: string[];
                         }[];
@@ -8096,6 +12811,7 @@ export interface paths {
                                 projectId: string | null;
                                 threadId: string | null;
                                 threadRootMessageId: string | null;
+                                replyToMessageId: string | null;
                                 /** Format: uuid */
                                 authorActorId: string;
                                 /** Format: uuid */
@@ -8132,66 +12848,67 @@ export interface paths {
                                     /** Format: uuid */
                                     artifactId: string;
                                     /** Format: uuid */
-                                    artifactSnapshotId: string;
+                                    artifactVersionId: string;
                                     artifactName: string;
-                                    snapshotLabel: string | null;
-                                    snapshotCreatedAt: number;
+                                    version: number;
+                                    fileName: string;
                                     mediaType: string;
                                     contentDigest: string;
                                     byteLength: number;
                                     contentAvailable: boolean;
+                                    artifactStatus: "active" | "deleted" | "purged";
+                                }[];
+                                workItemReferences: {
+                                    /** Format: uuid */
+                                    workItemId: string;
+                                    taskNumber: number;
                                 }[];
                                 createdAt: number;
                             }[];
                             publishedArtifacts: {
                                 /** Format: uuid */
-                                id: string;
+                                artifactId: string;
                                 /** Format: uuid */
-                                workspaceId: string;
+                                projectId: string;
                                 name: string;
-                                artifactType: "markdown" | "file";
-                                currentState: {
+                                projectPath: string;
+                                status: "active" | "deleted" | "purged";
+                                latestVersionId: string | null;
+                                latestVersion: {
+                                    /** Format: uuid */
+                                    versionId: string;
                                     /** Format: uuid */
                                     artifactId: string;
-                                    currentRevision: number;
-                                    contentDigest: string;
+                                    version: number;
+                                    fileName: string;
                                     mediaType: string;
                                     byteLength: number;
-                                    /** Format: uuid */
-                                    updatedByMembershipId: string;
-                                    updatedAt: number;
-                                };
-                                latestSnapshot: {
-                                    /** Format: uuid */
-                                    snapshotId: string;
-                                    /** Format: uuid */
-                                    artifactId: string;
-                                    label: string | null;
-                                    parentSnapshotId: string | null;
-                                    contentDigest: string;
-                                    mediaType: string;
-                                    byteLength: number;
+                                    digest: string;
+                                    parentVersionId: string | null;
+                                    status: "active" | "deleted" | "purged";
                                     /** Format: uuid */
                                     createdByActorId: string;
-                                    /** Format: uuid */
-                                    createdByMembershipId: string;
-                                    createdByDisplayName: string;
-                                    revision: number;
-                                    status: "active" | "deleted";
-                                    deletedAt: number | null;
                                     createdAt: number;
-                                    updatedAt: number;
+                                    taskId: string | null;
+                                    messageId: string | null;
+                                    publishBatchId: string | null;
+                                    note: string | null;
+                                    preview: {
+                                        status: "pending" | "ready" | "failed";
+                                        errorMessage: string | null;
+                                    };
+                                    deletedAt: number | null;
+                                    purgeAfter: number | null;
                                 } | null;
-                                projectIds: string[];
                                 /** Format: uuid */
-                                createdByMembershipId: string;
-                                revision: number;
-                                status: "active" | "deleted" | "purged";
-                                deletedAt: number | null;
-                                purgeAfter: number | null;
-                                purgedAt: number | null;
+                                createdByActorId: string;
                                 createdAt: number;
                                 updatedAt: number;
+                                deletedAt: number | null;
+                                purgeAfter: number | null;
+                                derivationParentVersionIds: string[];
+                                contentBase64?: string;
+                                mediaType?: string;
                             }[];
                         };
                     };

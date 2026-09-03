@@ -45,15 +45,19 @@ describe('database foundation', () => {
 
         sql.prepare(
           `INSERT INTO conversations (
-             id, workspace_id, conversation_kind, title, created_by_membership_id,
-             context_version, timeline_frontier, created_at, updated_at
-           ) VALUES ('conversation-1', 'workspace-1', 'channel', NULL, 'member-1', 3, 2, 1, 1)`,
+             id, workspace_id, project_id, scope_type, membership_mode,
+             conversation_kind, visibility, title, created_by_membership_id,
+             created_by_project_membership_id, context_version, timeline_frontier, created_at, updated_at
+           ) VALUES ('conversation-1', 'workspace-1', NULL, 'direct_message', 'explicit',
+             'dm', 'private', NULL, 'member-1', NULL, 3, 2, 1, 1)`,
         ).run();
         sql.prepare(
           `INSERT INTO conversations (
-             id, workspace_id, conversation_kind, title, created_by_membership_id,
-             context_version, timeline_frontier, created_at, updated_at
-           ) VALUES ('conversation-2', 'workspace-1', 'channel', NULL, 'member-1', 1, 0, 1, 1)`,
+             id, workspace_id, project_id, scope_type, membership_mode,
+             conversation_kind, visibility, title, created_by_membership_id,
+             created_by_project_membership_id, context_version, timeline_frontier, created_at, updated_at
+           ) VALUES ('conversation-2', 'workspace-1', NULL, 'direct_message', 'explicit',
+             'dm', 'private', NULL, 'member-1', NULL, 1, 0, 1, 1)`,
         ).run();
         sql.prepare(
           `INSERT INTO messages (
@@ -66,9 +70,9 @@ describe('database foundation', () => {
         ).run();
         sql.prepare(
           `INSERT INTO messages (
-             id, workspace_id, conversation_id, thread_id, author_actor_id,
+             id, workspace_id, conversation_id, thread_id, reply_to_message_id, author_actor_id,
              author_membership_id, body, conversation_version, scope_position, created_at
-           ) VALUES ('reply-1', 'workspace-1', 'conversation-1', 'thread-1', 'human-1', 'member-1', 'reply', 2, 1, 1)`,
+           ) VALUES ('reply-1', 'workspace-1', 'conversation-1', 'thread-1', 'root-1', 'human-1', 'member-1', 'reply', 2, 1, 1)`,
         ).run();
         sql.prepare(
           `INSERT INTO messages (
@@ -90,6 +94,16 @@ describe('database foundation', () => {
              id, workspace_id, conversation_id, thread_id, author_actor_id,
              author_membership_id, body, conversation_version, scope_position, created_at
            ) VALUES ('wrong-thread', 'workspace-1', 'conversation-2', 'thread-1', 'human-1', 'member-1', 'body', 1, 1, 1)`,
+        ).run(),
+      ).toThrow(/FOREIGN KEY/);
+
+      expect(() =>
+        sql.prepare(
+          `INSERT INTO messages (
+             id, workspace_id, conversation_id, thread_id, reply_to_message_id, author_actor_id,
+             author_membership_id, body, conversation_version, scope_position, created_at
+           ) VALUES ('wrong-reply-target', 'workspace-1', 'conversation-2', NULL, 'root-1',
+             'human-1', 'member-1', 'body', 1, 1, 1)`,
         ).run(),
       ).toThrow(/FOREIGN KEY/);
 
@@ -259,6 +273,12 @@ describe('database foundation', () => {
         ).toEqual({ phase: 'running' });
         expect(reopenedWorkspace.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 1 });
         expect(reopenedWorkspace.raw.prepare('PRAGMA application_id').get()).toEqual({ application_id: 1095648087 });
+        expect(reopenedWorkspace.raw.prepare(
+          "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'project_resource_links'",
+        ).get()).toBeUndefined();
+        expect(reopenedWorkspace.raw.prepare(
+          "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'project_artifacts_v2'",
+        ).get()).toEqual({ name: 'project_artifacts_v2' });
         expect(reopenedLocalNode.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 1 });
         expect(reopenedLocalNode.raw.prepare('PRAGMA application_id').get()).toEqual({ application_id: 1095648076 });
         for (const database of [reopenedWorkspace, reopenedLocalNode]) {
@@ -276,14 +296,35 @@ describe('database foundation', () => {
     }
   });
 
-  it('rejects databases from an abandoned schema generation', () => {
-    const directory = mkdtempSync(resolve(tmpdir(), 'anc-future-schema-'));
+  it('rejects databases outside the v1 baseline even when current capabilities remain intact', () => {
+    const directory = mkdtempSync(resolve(tmpdir(), 'anc-additive-schema-'));
     const workspacePath = resolve(directory, 'workspace.sqlite');
     try {
+      const workspace = SqliteDatabase.open(workspacePath, 'workspace');
+      workspace.close();
       const raw = new DatabaseSync(workspacePath);
-      raw.exec('PRAGMA application_id = 1095648087; PRAGMA user_version = 19;');
+      raw.exec('ALTER TABLE workspaces ADD COLUMN optional_note TEXT; PRAGMA user_version = 19;');
       raw.close();
-      expect(() => SqliteDatabase.open(workspacePath, 'workspace')).toThrow(/newer than supported version 1/);
+      expect(() => SqliteDatabase.open(workspacePath, 'workspace')).toThrow(
+        /schema version 19 is not the supported v1 baseline/,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a database that is missing a capability required by the current build', () => {
+    const directory = mkdtempSync(resolve(tmpdir(), 'anc-schema-drift-'));
+    const localNodePath = resolve(directory, 'local-node.sqlite');
+    try {
+      const localNode = SqliteDatabase.open(localNodePath, 'local-node');
+      localNode.close();
+      const drifted = new DatabaseSync(localNodePath);
+      drifted.exec('ALTER TABLE held_artifact_drafts RENAME COLUMN draft_key TO obsolete_target;');
+      drifted.close();
+      expect(() => SqliteDatabase.open(localNodePath, 'local-node')).toThrow(
+        /missing or incompatible held_artifact_drafts\.draft_key/,
+      );
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

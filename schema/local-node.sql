@@ -6,28 +6,16 @@ CREATE TABLE local_runtime_executions (
   run_id TEXT NOT NULL,
   attempt_root TEXT NOT NULL,
   working_directory TEXT NOT NULL,
-  execution_kind TEXT NOT NULL CHECK (execution_kind IN ('workspace_scratch', 'project_repository')),
+  execution_kind TEXT NOT NULL CHECK (execution_kind IN ('workspace_scratch', 'project_scratch')),
   project_id TEXT,
-  repository_id TEXT,
-  repository_identity TEXT,
   phase TEXT NOT NULL CHECK (phase IN ('assembling', 'running', 'returning', 'finished', 'failed')),
   started_at INTEGER NOT NULL,
   return_prepared_at INTEGER,
   finished_at INTEGER,
   CHECK (
-    (execution_kind = 'workspace_scratch' AND project_id IS NULL AND repository_id IS NULL AND repository_identity IS NULL)
-    OR (execution_kind = 'project_repository' AND project_id IS NOT NULL AND repository_id IS NOT NULL AND repository_identity IS NOT NULL)
+    (execution_kind = 'workspace_scratch' AND project_id IS NULL)
+    OR (execution_kind = 'project_scratch' AND project_id IS NOT NULL)
   )
-) STRICT;
-
-CREATE TABLE local_project_working_copies (
-  project_id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  repository_id TEXT NOT NULL,
-  repository_identity TEXT NOT NULL,
-  absolute_path TEXT NOT NULL,
-  bound_at INTEGER NOT NULL,
-  checked_at INTEGER NOT NULL
 ) STRICT;
 
 CREATE TABLE local_private_materializations (
@@ -73,19 +61,70 @@ CREATE TABLE held_drafts (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
   agent_id TEXT NOT NULL,
-  attempt_id TEXT NOT NULL,
-  conversation_id TEXT NOT NULL,
-  content_blob_hash TEXT,
-  attachment_refs_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(attachment_refs_json)),
-  based_on_workspace_version INTEGER NOT NULL CHECK (based_on_workspace_version >= 0),
-  based_on_conversation_version INTEGER NOT NULL CHECK (based_on_conversation_version >= 0),
+  binding_revision INTEGER NOT NULL CHECK (binding_revision > 0),
+  session_kind TEXT NOT NULL DEFAULT 'mention' CHECK (session_kind IN ('mention', 'work_item')),
+  session_key TEXT NOT NULL DEFAULT 'legacy' CHECK (length(trim(session_key)) > 0),
+  target TEXT NOT NULL,
+  receipt TEXT NOT NULL,
+  body TEXT NOT NULL CHECK (length(trim(body)) > 0),
+  body_hash TEXT NOT NULL CHECK (length(body_hash) = 64),
+  artifact_ids_json TEXT NOT NULL DEFAULT '[]' CHECK (
+    json_valid(artifact_ids_json) AND json_type(artifact_ids_json) = 'array'
+  ),
+  mentioned_actor_ids_json TEXT NOT NULL DEFAULT '[]' CHECK (
+    json_valid(mentioned_actor_ids_json) AND json_type(mentioned_actor_ids_json) = 'array'
+  ),
+  work_item_ids_json TEXT NOT NULL DEFAULT '[]' CHECK (
+    json_valid(work_item_ids_json) AND json_type(work_item_ids_json) = 'array'
+  ),
+  based_on_position INTEGER NOT NULL CHECK (based_on_position >= 0),
+  reviewed_through_position INTEGER NOT NULL CHECK (reviewed_through_position >= based_on_position),
   rehold_count INTEGER NOT NULL DEFAULT 0 CHECK (rehold_count >= 0),
-  status TEXT NOT NULL DEFAULT 'held' CHECK (status IN ('held', 'returned', 'discarded')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'held', 'published', 'discarded', 'fenced')),
+  pending_mode TEXT NOT NULL CHECK (pending_mode IN ('check', 'override', 'discard')),
+  idempotency_key TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 ) STRICT;
 
-CREATE INDEX held_drafts_attempt ON held_drafts(attempt_id, status);
+CREATE UNIQUE INDEX held_drafts_active_target
+  ON held_drafts(workspace_id, agent_id, binding_revision, session_kind, session_key, target)
+  WHERE status IN ('pending', 'held');
+
+CREATE INDEX held_drafts_recovery
+  ON held_drafts(status, workspace_id, agent_id, binding_revision, updated_at);
+
+CREATE TABLE held_artifact_drafts (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  binding_revision INTEGER NOT NULL CHECK (binding_revision > 0),
+  session_kind TEXT NOT NULL DEFAULT 'mention' CHECK (session_kind IN ('mention', 'work_item')),
+  session_key TEXT NOT NULL DEFAULT 'legacy' CHECK (length(trim(session_key)) > 0),
+  draft_key TEXT NOT NULL,
+  artifact_id TEXT,
+  publication_json TEXT NOT NULL CHECK (
+    json_valid(publication_json) AND json_type(publication_json) = 'object'
+  ),
+  publication_hash TEXT NOT NULL CHECK (length(publication_hash) = 64),
+  content_path TEXT,
+  expected_latest_version_id TEXT,
+  held_current_latest_version_id TEXT,
+  proposed_digest TEXT NOT NULL CHECK (length(proposed_digest) = 64),
+  rehold_count INTEGER NOT NULL DEFAULT 0 CHECK (rehold_count >= 0),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'held', 'published', 'discarded', 'fenced')),
+  pending_mode TEXT NOT NULL CHECK (pending_mode IN ('check', 'override', 'discard')),
+  idempotency_key TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE UNIQUE INDEX held_artifact_drafts_active_key
+  ON held_artifact_drafts(workspace_id, agent_id, binding_revision, session_kind, session_key, draft_key)
+  WHERE status IN ('pending', 'held');
+
+CREATE INDEX held_artifact_drafts_recovery
+  ON held_artifact_drafts(status, workspace_id, agent_id, binding_revision, updated_at);
 
 CREATE TABLE runtime_sessions (
   id TEXT PRIMARY KEY,
@@ -93,14 +132,26 @@ CREATE TABLE runtime_sessions (
   agent_id TEXT NOT NULL,
   adapter_instance_id TEXT NOT NULL,
   runtime_session_id TEXT NOT NULL,
+  session_kind TEXT NOT NULL DEFAULT 'mention' CHECK (session_kind IN ('mention', 'work_item')),
+  session_key TEXT NOT NULL DEFAULT 'legacy' CHECK (length(trim(session_key)) > 0),
+  context_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000' CHECK (length(context_hash) = 64),
+  context_jsonl TEXT NOT NULL DEFAULT '',
+  session_target TEXT,
+  window_mode TEXT NOT NULL DEFAULT 'isolated' CHECK (window_mode IN ('dm', 'isolated')),
+  window_initial_frontier INTEGER NOT NULL DEFAULT 0 CHECK (window_initial_frontier >= 0),
+  window_message_count INTEGER NOT NULL DEFAULT 0 CHECK (window_message_count >= 0 AND window_message_count <= 10),
+  window_status TEXT NOT NULL DEFAULT 'accepting' CHECK (window_status IN ('accepting', 'frozen', 'completed')),
   initial_prompt_sent INTEGER NOT NULL DEFAULT 0 CHECK (initial_prompt_sent IN (0, 1)),
   return_committed INTEGER NOT NULL DEFAULT 0 CHECK (return_committed IN (0, 1)),
   last_seen_position INTEGER NOT NULL DEFAULT 0 CHECK (last_seen_position >= 0),
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed', 'lost')),
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  UNIQUE (agent_id, adapter_instance_id, runtime_session_id)
+  updated_at INTEGER NOT NULL
 ) STRICT;
+
+CREATE UNIQUE INDEX runtime_sessions_active_lane
+  ON runtime_sessions(workspace_id, agent_id, adapter_instance_id, session_kind, session_key)
+  WHERE status = 'active';
 
 CREATE TABLE local_receipts (
   id TEXT PRIMARY KEY,

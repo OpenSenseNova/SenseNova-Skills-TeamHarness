@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { newId } from '../src/lib/values.js';
-import { createTestService, reportReadyRuntime } from './helpers.js';
+import {
+  authorizeAgentInConversation,
+  createTestService,
+  projectMain,
+  reportReadyRuntime,
+  workspaceGeneral,
+} from './helpers.js';
 
 describe('Collaboration requests', () => {
   it('implicitly requests the direct Agent in a DM while keeping Human DMs non-agentic', () => {
@@ -10,16 +16,10 @@ describe('Collaboration requests', () => {
     const alicePrincipal = { kind: 'human' as const, actorId: alice.humanId };
     const bobPrincipal = { kind: 'human' as const, actorId: bob.humanId };
     const workspace = service.createWorkspace(alicePrincipal, 'Product', 'direct-agent-workspace');
-    const bobInvitation = service.createInvitation(
-      alicePrincipal,
-      workspace.id,
-      { verifiedEmail: 'bob@example.com', membershipRole: 'member' },
-      'invite-bob-for-direct-message',
-    );
-    const bobMembershipId = service.acceptInvitation(
+    const bobJoinLink = service.createWorkspaceJoinLink(alicePrincipal, workspace.id);
+    const bobMembershipId = service.acceptWorkspaceJoinLink(
       bobPrincipal,
-      bobInvitation.id,
-      bobInvitation.revision,
+      bobJoinLink.token,
       'accept-bob-for-direct-message',
     ).membershipId;
     const agent = service.createAgent(alicePrincipal, workspace.id, { name: 'Researcher' }, 'direct-message-agent');
@@ -59,7 +59,7 @@ describe('Collaboration requests', () => {
     const directReply = service.replyToMessage(
       alicePrincipal,
       directMessage.id,
-      { body: '在线程里补充一个条件' },
+      { body: '回复补充一个条件' },
       'agent-direct-message-reply',
     );
     expect(directReply.mentionOutcomes[0]).toMatchObject({
@@ -97,6 +97,27 @@ describe('Collaboration requests', () => {
     expect(humanMessage.mentions).toEqual([
       expect.objectContaining({ actorId: bob.humanId, actorType: 'human', displayName: 'Bob' }),
     ]);
+    const bobReply = service.replyToMessage(
+      bobPrincipal,
+      humanMessage.id,
+      { body: '收到，我来处理' },
+      'human-direct-message-reply',
+    );
+    expect(bobReply.mentions).toEqual([
+      expect.objectContaining({ actorId: alice.humanId, actorType: 'human', displayName: 'Alice' }),
+    ]);
+    expect(bobReply.replyToMessageId).toBe(humanMessage.id);
+    const aliceFollowUp = service.replyToMessage(
+      alicePrincipal,
+      bobReply.id,
+      { body: '再补充一点' },
+      'human-direct-message-follow-up',
+    );
+    expect(aliceFollowUp.threadId).toBe(bobReply.threadId);
+    expect(aliceFollowUp.replyToMessageId).toBe(bobReply.id);
+    expect(aliceFollowUp.mentions).toEqual([
+      expect.objectContaining({ actorId: bob.humanId, actorType: 'human', displayName: 'Bob' }),
+    ]);
     expect(service.listAgentRequests(alicePrincipal, humanDm.id)).toEqual([]);
   });
 
@@ -107,26 +128,21 @@ describe('Collaboration requests', () => {
     const alicePrincipal = { kind: 'human' as const, actorId: alice.humanId };
     const bobPrincipal = { kind: 'human' as const, actorId: bob.humanId };
     const workspace = service.createWorkspace(alicePrincipal, 'Product', 'mentions-workspace');
-    const bobInvitation = service.createInvitation(
-      alicePrincipal,
-      workspace.id,
-      { verifiedEmail: 'bob@example.com', membershipRole: 'member' },
-      'invite-bob-for-mentions',
-    );
-    const bobMembershipId = service.acceptInvitation(
+    const bobJoinLink = service.createWorkspaceJoinLink(alicePrincipal, workspace.id);
+    const bobMembershipId = service.acceptWorkspaceJoinLink(
       bobPrincipal,
-      bobInvitation.id,
-      bobInvitation.revision,
+      bobJoinLink.token,
       'accept-bob-for-mentions',
     ).membershipId;
     const requestable = service.createAgent(alicePrincipal, workspace.id, { name: 'Researcher' }, 'requestable-agent');
     const outsideScope = service.createAgent(alicePrincipal, workspace.id, { name: 'Writer' }, 'outside-agent');
     const unknownTarget = newId();
-    const conversation = service.createConversation(
-      alicePrincipal,
-      workspace.id,
-      { kind: 'channel' },
-      'mentions-conversation',
+    let conversation = workspaceGeneral(service, alicePrincipal, workspace.id);
+    conversation = authorizeAgentInConversation(
+      service, alicePrincipal, conversation, requestable.membershipId, 'mentions-requestable-agent',
+    );
+    conversation = authorizeAgentInConversation(
+      service, alicePrincipal, conversation, outsideScope.membershipId, 'mentions-writer-agent',
     );
 
     expect(() => service.postMessage(
@@ -198,17 +214,15 @@ describe('Collaboration requests', () => {
     expect(workspaceDatabase.raw.prepare('SELECT count(*) AS count FROM agent_requests').get()).toEqual({ count: 2 });
   });
 
-  it('creates a Thread with its first reply and preserves the exact result scope', () => {
+  it('keeps replies in one Discussion Scope while allowing replies to any Message', () => {
     const { service } = createTestService();
     const alice = service.bootstrapHuman('Alice', 'alice@example.com');
     const principal = { kind: 'human' as const, actorId: alice.humanId };
     const workspace = service.createWorkspace(principal, 'Product', 'thread-workspace');
     const agent = service.createAgent(principal, workspace.id, { name: 'Researcher' }, 'thread-agent');
-    const conversation = service.createConversation(
-      principal,
-      workspace.id,
-      { kind: 'channel' },
-      'thread-conversation',
+    const conversation = authorizeAgentInConversation(
+      service, principal, workspaceGeneral(service, principal, workspace.id),
+      agent.membershipId, 'thread-general-agent',
     );
     const root = service.postMessage(principal, conversation.id, { body: '根消息' }, 'root-message');
     const firstReply = service.replyToMessage(
@@ -221,6 +235,7 @@ describe('Collaboration requests', () => {
 
     expect(firstReply.threadId).not.toBeNull();
     expect(firstReply.threadRootMessageId).toBe(root.id);
+    expect(firstReply.replyToMessageId).toBe(root.id);
     expect(firstReply.authorDisplayName).toBe('Alice');
     expect(firstReply.authorActorType).toBe('human');
     expect(secondReply.threadId).toBe(firstReply.threadId);
@@ -228,9 +243,9 @@ describe('Collaboration requests', () => {
     expect(request.resultConversationId).toBe(conversation.id);
     expect(request.resultThreadId).toBe(firstReply.threadId);
     expect(service.listAgentRequests(principal, conversation.id, firstReply.threadId!)).toHaveLength(1);
-    expect(() => service.replyToMessage(principal, firstReply.id, { body: '禁止嵌套 Thread' }, 'nested-reply')).toThrow(
-      /top-level Message/,
-    );
+    const followUp = service.replyToMessage(principal, firstReply.id, { body: '继续回复' }, 'nested-reply');
+    expect(followUp.threadId).toBe(firstReply.threadId);
+    expect(followUp.replyToMessageId).toBe(firstReply.id);
   });
 
   it('cancels a pending request with optimistic concurrency without rewriting its Mention Outcome', () => {
@@ -240,24 +255,16 @@ describe('Collaboration requests', () => {
     const alicePrincipal = { kind: 'human' as const, actorId: alice.humanId };
     const bobPrincipal = { kind: 'human' as const, actorId: bob.humanId };
     const workspace = service.createWorkspace(alicePrincipal, 'Product', 'cancel-workspace');
-    const bobInvitation = service.createInvitation(
-      alicePrincipal,
-      workspace.id,
-      { verifiedEmail: 'bob@example.com', membershipRole: 'member' },
-      'invite-bob-for-cancel',
-    );
-    const bobMembershipId = service.acceptInvitation(
+    const bobJoinLink = service.createWorkspaceJoinLink(alicePrincipal, workspace.id);
+    const bobMembershipId = service.acceptWorkspaceJoinLink(
       bobPrincipal,
-      bobInvitation.id,
-      bobInvitation.revision,
+      bobJoinLink.token,
       'accept-bob-for-cancel',
     ).membershipId;
     const agent = service.createAgent(alicePrincipal, workspace.id, { name: 'Researcher' }, 'cancel-agent');
-    const conversation = service.createConversation(
-      alicePrincipal,
-      workspace.id,
-      { kind: 'channel' },
-      'cancel-conversation',
+    const conversation = authorizeAgentInConversation(
+      service, alicePrincipal, workspaceGeneral(service, alicePrincipal, workspace.id),
+      agent.membershipId, 'cancel-general-agent',
     );
     const message = service.postMessage(
       alicePrincipal,
@@ -312,7 +319,7 @@ describe('Collaboration requests', () => {
     const workspace = service.createWorkspace(principal, 'Product', 'scope-workspace');
     const project = service.createProject(principal, workspace.id, { name: 'Launch' }, 'scope-project');
     const agent = service.createAgent(principal, workspace.id, { name: 'Researcher' }, 'scope-agent');
-    const conversation = service.createProjectConversation(principal, project.id, { kind: 'channel' }, 'scope-conversation');
+    let conversation = projectMain(service, principal, project.id);
 
     expect(() => service.postMessage(
       principal,
@@ -326,6 +333,12 @@ describe('Collaboration requests', () => {
       project.id,
       { workspaceMembershipId: agent.membershipId, role: 'member' },
       'add-agent-to-project',
+    );
+    expect(service.listConversationParticipants(principal, conversation.id)).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ actorId: agent.id })]),
+    );
+    conversation = authorizeAgentInConversation(
+      service, principal, conversation, agent.membershipId, 'authorize-agent-in-project-main',
     );
     expect(service.listConversationParticipants(principal, conversation.id)).toEqual(
       expect.arrayContaining([

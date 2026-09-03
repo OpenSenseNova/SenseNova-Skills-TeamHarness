@@ -1,12 +1,12 @@
 import { createApplication, databasePathsFromEnvironment } from './app.js';
 import staticFiles from '@fastify/static';
 import { resolve } from 'node:path';
+import { applicationConfig } from './config.js';
 
-const { app } = await createApplication(databasePathsFromEnvironment());
-const port = Number(process.env.PORT ?? 3000);
-const host = process.env.HOST ?? '0.0.0.0';
+const config = applicationConfig();
+const { app } = await createApplication(databasePathsFromEnvironment(), { environment: config.environment });
 
-if (process.env.NODE_ENV === 'production') {
+if (config.environment === 'production') {
   await app.register(staticFiles, { root: resolve(process.cwd(), 'web/dist') });
   app.setNotFoundHandler((request, reply) => {
     if (request.method === 'GET' && !request.url.startsWith('/v1/') && request.url !== '/openapi.json') {
@@ -16,4 +16,19 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-await app.listen({ host, port });
+let shuttingDown = false;
+const shutdown = async (signal: string): Promise<void> => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  process.stderr.write(`Received ${signal}; shutting down…\n`);
+  await app.close();
+};
+process.once('SIGINT', () => void shutdown('SIGINT'));
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
+
+try {
+  await app.listen({ host: config.host, port: config.port });
+} catch (error) {
+  await app.close();
+  throw error;
+}

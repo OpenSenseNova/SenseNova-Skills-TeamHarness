@@ -1,15 +1,16 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 type SchemaName = 'workspace' | 'local-node';
 
 interface SchemaDefinition {
   version: number;
-  minimumSupportedVersion: number;
   applicationId: number;
 }
 
-const root = process.cwd();
+// Resolve from this script so validation is deterministic from any cwd.
+const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const manifestPath = resolve(root, 'schema', 'manifest.json');
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<SchemaName, SchemaDefinition>;
 
@@ -25,38 +26,6 @@ for (const schemaName of ['workspace', 'local-node'] as const) {
     throw new Error(
       `${schemaName}.sql declares application id ${declaredApplicationId}; manifest declares ${definition.applicationId}.`,
     );
-  }
-
-  const migrationDirectory = resolve(root, 'schema', 'migrations', schemaName);
-  const migrationEntries = existsSync(migrationDirectory)
-    ? readdirSync(migrationDirectory, { withFileTypes: true })
-    : [];
-  if (migrationEntries.some((entry) => !entry.isDirectory())) {
-    throw new Error(`${schemaName} migrations must use one directory per version step.`);
-  }
-  const actualMigrations = migrationEntries.map((entry) => entry.name).sort();
-  const expectedMigrations = Array.from(
-    { length: definition.version - definition.minimumSupportedVersion },
-    (_, index) => {
-      const from = definition.minimumSupportedVersion + index;
-      return `${from}-to-${from + 1}`;
-    },
-  );
-  if (JSON.stringify(actualMigrations) !== JSON.stringify(expectedMigrations)) {
-    throw new Error(
-      `${schemaName} migration chain mismatch. Expected [${expectedMigrations.join(', ')}], `
-      + `found [${actualMigrations.join(', ')}].`,
-    );
-  }
-  for (const migration of expectedMigrations) {
-    const tableScripts = readdirSync(resolve(migrationDirectory, migration), { withFileTypes: true });
-    if (tableScripts.length === 0 || tableScripts.some((entry) => (
-      !entry.isFile() || !/^\d{3}-[a-z0-9-]+\.sql$/u.test(entry.name)
-    ))) {
-      throw new Error(
-        `${schemaName} migration ${migration} must contain only ordered table scripts such as 001-messages.sql.`,
-      );
-    }
   }
 }
 

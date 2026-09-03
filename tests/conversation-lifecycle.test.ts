@@ -1,21 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { buildApp } from '../src/http/app.js';
-import { createTestService } from './helpers.js';
+import { authorizeAgentInConversation, createTestService, workspaceGeneral } from './helpers.js';
 
 function addHumanToWorkspace(
   service: ReturnType<typeof createTestService>['service'],
   owner: { kind: 'human'; actorId: string },
   member: { kind: 'human'; actorId: string },
   workspaceId: string,
-  email: string,
+  key: string,
 ) {
-  const invitation = service.createInvitation(
-    owner,
-    workspaceId,
-    { verifiedEmail: email, membershipRole: 'member' },
-    `invite-${email}`,
-  );
-  return service.acceptInvitation(member, invitation.id, invitation.revision, `accept-${email}`);
+  const joinLink = service.createWorkspaceJoinLink(owner, workspaceId);
+  return service.acceptWorkspaceJoinLink(member, joinLink.token, `accept-${key}`);
 }
 
 describe('Conversation lifecycle', () => {
@@ -24,10 +19,9 @@ describe('Conversation lifecycle', () => {
     const alice = service.bootstrapHuman('Alice', 'alice@example.com');
     const principal = { kind: 'human' as const, actorId: alice.humanId };
     const workspace = service.createWorkspace(principal, 'Product', 'conversation-lifecycle-workspace');
-    const conversation = service.createConversation(
-      principal,
-      workspace.id,
-      { kind: 'channel', title: 'Planning' },
+    const project = service.createProject(principal, workspace.id, { name: 'Launch' }, 'conversation-lifecycle-project');
+    const conversation = service.createProjectConversation(
+      principal, project.id, { kind: 'channel', title: 'Planning' },
       'conversation-lifecycle-create',
     );
     const message = service.postMessage(
@@ -57,12 +51,14 @@ describe('Conversation lifecycle', () => {
       });
 
       const activeList = await app.inject({
-        method: 'GET', url: `/v1/workspaces/${workspace.id}/conversations`, headers,
+        method: 'GET', url: `/v1/projects/${project.id}/conversations`, headers,
       });
-      expect(activeList.json<{ items: unknown[] }>().items).toEqual([]);
+      expect(activeList.json<{ items: Array<{ id: string }> }>().items).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: conversation.id })]),
+      );
       const archivedList = await app.inject({
         method: 'GET',
-        url: `/v1/workspaces/${workspace.id}/conversations?lifecycleStatus=archived`,
+        url: `/v1/projects/${project.id}/conversations?lifecycleStatus=archived`,
         headers,
       });
       expect(archivedList.json<{ items: Array<{ id: string }> }>().items).toEqual([
@@ -114,17 +110,15 @@ describe('Conversation lifecycle', () => {
     const bobPrincipal = { kind: 'human' as const, actorId: bob.humanId };
     const workspace = service.createWorkspace(alicePrincipal, 'Product', 'conversation-authority-workspace');
     const bobMembership = addHumanToWorkspace(
-      service, alicePrincipal, bobPrincipal, workspace.id, 'bob@example.com',
+      service, alicePrincipal, bobPrincipal, workspace.id, 'bob',
     );
-    const channel = service.createConversation(
-      alicePrincipal, workspace.id, { kind: 'channel', title: 'Team' }, 'conversation-authority-channel',
-    );
+    const channel = workspaceGeneral(service, alicePrincipal, workspace.id);
     expect(() => workspaceDatabase.raw.prepare(
       "UPDATE conversations SET lifecycle_status = 'archived' WHERE id = ?",
-    ).run(channel.id)).toThrow(/invalid conversation lifecycle state/);
+    ).run(channel.id)).toThrow(/required Workspace and Project groups cannot be archived/);
     expect(() => service.archiveConversation(
       bobPrincipal, channel.id, channel.revision, 'conversation-authority-forbidden',
-    )).toThrow(/Only a DM participant, Conversation creator/);
+    )).toThrow(/current scope administrator/);
 
     const dm = service.createConversation(
       alicePrincipal,
@@ -146,11 +140,14 @@ describe('Conversation lifecycle', () => {
       'conversation-authority-project-member',
     );
     const projectConversation = service.createProjectConversation(
-      alicePrincipal, project.id, { kind: 'channel', title: 'Launch plan' }, 'conversation-authority-project-channel',
+      alicePrincipal, project.id, {
+        kind: 'channel', title: 'Launch plan',
+        participantProjectMembershipIds: [bobProjectMembership.projectMembershipId],
+      }, 'conversation-authority-project-channel',
     );
     expect(() => service.archiveConversation(
       bobPrincipal, projectConversation.id, projectConversation.revision, 'conversation-authority-project-forbidden',
-    )).toThrow(/Project Manager/);
+    )).toThrow(/current scope administrator/);
     service.updateProjectMember(
       alicePrincipal,
       project.id,
@@ -161,7 +158,9 @@ describe('Conversation lifecycle', () => {
     expect(service.archiveConversation(
       bobPrincipal, projectConversation.id, projectConversation.revision, 'conversation-authority-project-archive',
     )).toMatchObject({ lifecycleStatus: 'archived', revision: 2 });
-    expect(service.listProjectConversations(bobPrincipal, project.id).items).toEqual([]);
+    expect(service.listProjectConversations(bobPrincipal, project.id).items).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: projectConversation.id })]),
+    );
     expect(service.listProjectConversations(bobPrincipal, project.id, undefined, 100, 'archived').items).toEqual([
       expect.objectContaining({ id: projectConversation.id, lifecycleStatus: 'archived' }),
     ]);
@@ -169,12 +168,22 @@ describe('Conversation lifecycle', () => {
     const agent = service.createAgent(
       alicePrincipal, workspace.id, { name: 'Researcher' }, 'conversation-authority-agent',
     );
-    const requestMessage = service.postMessage(alicePrincipal, channel.id, {
+    const agentProjectMembership = service.addProjectMember(alicePrincipal, project.id, {
+      workspaceMembershipId: agent.membershipId, role: 'member',
+    }, 'conversation-authority-agent-project');
+    let workConversation = service.createProjectConversation(alicePrincipal, project.id, {
+      kind: 'channel', title: 'Agent work',
+    }, 'conversation-authority-agent-channel');
+    workConversation = authorizeAgentInConversation(
+      service, alicePrincipal, workConversation, agent.membershipId, 'conversation-authority-agent-audience',
+    );
+    expect(agentProjectMembership.workspaceMembershipId).toBe(agent.membershipId);
+    const requestMessage = service.postMessage(alicePrincipal, workConversation.id, {
       body: '@Researcher investigate', mentionedActorIds: [agent.id],
     }, 'conversation-authority-request');
     const requestId = requestMessage.mentionOutcomes[0]!.agentRequestId!;
     expect(() => service.archiveConversation(
-      alicePrincipal, channel.id, channel.revision, 'conversation-authority-active-work',
+      alicePrincipal, workConversation.id, workConversation.revision, 'conversation-authority-active-work',
     )).toThrow(/Cancel or finish pending Agent Requests/);
     service.cancelAgentRequest(
       alicePrincipal,
@@ -183,8 +192,8 @@ describe('Conversation lifecycle', () => {
       'conversation-authority-cancel-request',
     );
     expect(service.archiveConversation(
-      alicePrincipal, channel.id, channel.revision, 'conversation-authority-archive-after-cancel',
-    )).toMatchObject({ lifecycleStatus: 'archived', revision: 2 });
+      alicePrincipal, workConversation.id, workConversation.revision, 'conversation-authority-archive-after-cancel',
+    )).toMatchObject({ lifecycleStatus: 'archived', revision: 3 });
   });
 
 });

@@ -12,8 +12,6 @@ export interface LocalExecutionRow {
   working_directory: string;
   execution_kind: AttemptExecutionInputView['executionScope']['kind'];
   project_id: string | null;
-  repository_id: string | null;
-  repository_identity: string | null;
   phase: 'assembling' | 'running' | 'returning' | 'finished' | 'failed';
 }
 
@@ -42,16 +40,13 @@ export class LocalExecutionStore {
         ) {
           this.database.raw.prepare(
             `UPDATE local_runtime_executions
-             SET attempt_root = ?, working_directory = ?, execution_kind = ?,
-                 project_id = ?, repository_id = ?, repository_identity = ?
+             SET attempt_root = ?, working_directory = ?, execution_kind = ?, project_id = ?
              WHERE attempt_id = ?`,
           ).run(
             local.attemptRoot,
             local.workingDirectory,
-            local.executionScope.kind,
-            local.executionScope.kind === 'project_repository' ? local.executionScope.projectId : null,
-            local.executionScope.kind === 'project_repository' ? local.executionScope.repositoryId : null,
-            local.executionScope.kind === 'project_repository' ? local.executionScope.repositoryIdentity : null,
+            local.executionScope.kind === 'workspace_scratch' ? 'workspace_scratch' : 'project_scratch',
+            local.executionScope.kind === 'project_scratch' ? local.executionScope.projectId : null,
             attemptId,
           );
           return;
@@ -70,13 +65,13 @@ export class LocalExecutionStore {
         );
         return;
       }
+      const executionScopeKind = local?.executionScope.kind ?? 'workspace_scratch';
       this.database.raw
         .prepare(
           `INSERT INTO local_runtime_executions (
              attempt_id, workspace_id, run_id, attempt_root, working_directory, execution_kind,
-             project_id, repository_id, repository_identity,
-             phase, started_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)`,
+             project_id, phase, started_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?)`,
         )
         .run(
           attemptId,
@@ -84,10 +79,8 @@ export class LocalExecutionStore {
           runId,
           local?.attemptRoot ?? attemptId,
           local?.workingDirectory ?? attemptId,
-          local?.executionScope.kind ?? 'workspace_scratch',
-          local?.executionScope.kind === 'project_repository' ? local.executionScope.projectId : null,
-          local?.executionScope.kind === 'project_repository' ? local.executionScope.repositoryId : null,
-          local?.executionScope.kind === 'project_repository' ? local.executionScope.repositoryIdentity : null,
+          executionScopeKind,
+          local?.executionScope.kind === 'project_scratch' ? local.executionScope.projectId : null,
           timestamp,
         );
     });
@@ -105,13 +98,13 @@ export class LocalExecutionStore {
   }
 
   recordContextEvent(event: RuntimeContextEvent): void {
-    this.require(event.attemptId);
+    this.require(event.executionId);
     this.database.raw
       .prepare(
         `INSERT INTO runtime_context_events (id, attempt_id, event_type, details_json, created_at)
          VALUES (?, ?, ?, ?, ?)`,
       )
-      .run(newId(), event.attemptId, event.type, canonicalJson(event.details), event.createdAt);
+      .run(newId(), event.executionId, event.type, canonicalJson(event.details), event.createdAt);
   }
 
   recordPrivateMaterial(

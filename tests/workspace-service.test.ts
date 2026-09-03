@@ -1,9 +1,86 @@
 import { describe, expect, it } from 'vitest';
-import { newId, nowMs } from '../src/lib/values.js';
+import { newId, nowMs, sha256 } from '../src/lib/values.js';
 import { DeliveryJobStore } from '../src/storage/delivery-job-store.js';
-import { createTestService, reportReadyRuntime, testRuntimeConfigurationCapabilities } from './helpers.js';
+import {
+  createTestService,
+  reportReadyRuntime,
+  testRuntimeConfigurationCapabilities,
+  workspaceGeneral,
+} from './helpers.js';
 
 describe('WorkspaceService', () => {
+  it('lets members view and copy encrypted Workspace links while only owners create or revoke them', () => {
+    const { service, workspaceDatabase } = createTestService();
+    const alice = service.bootstrapHuman('Alice', 'alice@example.com');
+    const bob = service.bootstrapHuman('Bob', 'bob@example.com');
+    const charlie = service.bootstrapHuman('Charlie', 'charlie@example.com');
+    const alicePrincipal = { kind: 'human' as const, actorId: alice.humanId };
+    const bobPrincipal = { kind: 'human' as const, actorId: bob.humanId };
+    const charliePrincipal = { kind: 'human' as const, actorId: charlie.humanId };
+    const workspace = service.createWorkspace(alicePrincipal, 'Product', 'join-link-workspace');
+
+    const joinLink = service.createWorkspaceJoinLink(alicePrincipal, workspace.id);
+    expect(joinLink.token).toMatch(/^anc_[A-Za-z0-9_-]{43}$/u);
+    const storedToken = workspaceDatabase.raw.prepare(
+      'SELECT token_hash, token_ciphertext FROM workspace_join_links WHERE id = ?',
+    ).get(joinLink.id) as { token_hash: string; token_ciphertext: string };
+    expect(storedToken.token_hash).toBe(sha256(joinLink.token));
+    expect(storedToken.token_ciphertext).not.toBe(joinLink.token);
+    expect(storedToken.token_ciphertext).not.toContain(joinLink.token);
+    expect((workspaceDatabase.raw.prepare("PRAGMA table_info('workspace_join_links')").all() as Array<{ name: string }>)
+      .map((column) => column.name)).not.toContain('verified_email');
+
+    expect(service.previewWorkspaceJoinLink(bobPrincipal, joinLink.token)).toMatchObject({
+      workspaceId: workspace.id,
+      workspaceName: 'Product',
+      status: 'active',
+      alreadyMember: false,
+    });
+    expect(service.acceptWorkspaceJoinLink(bobPrincipal, joinLink.token, 'join-link-bob')).toMatchObject({
+      actorId: bob.humanId,
+      membershipRole: 'member',
+    });
+    expect(service.acceptWorkspaceJoinLink(charliePrincipal, joinLink.token, 'join-link-charlie')).toMatchObject({
+      actorId: charlie.humanId,
+      membershipRole: 'member',
+    });
+    expect(() => service.createWorkspaceJoinLink(bobPrincipal, workspace.id)).toThrow(/Workspace Owner/);
+    expect(service.listWorkspaceJoinLinks(bobPrincipal, workspace.id).items).toEqual([
+      expect.objectContaining({ id: joinLink.id, token: joinLink.token, status: 'active', useCount: 2 }),
+    ]);
+    expect(() => service.revokeWorkspaceJoinLink(
+      bobPrincipal,
+      joinLink.id,
+      joinLink.revision,
+      'member-cannot-revoke-link',
+    )).toThrow(/Workspace Owner/);
+
+    expect(service.revokeWorkspaceJoinLink(
+      alicePrincipal,
+      joinLink.id,
+      joinLink.revision,
+      'revoke-join-link',
+    )).toMatchObject({ id: joinLink.id, token: null, status: 'revoked' });
+    expect(workspaceDatabase.raw.prepare(
+      'SELECT token_ciphertext FROM workspace_join_links WHERE id = ?',
+    ).get(joinLink.id)).toEqual({ token_ciphertext: null });
+    expect(service.listWorkspaceJoinLinks(bobPrincipal, workspace.id).items).toEqual([
+      expect.objectContaining({ id: joinLink.id, token: null, status: 'revoked' }),
+    ]);
+    expect(service.followChanges(bobPrincipal, workspace.id).items.map((change) => change.changeType))
+      .toContain('workspace_join_link_revoked');
+    const dave = service.bootstrapHuman('Dave', 'dave@example.com');
+    expect(() => service.listWorkspaceJoinLinks(
+      { kind: 'human', actorId: dave.humanId },
+      workspace.id,
+    )).toThrow(/Workspace Membership/);
+    expect(() => service.acceptWorkspaceJoinLink(
+      { kind: 'human', actorId: dave.humanId },
+      joinLink.token,
+      'join-link-dave',
+    )).toThrow(/revoked/);
+  });
+
   it('atomically creates workspace, messages, versions, changes and audit records', () => {
     const { service, workspaceDatabase } = createTestService();
     const bootstrap = service.bootstrapHuman('Alice', 'alice@example.com');
@@ -14,12 +91,7 @@ describe('WorkspaceService', () => {
     expect(repeatedWorkspace.id).toBe(workspace.id);
     expect(workspace.membershipRole).toBe('owner');
 
-    const conversation = service.createConversation(
-      principal,
-      workspace.id,
-      { kind: 'channel', title: 'General' },
-      'conversation-1',
-    );
+    const conversation = workspaceGeneral(service, principal, workspace.id);
     const message = service.postMessage(principal, conversation.id, { body: 'hello' }, 'message-1');
     const repeatedMessage = service.postMessage(principal, conversation.id, { body: 'hello' }, 'message-1');
 
@@ -33,8 +105,8 @@ describe('WorkspaceService', () => {
 
     const changes = service.followChanges(principal, workspace.id);
     expect(changes.items.map((change) => change.changeType)).toEqual([
-      'workspace_created',
       'conversation_created',
+      'workspace_created',
       'message_created',
     ]);
     expect(service.verifyAuditChain(workspace.id)).toBe(true);
@@ -76,7 +148,7 @@ describe('WorkspaceService', () => {
     ).toThrow(/retain an active owner/);
   });
 
-  it('requires ownership transfer before the Human Owner Membership can terminate', () => {
+  it('suspends an owned Agent when its Human Owner leaves the Workspace', () => {
     const { service, workspaceDatabase } = createTestService();
     const alice = service.bootstrapHuman('Alice', 'alice@example.com');
     const bob = service.bootstrapHuman('Bob', 'bob@example.com');
@@ -89,41 +161,35 @@ describe('WorkspaceService', () => {
       workspaceDatabase.raw.prepare('UPDATE agents SET created_by_human_id = ? WHERE actor_id = ?').run(bob.humanId, agent.id),
     ).toThrow(/immutable/);
 
-    const invitation = service.createInvitation(
+    const joinLink = service.createWorkspaceJoinLink(principal, workspace.id);
+    const joinedBobMembership = service.acceptWorkspaceJoinLink(bobPrincipal, joinLink.token, 'accept-second-owner');
+    const bobMembership = service.updateWorkspaceMember(
       principal,
       workspace.id,
-      { verifiedEmail: 'bob@example.com', membershipRole: 'owner' },
-      'invite-second-owner',
+      joinedBobMembership.membershipId,
+      { membershipRole: 'owner', expectedRevision: joinedBobMembership.revision },
+      'promote-second-owner',
     );
-    const bobMembership = service.acceptInvitation(bobPrincipal, invitation.id, invitation.revision, 'accept-second-owner');
-    expect(() => service.removeWorkspaceMember(
+    service.removeWorkspaceMember(
       bobPrincipal,
       workspace.id,
       workspace.membershipId,
       1,
-      'remove-owner-before-transfer',
-    )).toThrow(/transfer all owned Agents/);
-    const transferred = service.transferAgentOwnership(
-      bobPrincipal,
-      workspace.id,
-      agent.id,
-      { newOwnerMembershipId: bobMembership.membershipId, expectedRevision: agent.revision },
-      'transfer-agent-owner',
+      'remove-agent-owner',
     );
-    service.removeWorkspaceMember(bobPrincipal, workspace.id, workspace.membershipId, 1, 'remove-first-owner');
-
-    expect(transferred).toMatchObject({
+    expect(service.getAgent(bobPrincipal, workspace.id, agent.id)).toMatchObject({
       createdByHumanId: alice.humanId,
-      ownerHumanId: bob.humanId,
-      ownerMembershipId: bobMembership.membershipId,
+      ownerHumanId: alice.humanId,
+      ownerMembershipId: workspace.membershipId,
+      lifecycleStatus: 'suspended',
+      membershipStatus: 'removed',
       revision: 2,
     });
     const ownershipHistory = workspaceDatabase.raw
       .prepare('SELECT owner_membership_id, ended_at FROM agent_ownership_history WHERE agent_id = ? ORDER BY started_at, id')
       .all(agent.id);
     expect(ownershipHistory).toEqual([
-      { owner_membership_id: workspace.membershipId, ended_at: expect.any(Number) },
-      { owner_membership_id: bobMembership.membershipId, ended_at: null },
+      { owner_membership_id: workspace.membershipId, ended_at: null },
     ]);
   });
 
@@ -183,6 +249,68 @@ describe('WorkspaceService', () => {
     });
   });
 
+  it('resumes a live Agent activity turn when its initial event was missed', () => {
+    const { service } = createTestService();
+    const alice = service.bootstrapHuman('Alice', 'alice@example.com');
+    const principal = { kind: 'human' as const, actorId: alice.humanId };
+    const workspace = service.createWorkspace(principal, 'Product', 'activity-recovery-workspace');
+    const computer = service.registerComputer(principal, { name: 'Alice Mac' }, 'activity-recovery-computer');
+    reportReadyRuntime(service, computer.computerId, alice.humanId, 'codex');
+    const agent = service.createAgent(principal, workspace.id, {
+      name: 'Designer',
+      runtimeBinding: { computerId: computer.computerId, runtimeId: 'codex' },
+    }, 'activity-recovery-agent');
+
+    const recovered = service.recordComputerAgentActivity(computer.computerId, agent.id, {
+      eventId: 'activity-recovery-tool',
+      turnId: 'activity-recovery-turn',
+      sequence: 18,
+      eventType: 'tool',
+      title: '生成演示文稿',
+      status: 'in_progress',
+    });
+
+    expect(recovered).toMatchObject({ sequence: 18, title: '生成演示文稿', turnStatus: 'active' });
+    expect(service.listAgentActivity(principal, workspace.id, agent.id)).toEqual([
+      expect.objectContaining({ sequence: 18, title: '生成演示文稿', turnStatus: 'active' }),
+      expect.objectContaining({ sequence: 17, title: '动态连接已恢复，继续处理', eventType: 'turn_started' }),
+    ]);
+  });
+
+  it('finishes live Activity Turns when an Agent membership is terminated and hides deleted Agents', () => {
+    const { service } = createTestService();
+    const alice = service.bootstrapHuman('Alice', 'alice@example.com');
+    const principal = { kind: 'human' as const, actorId: alice.humanId };
+    const workspace = service.createWorkspace(principal, 'Product', 'activity-cleanup-workspace');
+    const computer = service.registerComputer(principal, { name: 'Alice Mac' }, 'activity-cleanup-computer');
+    reportReadyRuntime(service, computer.computerId, alice.humanId, 'codex');
+    const agent = service.createAgent(principal, workspace.id, {
+      name: 'To Delete',
+      runtimeBinding: { computerId: computer.computerId, runtimeId: 'codex' },
+    }, 'activity-cleanup-agent');
+
+    service.recordComputerAgentActivity(computer.computerId, agent.id, {
+      eventId: 'activity-cleanup-start',
+      turnId: 'activity-cleanup-turn',
+      sequence: 1,
+      eventType: 'turn_started',
+      title: '已收到消息，开始处理',
+      status: 'in_progress',
+    });
+    expect(service.listAgentActivity(principal, workspace.id)).toHaveLength(1);
+
+    service.terminateAgentMembership(principal, workspace.id, agent.id, agent.revision, 'activity-cleanup-terminate');
+    expect(service.listAgentActivity(principal, workspace.id, agent.id)[0]).toMatchObject({
+      eventType: 'turn_failed',
+      status: 'failed',
+      turnStatus: 'failed',
+      title: 'Agent 动态连接中断',
+    });
+
+    service.deleteAgent(principal, workspace.id, agent.id, 2, 'activity-cleanup-delete');
+    expect(service.listAgentActivity(principal, workspace.id)).toEqual([]);
+  });
+
   it('validates Runtime selections, exposes defaults, and fences binding updates by revision', () => {
     const { service, workspaceDatabase } = createTestService();
     const alice = service.bootstrapHuman('Alice', 'alice@example.com');
@@ -217,6 +345,15 @@ describe('WorkspaceService', () => {
       model: 'missing-model',
       expectedRevision: 1,
     }, 'runtime-config-invalid')).toThrow(/does not offer model/i);
+    expect(service.getAgent(principal, workspace.id, agent.id).runtimeBinding?.bindingRevision).toBe(1);
+
+    expect(() => service.bindAgentRuntime(principal, workspace.id, agent.id, {
+      computerId: computer.computerId,
+      runtimeId: 'codex',
+      model: 'gpt-5.6-codex',
+      reasoningEffort: 'ultra',
+      expectedRevision: 1,
+    }, 'runtime-config-unsupported-effort')).toThrow(/does not support reasoning effort/i);
     expect(service.getAgent(principal, workspace.id, agent.id).runtimeBinding?.bindingRevision).toBe(1);
 
     const updated = service.bindAgentRuntime(principal, workspace.id, agent.id, {
@@ -286,11 +423,12 @@ describe('WorkspaceService', () => {
     expect(() =>
       workspaceDatabase.raw
         .prepare(
-          `INSERT INTO conversation_direct_memberships (
-             id, workspace_id, conversation_id, membership_id, joined_at
-           ) VALUES (?, ?, ?, ?, ?)`,
+          `INSERT INTO conversation_memberships (
+             id, workspace_id, conversation_id, project_id, scope_membership_id,
+             workspace_membership_id, project_membership_id, joined_at
+           ) VALUES (?, ?, ?, NULL, ?, ?, NULL, ?)`,
         )
-        .run(newId(), first.id, conversation.id, second.membershipId, nowMs()),
+        .run(newId(), first.id, conversation.id, second.membershipId, second.membershipId, nowMs()),
     ).toThrow(/FOREIGN KEY/);
   });
 
@@ -299,7 +437,7 @@ describe('WorkspaceService', () => {
     const alice = service.bootstrapHuman('Alice', 'alice@example.com');
     const principal = { kind: 'human' as const, actorId: alice.humanId };
     const workspace = service.createWorkspace(principal, 'Product', 'delivery-workspace');
-    const conversation = service.createConversation(principal, workspace.id, { kind: 'channel' }, 'delivery-conversation');
+    const conversation = workspaceGeneral(service, principal, workspace.id);
     service.postMessage(principal, conversation.id, { body: 'wake agent' }, 'delivery-message');
 
     const jobs = new DeliveryJobStore(workspaceDatabase);

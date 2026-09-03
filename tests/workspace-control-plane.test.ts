@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildApp } from '../src/http/app.js';
-import { createTestService, reportReadyRuntime } from './helpers.js';
+import { createTestService, reportReadyRuntime, workspaceGeneral } from './helpers.js';
 
 describe('Workspace control plane', () => {
   it('discovers and governs Workspace resources through the HTTP contract', async () => {
@@ -36,32 +36,82 @@ describe('Workspace control plane', () => {
     const initialCursor = bootstrap.json<{ changeCursor: number }>().changeCursor;
     expect(initialCursor).toBeGreaterThan(0);
 
-    const invitationResponse = await app.inject({
+    const joinLinkResponse = await app.inject({
       method: 'POST',
-      url: `/v1/workspaces/${workspace.id}/invitations`,
-      headers: { ...aliceHeaders, 'idempotency-key': 'invite-bob' },
-      payload: { verifiedEmail: 'BOB@example.com ', membershipRole: 'member' },
+      url: `/v1/workspaces/${workspace.id}/join-links`,
+      headers: aliceHeaders,
     });
-    expect(invitationResponse.statusCode).toBe(201);
-    const invitation = invitationResponse.json<{ id: string; revision: number; verifiedEmail: string }>();
-    expect(invitation.verifiedEmail).toBe('bob@example.com');
+    expect(joinLinkResponse.statusCode).toBe(201);
+    const joinLink = joinLinkResponse.json<{ id: string; revision: number; token: string }>();
+    expect(joinLink.token).toMatch(/^anc_[A-Za-z0-9_-]{43}$/u);
 
-    const wrongHuman = await app.inject({
-      method: 'POST',
-      url: `/v1/invitations/${invitation.id}/accept`,
-      headers: { ...charlieHeaders, 'idempotency-key': 'wrong-accept' },
-      payload: { expectedRevision: invitation.revision },
+    const preview = await app.inject({
+      method: 'GET',
+      url: `/v1/workspace-join-links/${joinLink.token}`,
+      headers: charlieHeaders,
     });
-    expect(wrongHuman.statusCode).toBe(404);
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toMatchObject({ workspaceId: workspace.id, workspaceName: 'Product', alreadyMember: false });
+
+    const outsiderList = await app.inject({
+      method: 'GET',
+      url: `/v1/workspaces/${workspace.id}/join-links`,
+      headers: charlieHeaders,
+    });
+    expect(outsiderList.statusCode).toBe(403);
+    expect(outsiderList.json<{ error: { code: string } }>().error.code).toBe('WORKSPACE_MEMBERSHIP_REQUIRED');
 
     const accepted = await app.inject({
       method: 'POST',
-      url: `/v1/invitations/${invitation.id}/accept`,
+      url: `/v1/workspace-join-links/${joinLink.token}/accept`,
       headers: { ...bobHeaders, 'idempotency-key': 'bob-accept' },
-      payload: { expectedRevision: invitation.revision },
     });
     expect(accepted.statusCode).toBe(200);
     const bobMembership = accepted.json<{ membershipId: string; revision: number }>();
+
+    const charlieAccepted = await app.inject({
+      method: 'POST',
+      url: `/v1/workspace-join-links/${joinLink.token}/accept`,
+      headers: { ...charlieHeaders, 'idempotency-key': 'charlie-accept' },
+    });
+    expect(charlieAccepted.statusCode).toBe(200);
+    expect(charlieAccepted.json()).toMatchObject({ actorId: charlie.humanId, membershipRole: 'member' });
+
+    const memberCreate = await app.inject({
+      method: 'POST',
+      url: `/v1/workspaces/${workspace.id}/join-links`,
+      headers: bobHeaders,
+    });
+    expect(memberCreate.statusCode).toBe(403);
+    expect(memberCreate.json<{ error: { code: string } }>().error.code).toBe('WORKSPACE_OWNER_REQUIRED');
+
+    const listedJoinLinks = await app.inject({
+      method: 'GET',
+      url: `/v1/workspaces/${workspace.id}/join-links`,
+      headers: bobHeaders,
+    });
+    expect(listedJoinLinks.statusCode).toBe(200);
+    expect(listedJoinLinks.json<{ items: Array<Record<string, unknown>> }>().items).toEqual([
+      expect.objectContaining({ id: joinLink.id, token: joinLink.token, status: 'active', useCount: 2 }),
+    ]);
+
+    const memberRevoke = await app.inject({
+      method: 'POST',
+      url: `/v1/workspace-join-links/${joinLink.id}/revoke`,
+      headers: { ...bobHeaders, 'idempotency-key': 'member-revoke-link' },
+      payload: { expectedRevision: joinLink.revision },
+    });
+    expect(memberRevoke.statusCode).toBe(403);
+    expect(memberRevoke.json<{ error: { code: string } }>().error.code).toBe('WORKSPACE_OWNER_REQUIRED');
+
+    const ownerRevoke = await app.inject({
+      method: 'POST',
+      url: `/v1/workspace-join-links/${joinLink.id}/revoke`,
+      headers: { ...aliceHeaders, 'idempotency-key': 'owner-revoke-link' },
+      payload: { expectedRevision: joinLink.revision },
+    });
+    expect(ownerRevoke.statusCode).toBe(200);
+    expect(ownerRevoke.json()).toMatchObject({ id: joinLink.id, token: null, status: 'revoked' });
 
     const promoted = await app.inject({
       method: 'PATCH',
@@ -94,14 +144,14 @@ describe('Workspace control plane', () => {
       method: 'POST',
       url: `/v1/workspaces/${workspace.id}/conversations`,
       headers: { ...aliceHeaders, 'idempotency-key': 'private-conversation' },
-      payload: { kind: 'channel', title: 'Private' },
+      payload: { kind: 'channel', visibility: 'public', title: 'Private' },
     });
-    const conversation = conversationResponse.json<{ id: string }>();
+    expect(conversationResponse.statusCode).toBe(400);
     const visibleConversations = await app.inject({
       method: 'GET', url: `/v1/workspaces/${workspace.id}/conversations`, headers: bobHeaders,
     });
-    expect(visibleConversations.json<{ items: Array<{ id: string }> }>().items).toEqual([
-      expect.objectContaining({ id: conversation.id }),
+    expect(visibleConversations.json<{ items: Array<{ id: string; scope: { type: string } }> }>().items).toEqual([
+      expect.objectContaining({ scope: { type: 'workspace_general' } }),
     ]);
 
     const agentResponse = await app.inject({
@@ -184,7 +234,7 @@ describe('Workspace control plane', () => {
     expect(changes.statusCode).toBe(200);
     const changePage = changes.json<{ items: Array<{ changeType: string }>; nextCursor: number }>();
     expect(changePage.items.map((change) => change.changeType)).toEqual(expect.arrayContaining([
-      'invitation_created',
+      'workspace_join_link_created',
       'workspace_member_joined',
       'workspace_member_updated',
       'workspace_updated',
@@ -250,7 +300,10 @@ describe('Workspace control plane', () => {
       expect.objectContaining({ id: agent.id, membershipStatus: 'removed', ownerHumanId: alice.humanId }),
     ]);
     expect(service.listWorkspaceMembers(principal, workspace.id).items.map((member) => member.actorId)).not.toContain(agent.id);
-    expect(service.listConversations(principal, workspace.id).items).toEqual([]);
+    expect(service.listConversations(principal, workspace.id).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: directMessage.id, visibility: 'private', accessMode: 'content' }),
+      expect.objectContaining({ scope: { type: 'workspace_general' } }),
+    ]));
     expect(service.getAgent(principal, workspace.id, agent.id)).toMatchObject({ membershipStatus: 'removed' });
 
     expect(service.getConversation(principal, directMessage.id).id).toBe(directMessage.id);
@@ -375,24 +428,13 @@ describe('Workspace control plane', () => {
     const alicePrincipal = { kind: 'human' as const, actorId: alice.humanId };
     const bobPrincipal = { kind: 'human' as const, actorId: bob.humanId };
     const workspace = service.createWorkspace(alicePrincipal, 'Product', 'removal-workspace');
-    const invitation = service.createInvitation(
-      alicePrincipal,
-      workspace.id,
-      { verifiedEmail: 'bob@example.com', membershipRole: 'member' },
-      'removal-invite',
-    );
-    const bobMembership = service.acceptInvitation(
+    const joinLink = service.createWorkspaceJoinLink(alicePrincipal, workspace.id);
+    const bobMembership = service.acceptWorkspaceJoinLink(
       bobPrincipal,
-      invitation.id,
-      invitation.revision,
+      joinLink.token,
       'removal-accept',
     );
-    const conversation = service.createConversation(
-      alicePrincipal,
-      workspace.id,
-      { kind: 'channel' },
-      'removal-conversation',
-    );
+    const conversation = workspaceGeneral(service, alicePrincipal, workspace.id);
     const cursor = service.bootstrapWorkspace(alicePrincipal, workspace.id).changeCursor;
     service.postMessage(alicePrincipal, conversation.id, { body: 'workspace update' }, 'removal-message');
     service.removeWorkspaceMember(

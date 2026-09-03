@@ -186,8 +186,13 @@ BEFORE UPDATE OF status ON workspace_memberships
 WHEN OLD.status = 'active' AND NEW.status = 'removed'
 BEGIN
   SELECT CASE WHEN EXISTS (
-    SELECT 1 FROM agents
-    WHERE workspace_id = OLD.workspace_id AND owner_membership_id = OLD.id
+    SELECT 1
+    FROM agents agent
+    JOIN workspace_memberships agent_membership
+      ON agent_membership.workspace_id = agent.workspace_id
+     AND agent_membership.actor_id = agent.actor_id
+     AND agent_membership.status = 'active'
+    WHERE agent.workspace_id = OLD.workspace_id AND agent.owner_membership_id = OLD.id
   ) THEN RAISE(ABORT, 'Human Membership must transfer all owned Agents before removal') END;
 END;
 
@@ -195,8 +200,13 @@ CREATE TRIGGER workspace_memberships_owned_agents_block_delete
 BEFORE DELETE ON workspace_memberships
 BEGIN
   SELECT CASE WHEN EXISTS (
-    SELECT 1 FROM agents
-    WHERE workspace_id = OLD.workspace_id AND owner_membership_id = OLD.id
+    SELECT 1
+    FROM agents agent
+    JOIN workspace_memberships agent_membership
+      ON agent_membership.workspace_id = agent.workspace_id
+     AND agent_membership.actor_id = agent.actor_id
+     AND agent_membership.status = 'active'
+    WHERE agent.workspace_id = OLD.workspace_id AND agent.owner_membership_id = OLD.id
   ) THEN RAISE(ABORT, 'Human Membership must transfer all owned Agents before deletion') END;
 END;
 
@@ -296,43 +306,46 @@ CREATE TABLE agent_execution_policy_versions (
     REFERENCES workspace_memberships(workspace_id, id) ON DELETE RESTRICT
 ) STRICT;
 
-CREATE TABLE workspace_invitations (
+CREATE TABLE workspace_join_links (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
-  verified_email TEXT NOT NULL CHECK (
-    verified_email = lower(trim(verified_email))
-    AND length(verified_email) BETWEEN 3 AND 320
-    AND instr(verified_email, '@') > 1
-  ),
-  membership_role TEXT NOT NULL CHECK (membership_role IN ('owner', 'member')),
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'revoked')),
+  token_hash TEXT NOT NULL UNIQUE CHECK (length(token_hash) = 64),
+  token_ciphertext TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
-  invited_by_membership_id TEXT NOT NULL,
-  accepted_by_human_id TEXT REFERENCES humans(actor_id) ON DELETE RESTRICT,
-  accepted_membership_id TEXT,
+  created_by_membership_id TEXT NOT NULL,
+  use_count INTEGER NOT NULL DEFAULT 0 CHECK (use_count >= 0),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  terminal_at INTEGER,
+  last_used_at INTEGER,
+  revoked_at INTEGER,
   CHECK (
-    (status = 'pending' AND accepted_by_human_id IS NULL AND accepted_membership_id IS NULL AND terminal_at IS NULL)
-    OR (status = 'accepted' AND accepted_by_human_id IS NOT NULL AND accepted_membership_id IS NOT NULL AND terminal_at IS NOT NULL)
-    OR (status = 'revoked' AND accepted_by_human_id IS NULL AND accepted_membership_id IS NULL AND terminal_at IS NOT NULL)
+    (status = 'active' AND revoked_at IS NULL AND token_ciphertext IS NOT NULL)
+    OR (status = 'revoked' AND revoked_at IS NOT NULL AND token_ciphertext IS NULL)
   ),
   UNIQUE (workspace_id, id),
-  FOREIGN KEY (workspace_id, invited_by_membership_id)
-    REFERENCES workspace_memberships(workspace_id, id) ON DELETE RESTRICT,
-  FOREIGN KEY (workspace_id, accepted_membership_id)
+  FOREIGN KEY (workspace_id, created_by_membership_id)
     REFERENCES workspace_memberships(workspace_id, id) ON DELETE RESTRICT
 ) STRICT;
 
-CREATE UNIQUE INDEX workspace_invitations_one_pending_email
-  ON workspace_invitations(workspace_id, verified_email)
-  WHERE status = 'pending';
+CREATE INDEX workspace_join_links_workspace_status
+  ON workspace_join_links(workspace_id, status, created_at, id);
 
-CREATE INDEX workspace_invitations_workspace_status
-  ON workspace_invitations(workspace_id, status, created_at, id);
-CREATE INDEX workspace_invitations_email_status
-  ON workspace_invitations(verified_email, status, created_at, id);
+CREATE TRIGGER workspace_join_links_ciphertext_insert
+BEFORE INSERT ON workspace_join_links
+WHEN (NEW.status = 'active' AND NEW.token_ciphertext IS NULL)
+  OR (NEW.status = 'revoked' AND NEW.token_ciphertext IS NOT NULL)
+BEGIN
+  SELECT RAISE(ABORT, 'active join links require ciphertext and revoked links must clear it');
+END;
+
+CREATE TRIGGER workspace_join_links_ciphertext_update
+BEFORE UPDATE OF status, token_ciphertext ON workspace_join_links
+WHEN (NEW.status = 'active' AND NEW.token_ciphertext IS NULL)
+  OR (NEW.status = 'revoked' AND NEW.token_ciphertext IS NOT NULL)
+BEGIN
+  SELECT RAISE(ABORT, 'active join links require ciphertext and revoked links must clear it');
+END;
 
 CREATE TRIGGER workspace_memberships_keep_last_owner_update
 BEFORE UPDATE OF membership_role, status ON workspace_memberships
@@ -393,62 +406,13 @@ BEGIN
   SELECT RAISE(ABORT, 'project workspace and creator are immutable');
 END;
 
-CREATE TABLE project_repositories (
-  id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  project_id TEXT NOT NULL,
-  clone_url TEXT NOT NULL CHECK (length(trim(clone_url)) BETWEEN 1 AND 2000),
-  repository_identity TEXT NOT NULL CHECK (length(trim(repository_identity)) BETWEEN 3 AND 2000),
-  default_branch TEXT NOT NULL CHECK (length(trim(default_branch)) BETWEEN 1 AND 255),
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'detached')),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  detached_at INTEGER,
-  CHECK ((status = 'active' AND detached_at IS NULL) OR (status = 'detached' AND detached_at IS NOT NULL)),
-  UNIQUE (workspace_id, id),
-  UNIQUE (workspace_id, project_id, id),
-  FOREIGN KEY (workspace_id, project_id) REFERENCES projects(workspace_id, id) ON DELETE RESTRICT
-) STRICT;
-
-CREATE UNIQUE INDEX project_repositories_one_active
-  ON project_repositories(workspace_id, project_id) WHERE status = 'active';
-
-CREATE TRIGGER project_repositories_identity_immutable
-BEFORE UPDATE OF workspace_id, project_id, clone_url, repository_identity ON project_repositories
-BEGIN
-  SELECT RAISE(ABORT, 'project repository identity is immutable');
-END;
-
-CREATE TABLE project_resource_links (
-  id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  project_id TEXT NOT NULL,
-  title TEXT NOT NULL CHECK (length(trim(title)) BETWEEN 1 AND 200),
-  url TEXT NOT NULL CHECK (
-    length(trim(url)) BETWEEN 8 AND 4000
-    AND (lower(url) LIKE 'http://%' OR lower(url) LIKE 'https://%')
-  ),
-  description TEXT CHECK (description IS NULL OR length(description) <= 3000),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
-  created_by_membership_id TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  UNIQUE (workspace_id, id),
-  FOREIGN KEY (workspace_id, project_id) REFERENCES projects(workspace_id, id) ON DELETE CASCADE,
-  FOREIGN KEY (workspace_id, created_by_membership_id)
-    REFERENCES workspace_memberships(workspace_id, id) ON DELETE RESTRICT
-) STRICT;
-
-CREATE INDEX project_resource_links_project
-  ON project_resource_links(workspace_id, project_id, created_at, id);
-
 CREATE TABLE project_memberships (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
   project_id TEXT NOT NULL,
   workspace_membership_id TEXT NOT NULL,
-  project_role TEXT NOT NULL CHECK (project_role IN ('manager', 'member')),
+  project_role TEXT NOT NULL CHECK (project_role IN ('owner', 'manager', 'member')),
+  sponsored_by_project_membership_id TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'removed')),
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
   joined_at INTEGER NOT NULL,
@@ -459,7 +423,9 @@ CREATE TABLE project_memberships (
   UNIQUE (workspace_id, project_id, id, workspace_membership_id),
   FOREIGN KEY (workspace_id, project_id) REFERENCES projects(workspace_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (workspace_id, workspace_membership_id)
-    REFERENCES workspace_memberships(workspace_id, id) ON DELETE RESTRICT
+    REFERENCES workspace_memberships(workspace_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, project_id, sponsored_by_project_membership_id)
+    REFERENCES project_memberships(workspace_id, project_id, id) ON DELETE RESTRICT
 ) STRICT;
 
 CREATE UNIQUE INDEX project_memberships_one_active_workspace_member
@@ -472,28 +438,54 @@ CREATE INDEX project_memberships_project_status
 CREATE INDEX project_memberships_workspace_member_status
   ON project_memberships(workspace_id, workspace_membership_id, status, project_id);
 
-CREATE TRIGGER project_memberships_manager_must_be_human_insert
+CREATE TRIGGER project_memberships_admin_must_be_human_insert
 BEFORE INSERT ON project_memberships
-WHEN NEW.project_role = 'manager'
+WHEN NEW.project_role IN ('owner', 'manager')
 BEGIN
   SELECT CASE WHEN (
     SELECT a.actor_type
     FROM workspace_memberships wm
     JOIN actors a ON a.id = wm.actor_id
     WHERE wm.workspace_id = NEW.workspace_id AND wm.id = NEW.workspace_membership_id
-  ) <> 'human' THEN RAISE(ABORT, 'project manager must be human') END;
+  ) <> 'human' THEN RAISE(ABORT, 'project owner and manager must be human') END;
 END;
 
-CREATE TRIGGER project_memberships_manager_must_be_human_update
+CREATE TRIGGER project_memberships_admin_must_be_human_update
 BEFORE UPDATE OF project_role ON project_memberships
-WHEN NEW.project_role = 'manager'
+WHEN NEW.project_role IN ('owner', 'manager')
 BEGIN
   SELECT CASE WHEN (
     SELECT a.actor_type
     FROM workspace_memberships wm
     JOIN actors a ON a.id = wm.actor_id
     WHERE wm.workspace_id = NEW.workspace_id AND wm.id = NEW.workspace_membership_id
-  ) <> 'human' THEN RAISE(ABORT, 'project manager must be human') END;
+  ) <> 'human' THEN RAISE(ABORT, 'project owner and manager must be human') END;
+END;
+
+CREATE TRIGGER project_memberships_agent_requires_sponsor_insert
+BEFORE INSERT ON project_memberships
+WHEN (
+  SELECT a.actor_type
+  FROM workspace_memberships wm
+  JOIN actors a ON a.id = wm.actor_id
+  WHERE wm.workspace_id = NEW.workspace_id AND wm.id = NEW.workspace_membership_id
+) = 'agent'
+BEGIN
+  SELECT CASE WHEN NEW.project_role <> 'member' OR NEW.sponsored_by_project_membership_id IS NULL
+    THEN RAISE(ABORT, 'project Agent participation requires an owning Project administrator sponsor') END;
+END;
+
+CREATE TRIGGER project_memberships_human_has_no_sponsor_insert
+BEFORE INSERT ON project_memberships
+WHEN (
+  SELECT a.actor_type
+  FROM workspace_memberships wm
+  JOIN actors a ON a.id = wm.actor_id
+  WHERE wm.workspace_id = NEW.workspace_id AND wm.id = NEW.workspace_membership_id
+) = 'human'
+BEGIN
+  SELECT CASE WHEN NEW.sponsored_by_project_membership_id IS NOT NULL
+    THEN RAISE(ABORT, 'Human Project Membership cannot have an Agent sponsor') END;
 END;
 
 CREATE TRIGGER project_memberships_require_active_workspace_member_insert
@@ -521,7 +513,7 @@ BEGIN
 END;
 
 CREATE TRIGGER project_memberships_identity_immutable
-BEFORE UPDATE OF workspace_id, project_id, workspace_membership_id ON project_memberships
+BEFORE UPDATE OF workspace_id, project_id, workspace_membership_id, sponsored_by_project_membership_id ON project_memberships
 BEGIN
   SELECT RAISE(ABORT, 'project membership identity is immutable');
 END;
@@ -533,31 +525,31 @@ BEGIN
   SELECT RAISE(ABORT, 'removed project membership is terminal');
 END;
 
-CREATE TRIGGER project_memberships_keep_last_manager_update
+CREATE TRIGGER project_memberships_keep_owner_update
 BEFORE UPDATE OF project_role, status ON project_memberships
-WHEN OLD.status = 'active' AND OLD.project_role = 'manager'
- AND (NEW.status <> 'active' OR NEW.project_role <> 'manager')
+WHEN OLD.status = 'active' AND OLD.project_role = 'owner'
+ AND (NEW.status <> 'active' OR NEW.project_role <> 'owner')
 BEGIN
   SELECT CASE WHEN NOT EXISTS (
     SELECT 1 FROM project_memberships
     WHERE project_id = OLD.project_id
       AND id <> OLD.id
       AND status = 'active'
-      AND project_role = 'manager'
-  ) THEN RAISE(ABORT, 'project must retain an active human manager') END;
+      AND project_role = 'owner'
+  ) THEN RAISE(ABORT, 'project must retain an active human owner') END;
 END;
 
-CREATE TRIGGER project_memberships_keep_last_manager_delete
+CREATE TRIGGER project_memberships_keep_owner_delete
 BEFORE DELETE ON project_memberships
-WHEN OLD.status = 'active' AND OLD.project_role = 'manager'
+WHEN OLD.status = 'active' AND OLD.project_role = 'owner'
 BEGIN
   SELECT CASE WHEN NOT EXISTS (
     SELECT 1 FROM project_memberships
     WHERE project_id = OLD.project_id
       AND id <> OLD.id
       AND status = 'active'
-      AND project_role = 'manager'
-  ) THEN RAISE(ABORT, 'project must retain an active human manager') END;
+      AND project_role = 'owner'
+  ) THEN RAISE(ABORT, 'project must retain an active human owner') END;
 END;
 
 CREATE TRIGGER workspace_memberships_remove_requires_project_memberships_removed
@@ -581,30 +573,6 @@ CREATE TABLE computers (
   runtime_catalog_revision INTEGER NOT NULL DEFAULT 0 CHECK (runtime_catalog_revision >= 0),
   created_at INTEGER NOT NULL
 ) STRICT;
-
-CREATE TABLE computer_project_working_copies (
-  computer_id TEXT NOT NULL REFERENCES computers(id) ON DELETE CASCADE,
-  workspace_id TEXT NOT NULL,
-  project_id TEXT NOT NULL,
-  repository_id TEXT NOT NULL,
-  availability TEXT NOT NULL CHECK (availability IN ('ready', 'unavailable', 'mismatch')),
-  branch TEXT CHECK (branch IS NULL OR length(trim(branch)) BETWEEN 1 AND 255),
-  head_commit TEXT CHECK (head_commit IS NULL OR length(head_commit) IN (40, 64)),
-  dirty INTEGER CHECK (dirty IS NULL OR dirty IN (0, 1)),
-  checked_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  CHECK (
-    (availability = 'ready' AND branch IS NOT NULL AND head_commit IS NOT NULL AND dirty IS NOT NULL)
-    OR (availability <> 'ready' AND branch IS NULL AND head_commit IS NULL AND dirty IS NULL)
-  ),
-  PRIMARY KEY (computer_id, project_id),
-  FOREIGN KEY (workspace_id, project_id) REFERENCES projects(workspace_id, id) ON DELETE RESTRICT,
-  FOREIGN KEY (workspace_id, project_id, repository_id)
-    REFERENCES project_repositories(workspace_id, project_id, id) ON DELETE RESTRICT
-) STRICT;
-
-CREATE INDEX computer_project_working_copies_project
-  ON computer_project_working_copies(workspace_id, project_id, availability, checked_at);
 
 CREATE TABLE computer_runtime_capabilities (
   computer_id TEXT NOT NULL REFERENCES computers(id) ON DELETE CASCADE,
@@ -669,6 +637,56 @@ CREATE UNIQUE INDEX agent_runtime_bindings_one_active
   ON agent_runtime_bindings(workspace_id, agent_id)
   WHERE status = 'active';
 
+CREATE TABLE agent_activity_turns (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  computer_id TEXT NOT NULL,
+  runtime_binding_revision INTEGER NOT NULL CHECK (runtime_binding_revision > 0),
+  status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'failed')),
+  started_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  CHECK (
+    (status = 'active' AND finished_at IS NULL)
+    OR (status IN ('completed', 'failed') AND finished_at IS NOT NULL)
+  ),
+  UNIQUE (workspace_id, id),
+  UNIQUE (workspace_id, id, agent_id),
+  FOREIGN KEY (workspace_id, agent_id) REFERENCES agents(workspace_id, actor_id) ON DELETE RESTRICT,
+  FOREIGN KEY (computer_id) REFERENCES computers(id) ON DELETE RESTRICT
+) STRICT;
+
+CREATE UNIQUE INDEX agent_activity_turns_one_active
+  ON agent_activity_turns(workspace_id, agent_id)
+  WHERE status = 'active';
+CREATE INDEX agent_activity_turns_recent
+  ON agent_activity_turns(workspace_id, updated_at DESC, id);
+
+CREATE TABLE agent_activity_events (
+  position INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  workspace_id TEXT NOT NULL,
+  turn_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  sequence INTEGER NOT NULL CHECK (sequence > 0),
+  event_type TEXT NOT NULL CHECK (event_type IN (
+    'turn_started', 'thought', 'tool', 'plan', 'message', 'turn_completed', 'turn_failed'
+  )),
+  title TEXT NOT NULL CHECK (length(trim(title)) BETWEEN 1 AND 500),
+  status TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'completed', 'failed')),
+  created_at INTEGER NOT NULL,
+  UNIQUE (workspace_id, id),
+  UNIQUE (workspace_id, turn_id, sequence),
+  FOREIGN KEY (workspace_id, turn_id, agent_id)
+    REFERENCES agent_activity_turns(workspace_id, id, agent_id) ON DELETE CASCADE
+) STRICT;
+
+CREATE INDEX agent_activity_events_recent
+  ON agent_activity_events(workspace_id, position DESC);
+CREATE INDEX agent_activity_events_agent_recent
+  ON agent_activity_events(workspace_id, agent_id, position DESC);
+
 CREATE TABLE api_tokens (
   id TEXT PRIMARY KEY,
   principal_type TEXT NOT NULL CHECK (principal_type IN ('human', 'computer')),
@@ -695,7 +713,10 @@ CREATE TABLE conversations (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
   project_id TEXT,
+  scope_type TEXT NOT NULL CHECK (scope_type IN ('workspace_general', 'direct_message', 'project_group')),
+  membership_mode TEXT NOT NULL CHECK (membership_mode IN ('workspace_all', 'project_all', 'explicit')),
   conversation_kind TEXT NOT NULL CHECK (conversation_kind IN ('channel', 'dm')),
+  visibility TEXT NOT NULL CHECK (visibility IN ('public', 'private')),
   title TEXT,
   lifecycle_status TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_status IN ('active', 'archived')),
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
@@ -710,6 +731,17 @@ CREATE TABLE conversations (
   CHECK (
     (project_id IS NULL AND created_by_project_membership_id IS NULL)
     OR (project_id IS NOT NULL AND created_by_project_membership_id IS NOT NULL)
+  ),
+  CHECK (conversation_kind <> 'dm' OR visibility = 'private'),
+  CHECK (
+    (scope_type = 'workspace_general' AND project_id IS NULL
+      AND conversation_kind = 'channel' AND visibility = 'public' AND membership_mode = 'workspace_all')
+    OR (scope_type = 'direct_message' AND project_id IS NULL
+      AND conversation_kind = 'dm' AND visibility = 'private' AND membership_mode = 'explicit')
+    OR (scope_type = 'project_group' AND project_id IS NOT NULL
+      AND conversation_kind = 'channel'
+      AND ((visibility = 'public' AND membership_mode = 'project_all')
+        OR (visibility = 'private' AND membership_mode = 'explicit')))
   ),
   CHECK (
     (lifecycle_status = 'active' AND archived_at IS NULL AND archived_by_membership_id IS NULL)
@@ -731,10 +763,19 @@ CREATE INDEX conversations_workspace_created
 CREATE INDEX conversations_project_created
   ON conversations(workspace_id, project_id, lifecycle_status, updated_at DESC, id DESC);
 
+CREATE UNIQUE INDEX conversations_one_workspace_general
+  ON conversations(workspace_id)
+  WHERE scope_type = 'workspace_general';
+
+CREATE UNIQUE INDEX conversations_one_project_main
+  ON conversations(project_id)
+  WHERE scope_type = 'project_group' AND membership_mode = 'project_all';
+
 CREATE TRIGGER conversations_scope_immutable
-BEFORE UPDATE OF workspace_id, project_id, created_by_membership_id, created_by_project_membership_id ON conversations
+BEFORE UPDATE OF workspace_id, project_id, scope_type, membership_mode, conversation_kind, visibility,
+  created_by_membership_id, created_by_project_membership_id ON conversations
 BEGIN
-  SELECT RAISE(ABORT, 'conversation scope and creator are immutable');
+  SELECT RAISE(ABORT, 'conversation scope, preset, visibility, and creator are immutable');
 END;
 
 CREATE TRIGGER conversations_lifecycle_state_insert
@@ -769,38 +810,90 @@ BEGIN
   SELECT RAISE(ABORT, 'invalid conversation lifecycle state');
 END;
 
-CREATE TABLE conversation_direct_memberships (
+CREATE TABLE conversation_memberships (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
   conversation_id TEXT NOT NULL,
-  membership_id TEXT NOT NULL,
+  project_id TEXT,
+  scope_membership_id TEXT NOT NULL,
+  workspace_membership_id TEXT NOT NULL,
+  project_membership_id TEXT,
   joined_at INTEGER NOT NULL,
+  CHECK (
+    (project_id IS NULL
+      AND project_membership_id IS NULL
+      AND scope_membership_id = workspace_membership_id)
+    OR
+    (project_id IS NOT NULL
+      AND project_membership_id IS NOT NULL
+      AND scope_membership_id = project_membership_id)
+  ),
   UNIQUE (workspace_id, id),
-  UNIQUE (workspace_id, conversation_id, membership_id),
+  UNIQUE (workspace_id, conversation_id, scope_membership_id),
   FOREIGN KEY (workspace_id, conversation_id) REFERENCES conversations(workspace_id, id) ON DELETE RESTRICT,
-  FOREIGN KEY (workspace_id, membership_id) REFERENCES workspace_memberships(workspace_id, id) ON DELETE RESTRICT
+  FOREIGN KEY (workspace_id, project_id, conversation_id)
+    REFERENCES conversations(workspace_id, project_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, workspace_membership_id)
+    REFERENCES workspace_memberships(workspace_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, project_id, project_membership_id, workspace_membership_id)
+    REFERENCES project_memberships(workspace_id, project_id, id, workspace_membership_id) ON DELETE RESTRICT
 ) STRICT;
 
-CREATE INDEX conversation_direct_by_membership
-  ON conversation_direct_memberships(workspace_id, membership_id, conversation_id);
+CREATE INDEX conversation_memberships_by_scope_membership
+  ON conversation_memberships(workspace_id, scope_membership_id, conversation_id);
+CREATE INDEX conversation_memberships_by_workspace_membership
+  ON conversation_memberships(workspace_id, workspace_membership_id, conversation_id);
 
-CREATE TRIGGER conversation_direct_requires_workspace_dm
-BEFORE INSERT ON conversation_direct_memberships
+CREATE TRIGGER conversation_memberships_require_private_scope
+BEFORE INSERT ON conversation_memberships
 BEGIN
   SELECT CASE WHEN NOT EXISTS (
     SELECT 1 FROM conversations c
     WHERE c.workspace_id = NEW.workspace_id
       AND c.id = NEW.conversation_id
-      AND c.project_id IS NULL
-      AND c.conversation_kind = 'dm'
-  ) THEN RAISE(ABORT, 'direct participants require a Workspace DM') END;
+      AND c.project_id IS NEW.project_id
+      AND (
+        (c.membership_mode = 'explicit' AND c.project_id IS NULL
+          AND NEW.project_membership_id IS NULL
+          AND NEW.scope_membership_id = NEW.workspace_membership_id)
+        OR
+        (c.membership_mode = 'explicit' AND c.project_id IS NOT NULL
+          AND NEW.project_membership_id IS NOT NULL
+          AND NEW.scope_membership_id = NEW.project_membership_id)
+        OR
+        (c.membership_mode = 'workspace_all' AND c.project_id IS NULL
+          AND NEW.project_membership_id IS NULL
+          AND NEW.scope_membership_id = NEW.workspace_membership_id
+          AND (SELECT actor_type FROM actors WHERE id = (
+            SELECT actor_id FROM workspace_memberships
+            WHERE workspace_id = NEW.workspace_id AND id = NEW.workspace_membership_id
+          )) = 'agent')
+        OR
+        (c.membership_mode = 'project_all' AND c.project_id IS NOT NULL
+          AND NEW.project_membership_id IS NOT NULL
+          AND NEW.scope_membership_id = NEW.project_membership_id
+          AND (SELECT actor_type FROM actors WHERE id = (
+            SELECT actor_id FROM workspace_memberships
+            WHERE workspace_id = NEW.workspace_id AND id = NEW.workspace_membership_id
+          )) = 'agent')
+      )
+  ) THEN RAISE(ABORT, 'conversation participant is invalid for the Conversation membership mode') END;
 END;
 
-CREATE TRIGGER conversation_direct_identity_immutable
-BEFORE UPDATE OF workspace_id, conversation_id, membership_id, joined_at
-ON conversation_direct_memberships
+CREATE TRIGGER conversations_required_groups_cannot_archive
+BEFORE UPDATE OF lifecycle_status ON conversations
+WHEN OLD.lifecycle_status = 'active' AND NEW.lifecycle_status = 'archived'
+  AND (OLD.scope_type = 'workspace_general' OR OLD.membership_mode = 'project_all')
 BEGIN
-  SELECT RAISE(ABORT, 'direct participant identity is immutable');
+  SELECT RAISE(ABORT, 'required Workspace and Project groups cannot be archived');
+END;
+
+CREATE TRIGGER conversation_memberships_identity_immutable
+BEFORE UPDATE OF workspace_id, conversation_id, project_id, scope_membership_id,
+  workspace_membership_id, project_membership_id, joined_at
+ON conversation_memberships
+BEGIN
+  SELECT RAISE(ABORT, 'conversation participant identity is immutable');
 END;
 
 CREATE TABLE threads (
@@ -826,6 +919,7 @@ CREATE TABLE messages (
   conversation_id TEXT NOT NULL,
   project_id TEXT,
   thread_id TEXT,
+  reply_to_message_id TEXT,
   author_actor_id TEXT NOT NULL REFERENCES actors(id) ON DELETE RESTRICT,
   author_membership_id TEXT NOT NULL,
   author_project_membership_id TEXT,
@@ -847,159 +941,425 @@ CREATE TABLE messages (
     OR
     (producing_run_id IS NOT NULL AND producing_attempt_id IS NOT NULL)
   ),
+  CHECK (reply_to_message_id IS NULL OR reply_to_message_id <> id),
   FOREIGN KEY (workspace_id, conversation_id) REFERENCES conversations(workspace_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (workspace_id, conversation_id, thread_id)
     REFERENCES threads(workspace_id, conversation_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, conversation_id, reply_to_message_id)
+    REFERENCES messages(workspace_id, conversation_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (workspace_id, author_membership_id, author_actor_id)
     REFERENCES workspace_memberships(workspace_id, id, actor_id) ON DELETE RESTRICT,
   FOREIGN KEY (workspace_id, project_id, author_project_membership_id, author_membership_id)
     REFERENCES project_memberships(workspace_id, project_id, id, workspace_membership_id) ON DELETE RESTRICT
 ) STRICT;
 
-CREATE TABLE artifacts (
+CREATE TABLE work_items (
   id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
-  name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 500),
-  artifact_type TEXT NOT NULL CHECK (artifact_type IN ('markdown', 'file')),
-  current_snapshot_id TEXT,
+  workspace_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  description TEXT NOT NULL CHECK (length(trim(description)) BETWEEN 1 AND 10000),
+  task_number INTEGER NOT NULL CHECK (task_number > 0),
+  source_conversation_id TEXT,
+  source_message_id TEXT,
+  source_thread_id TEXT,
   created_by_membership_id TEXT NOT NULL,
+  created_by_project_membership_id TEXT NOT NULL,
+  lifecycle_status TEXT NOT NULL DEFAULT 'open'
+    CHECK (lifecycle_status IN ('open', 'blocked', 'completed', 'cancelled')),
+  blocker_reason TEXT CHECK (blocker_reason IS NULL OR length(trim(blocker_reason)) BETWEEN 1 AND 2000),
+  cancellation_reason TEXT CHECK (cancellation_reason IS NULL OR length(trim(cancellation_reason)) BETWEEN 1 AND 2000),
+  assignee_membership_id TEXT,
+  assignee_project_membership_id TEXT,
+  current_submission_id TEXT,
+  assignment_revision INTEGER NOT NULL DEFAULT 0 CHECK (assignment_revision >= 0),
+  comment_frontier INTEGER NOT NULL DEFAULT 0 CHECK (comment_frontier >= 0),
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'deleted', 'purged')),
-  deleted_at INTEGER,
-  purge_after INTEGER,
-  purged_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  cancelled_at INTEGER,
   CHECK (
-    (status = 'active' AND deleted_at IS NULL AND purge_after IS NULL AND purged_at IS NULL)
-    OR (status = 'deleted' AND deleted_at IS NOT NULL AND purge_after IS NOT NULL AND purged_at IS NULL)
-    OR (status = 'purged' AND deleted_at IS NOT NULL AND purge_after IS NOT NULL AND purged_at IS NOT NULL
-        AND current_snapshot_id IS NULL)
+    (assignee_membership_id IS NULL AND assignee_project_membership_id IS NULL)
+    OR (assignee_membership_id IS NOT NULL AND assignee_project_membership_id IS NOT NULL)
+  ),
+  CHECK (
+    (source_conversation_id IS NULL AND source_message_id IS NULL AND source_thread_id IS NULL)
+    OR (source_conversation_id IS NOT NULL AND source_message_id IS NOT NULL)
+  ),
+  CHECK (
+    (lifecycle_status = 'open'
+      AND blocker_reason IS NULL AND cancellation_reason IS NULL
+      AND completed_at IS NULL AND cancelled_at IS NULL)
+    OR (lifecycle_status = 'blocked'
+      AND blocker_reason IS NOT NULL AND cancellation_reason IS NULL
+      AND completed_at IS NULL AND cancelled_at IS NULL)
+    OR (lifecycle_status = 'completed'
+      AND blocker_reason IS NULL AND cancellation_reason IS NULL
+      AND completed_at IS NOT NULL AND cancelled_at IS NULL
+      AND assignee_membership_id IS NULL AND assignee_project_membership_id IS NULL)
+    OR (lifecycle_status = 'cancelled'
+      AND blocker_reason IS NULL
+      AND completed_at IS NULL AND cancelled_at IS NOT NULL
+      AND assignee_membership_id IS NULL AND assignee_project_membership_id IS NULL)
   ),
   UNIQUE (workspace_id, id),
-  UNIQUE (workspace_id, id, current_snapshot_id),
+  UNIQUE (workspace_id, project_id, task_number),
+  UNIQUE (workspace_id, project_id, id),
+  FOREIGN KEY (workspace_id, project_id) REFERENCES projects(workspace_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, project_id, source_conversation_id)
+    REFERENCES conversations(workspace_id, project_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, source_conversation_id, source_message_id)
+    REFERENCES messages(workspace_id, conversation_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, source_conversation_id, source_thread_id)
+    REFERENCES threads(workspace_id, conversation_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (workspace_id, created_by_membership_id)
     REFERENCES workspace_memberships(workspace_id, id) ON DELETE RESTRICT,
-  FOREIGN KEY (workspace_id, id, current_snapshot_id)
-    REFERENCES artifact_snapshots(workspace_id, artifact_id, id) ON DELETE RESTRICT
+  FOREIGN KEY (
+    workspace_id, project_id, created_by_project_membership_id, created_by_membership_id
+  ) REFERENCES project_memberships(
+    workspace_id, project_id, id, workspace_membership_id
+  ) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, assignee_membership_id)
+    REFERENCES workspace_memberships(workspace_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (
+    workspace_id, project_id, assignee_project_membership_id, assignee_membership_id
+  ) REFERENCES project_memberships(
+    workspace_id, project_id, id, workspace_membership_id
+  ) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, id, current_submission_id)
+    REFERENCES work_item_submissions(workspace_id, work_item_id, id) ON DELETE RESTRICT
 ) STRICT;
 
-CREATE INDEX artifacts_workspace_status
-  ON artifacts(workspace_id, status, updated_at DESC, id);
+CREATE INDEX work_items_project_status_updated
+  ON work_items(workspace_id, project_id, lifecycle_status, updated_at DESC, id DESC);
 
-CREATE TABLE artifact_snapshots (
+CREATE INDEX work_items_project_task_number
+  ON work_items(workspace_id, project_id, task_number);
+
+CREATE INDEX work_items_project_assignee
+  ON work_items(workspace_id, project_id, assignee_project_membership_id, lifecycle_status);
+
+CREATE INDEX work_items_source_message
+  ON work_items(workspace_id, source_conversation_id, source_message_id);
+
+-- A WorkItem can be owned by several Project members.  The legacy assignee
+-- columns above remain as the primary/compatibility assignee while this table
+-- is the authoritative ordered set for new writes.
+CREATE TABLE work_item_assignees (
+  workspace_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  work_item_id TEXT NOT NULL,
+  assignment_order INTEGER NOT NULL CHECK (assignment_order >= 0),
+  project_membership_id TEXT NOT NULL,
+  workspace_membership_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, work_item_id, project_membership_id),
+  UNIQUE (workspace_id, work_item_id, assignment_order),
+  FOREIGN KEY (workspace_id, project_id, work_item_id)
+    REFERENCES work_items(workspace_id, project_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (workspace_id, project_id, project_membership_id, workspace_membership_id)
+    REFERENCES project_memberships(workspace_id, project_id, id, workspace_membership_id)
+    ON DELETE RESTRICT
+) STRICT;
+
+CREATE INDEX work_item_assignees_member
+  ON work_item_assignees(workspace_id, project_id, project_membership_id, work_item_id);
+
+CREATE TRIGGER work_items_identity_and_intent_immutable
+BEFORE UPDATE OF workspace_id, project_id,
+  source_conversation_id, source_message_id, source_thread_id,
+  created_by_membership_id, created_by_project_membership_id
+ON work_items
+BEGIN
+  SELECT RAISE(ABORT, 'work item identity, source, scope, and creator are immutable');
+END;
+
+CREATE TRIGGER work_items_description_edit_requires_unassigned_open
+BEFORE UPDATE OF description ON work_items
+WHEN OLD.lifecycle_status <> 'open'
+  OR OLD.assignee_membership_id IS NOT NULL
+  OR OLD.assignee_project_membership_id IS NOT NULL
+BEGIN
+  SELECT RAISE(ABORT, 'only an unassigned open work item description can be edited');
+END;
+
+CREATE TRIGGER work_items_source_provenance_valid_insert
+BEFORE INSERT ON work_items
+WHEN (NEW.source_conversation_id IS NULL
+      AND (NEW.source_message_id IS NOT NULL OR NEW.source_thread_id IS NOT NULL))
+  OR (NEW.source_conversation_id IS NOT NULL AND NEW.source_message_id IS NULL)
+  OR (NEW.source_conversation_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM conversations conversation
+      WHERE conversation.workspace_id = NEW.workspace_id
+        AND conversation.project_id = NEW.project_id
+        AND conversation.id = NEW.source_conversation_id
+    ))
+  OR (NEW.source_message_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM messages message
+      WHERE message.workspace_id = NEW.workspace_id
+        AND message.conversation_id = NEW.source_conversation_id
+        AND message.id = NEW.source_message_id
+    ))
+  OR (NEW.source_thread_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM threads thread
+      WHERE thread.workspace_id = NEW.workspace_id
+        AND thread.conversation_id = NEW.source_conversation_id
+        AND thread.id = NEW.source_thread_id
+    ))
+BEGIN
+  SELECT RAISE(ABORT, 'work item source provenance is invalid');
+END;
+
+CREATE TRIGGER work_items_terminal_irreversible
+BEFORE UPDATE OF lifecycle_status ON work_items
+WHEN OLD.lifecycle_status IN ('completed', 'cancelled')
+  AND NEW.lifecycle_status <> OLD.lifecycle_status
+BEGIN
+  SELECT RAISE(ABORT, 'terminal work item lifecycle is irreversible');
+END;
+
+CREATE TABLE work_item_comments (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
-  artifact_id TEXT NOT NULL,
-  label TEXT CHECK (label IS NULL OR length(trim(label)) BETWEEN 1 AND 200),
-  parent_snapshot_id TEXT,
-  blob_hash TEXT,
-  content_digest TEXT NOT NULL CHECK (length(content_digest) = 64),
-  media_type TEXT NOT NULL CHECK (length(trim(media_type)) BETWEEN 1 AND 200),
-  byte_length INTEGER NOT NULL CHECK (byte_length BETWEEN 0 AND 104857600),
-  created_by_actor_id TEXT NOT NULL REFERENCES actors(id) ON DELETE RESTRICT,
-  created_by_membership_id TEXT NOT NULL,
-  producing_run_id TEXT,
-  producing_attempt_id TEXT,
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'deleted')),
-  deleted_at INTEGER,
-  purge_after INTEGER,
-  content_purged_at INTEGER,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  CHECK (
-    (producing_run_id IS NULL AND producing_attempt_id IS NULL)
-    OR (producing_run_id IS NOT NULL AND producing_attempt_id IS NOT NULL)
-  ),
-  CHECK (
-    (status = 'active' AND deleted_at IS NULL AND purge_after IS NULL
-      AND blob_hash IS NOT NULL AND content_purged_at IS NULL)
-    OR (status = 'deleted' AND deleted_at IS NOT NULL AND purge_after IS NOT NULL
-      AND ((blob_hash IS NOT NULL AND content_purged_at IS NULL)
-        OR (blob_hash IS NULL AND content_purged_at IS NOT NULL)))
-  ),
-  UNIQUE (workspace_id, id),
-  UNIQUE (workspace_id, artifact_id, id),
-  FOREIGN KEY (workspace_id, artifact_id) REFERENCES artifacts(workspace_id, id) ON DELETE CASCADE,
-  FOREIGN KEY (workspace_id, artifact_id, parent_snapshot_id)
-    REFERENCES artifact_snapshots(workspace_id, artifact_id, id) ON DELETE RESTRICT,
-  FOREIGN KEY (blob_hash) REFERENCES content_blobs(hash) ON DELETE RESTRICT,
-  FOREIGN KEY (workspace_id, created_by_membership_id, created_by_actor_id)
-    REFERENCES workspace_memberships(workspace_id, id, actor_id) ON DELETE RESTRICT,
-  FOREIGN KEY (workspace_id, producing_attempt_id, producing_run_id)
-    REFERENCES attempts(workspace_id, id, run_id) ON DELETE RESTRICT
-) STRICT;
-
-CREATE INDEX artifact_snapshots_artifact
-  ON artifact_snapshots(workspace_id, artifact_id, created_at DESC, id DESC);
-
-CREATE TABLE artifact_drafts (
-  workspace_id TEXT NOT NULL,
-  artifact_id TEXT NOT NULL,
-  base_snapshot_id TEXT,
-  yjs_state BLOB NOT NULL,
-  draft_revision INTEGER NOT NULL DEFAULT 0 CHECK (draft_revision >= 0),
-  updated_by_membership_id TEXT NOT NULL,
-  updated_at INTEGER NOT NULL,
-  PRIMARY KEY (workspace_id, artifact_id),
-  FOREIGN KEY (workspace_id, artifact_id) REFERENCES artifacts(workspace_id, id) ON DELETE CASCADE,
-  FOREIGN KEY (workspace_id, artifact_id, base_snapshot_id)
-    REFERENCES artifact_snapshots(workspace_id, artifact_id, id) ON DELETE RESTRICT,
-  FOREIGN KEY (workspace_id, updated_by_membership_id)
-    REFERENCES workspace_memberships(workspace_id, id) ON DELETE RESTRICT
-) STRICT;
-
-CREATE TABLE artifact_file_states (
-  workspace_id TEXT NOT NULL,
-  artifact_id TEXT NOT NULL,
-  blob_hash TEXT NOT NULL,
-  content_digest TEXT NOT NULL CHECK (length(content_digest) = 64),
-  media_type TEXT NOT NULL CHECK (length(trim(media_type)) BETWEEN 1 AND 200),
-  byte_length INTEGER NOT NULL CHECK (byte_length BETWEEN 0 AND 104857600),
-  current_revision INTEGER NOT NULL DEFAULT 1 CHECK (current_revision > 0),
-  updated_by_membership_id TEXT NOT NULL,
-  updated_at INTEGER NOT NULL,
-  PRIMARY KEY (workspace_id, artifact_id),
-  FOREIGN KEY (workspace_id, artifact_id) REFERENCES artifacts(workspace_id, id) ON DELETE CASCADE,
-  FOREIGN KEY (blob_hash) REFERENCES content_blobs(hash) ON DELETE RESTRICT,
-  FOREIGN KEY (workspace_id, updated_by_membership_id)
-    REFERENCES workspace_memberships(workspace_id, id) ON DELETE RESTRICT
-) STRICT;
-
-CREATE TABLE artifact_project_associations (
-  workspace_id TEXT NOT NULL,
-  artifact_id TEXT NOT NULL,
   project_id TEXT NOT NULL,
-  associated_by_membership_id TEXT NOT NULL,
+  work_item_id TEXT NOT NULL,
+  author_actor_id TEXT NOT NULL,
+  author_membership_id TEXT NOT NULL,
+  author_project_membership_id TEXT NOT NULL,
+  body TEXT NOT NULL CHECK (length(trim(body)) BETWEEN 1 AND 10000),
+  comment_position INTEGER NOT NULL CHECK (comment_position > 0),
   created_at INTEGER NOT NULL,
-  PRIMARY KEY (workspace_id, artifact_id, project_id),
-  FOREIGN KEY (workspace_id, artifact_id) REFERENCES artifacts(workspace_id, id) ON DELETE CASCADE,
-  FOREIGN KEY (workspace_id, project_id) REFERENCES projects(workspace_id, id) ON DELETE CASCADE,
-  FOREIGN KEY (workspace_id, associated_by_membership_id)
-    REFERENCES workspace_memberships(workspace_id, id) ON DELETE RESTRICT
+  UNIQUE (workspace_id, id),
+  UNIQUE (workspace_id, work_item_id, id),
+  UNIQUE (workspace_id, work_item_id, comment_position),
+  FOREIGN KEY (workspace_id, project_id, work_item_id)
+    REFERENCES work_items(workspace_id, project_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, author_membership_id, author_actor_id)
+    REFERENCES workspace_memberships(workspace_id, id, actor_id) ON DELETE RESTRICT,
+  FOREIGN KEY (
+    workspace_id, project_id, author_project_membership_id, author_membership_id
+  ) REFERENCES project_memberships(
+    workspace_id, project_id, id, workspace_membership_id
+  ) ON DELETE RESTRICT
 ) STRICT;
 
-CREATE INDEX artifact_project_associations_project
-  ON artifact_project_associations(workspace_id, project_id, created_at, artifact_id);
+CREATE INDEX work_item_comments_work_item_position
+  ON work_item_comments(workspace_id, work_item_id, comment_position, id);
 
-CREATE TABLE message_artifact_references (
+CREATE TRIGGER work_item_comments_immutable
+BEFORE UPDATE ON work_item_comments
+BEGIN
+  SELECT RAISE(ABORT, 'work item comments are immutable');
+END;
+
+CREATE TABLE work_item_comment_mentions (
+  workspace_id TEXT NOT NULL,
+  comment_id TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  mention_order INTEGER NOT NULL CHECK (mention_order >= 0),
+  PRIMARY KEY (workspace_id, comment_id, actor_id),
+  UNIQUE (workspace_id, comment_id, mention_order),
+  FOREIGN KEY (workspace_id, comment_id)
+    REFERENCES work_item_comments(workspace_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (actor_id) REFERENCES actors(id) ON DELETE RESTRICT
+) STRICT;
+
+CREATE TABLE work_item_comment_work_item_references_v2 (
+  workspace_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  comment_id TEXT NOT NULL,
+  reference_order INTEGER NOT NULL CHECK (reference_order >= 0),
+  work_item_id TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, comment_id, reference_order),
+  UNIQUE (workspace_id, comment_id, work_item_id),
+  FOREIGN KEY (workspace_id, comment_id)
+    REFERENCES work_item_comments(workspace_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (workspace_id, project_id, work_item_id)
+    REFERENCES work_items(workspace_id, project_id, id) ON DELETE RESTRICT
+) STRICT;
+
+CREATE INDEX work_item_comment_work_item_references_comment
+  ON work_item_comment_work_item_references_v2(workspace_id, comment_id, reference_order);
+
+CREATE TABLE work_item_comment_artifact_version_references_v2 (
+  workspace_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  comment_id TEXT NOT NULL,
+  reference_order INTEGER NOT NULL CHECK (reference_order >= 0),
+  artifact_id TEXT NOT NULL,
+  version_id TEXT NOT NULL,
+  artifact_name_snapshot TEXT NOT NULL CHECK (length(trim(artifact_name_snapshot)) BETWEEN 1 AND 255),
+  version_number_snapshot INTEGER NOT NULL CHECK (version_number_snapshot > 0),
+  version_created_at_snapshot INTEGER NOT NULL,
+  file_name_snapshot TEXT NOT NULL CHECK (length(trim(file_name_snapshot)) BETWEEN 1 AND 255),
+  media_type_snapshot TEXT NOT NULL,
+  content_digest_snapshot TEXT NOT NULL CHECK (length(content_digest_snapshot) = 64),
+  byte_length_snapshot INTEGER NOT NULL CHECK (byte_length_snapshot >= 0),
+  status_snapshot TEXT NOT NULL CHECK (status_snapshot IN ('active', 'deleted', 'purged')),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, comment_id, reference_order),
+  UNIQUE (workspace_id, comment_id, version_id),
+  FOREIGN KEY (workspace_id, comment_id)
+    REFERENCES work_item_comments(workspace_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (workspace_id, version_id) REFERENCES artifact_versions_v2(workspace_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, artifact_id) REFERENCES project_artifacts_v2(workspace_id, id) ON DELETE RESTRICT
+) STRICT;
+
+CREATE INDEX work_item_comment_artifact_references_comment
+  ON work_item_comment_artifact_version_references_v2(workspace_id, comment_id, reference_order);
+
+CREATE TABLE work_item_submissions (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  work_item_id TEXT NOT NULL,
+  comment_id TEXT,
+  submitted_by_membership_id TEXT NOT NULL,
+  submitted_by_project_membership_id TEXT NOT NULL,
+  assignment_revision INTEGER NOT NULL CHECK (assignment_revision >= 0),
+  created_at INTEGER NOT NULL,
+  UNIQUE (workspace_id, id),
+  UNIQUE (workspace_id, work_item_id, id),
+  FOREIGN KEY (workspace_id, project_id, work_item_id)
+    REFERENCES work_items(workspace_id, project_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, work_item_id, comment_id)
+    REFERENCES work_item_comments(workspace_id, work_item_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, submitted_by_membership_id)
+    REFERENCES workspace_memberships(workspace_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (
+    workspace_id, project_id, submitted_by_project_membership_id, submitted_by_membership_id
+  ) REFERENCES project_memberships(
+    workspace_id, project_id, id, workspace_membership_id
+  ) ON DELETE RESTRICT
+) STRICT;
+
+CREATE INDEX work_item_submissions_work_item_created
+  ON work_item_submissions(workspace_id, work_item_id, created_at, id);
+
+CREATE TRIGGER work_item_submissions_immutable
+BEFORE UPDATE ON work_item_submissions
+BEGIN
+  SELECT RAISE(ABORT, 'work item submissions are immutable');
+END;
+
+CREATE TABLE work_item_submission_artifact_references_v2 (
+  workspace_id TEXT NOT NULL,
+  submission_id TEXT NOT NULL,
+  reference_order INTEGER NOT NULL CHECK (reference_order >= 0),
+  artifact_id TEXT NOT NULL,
+  version_id TEXT NOT NULL,
+  artifact_name_snapshot TEXT NOT NULL CHECK (length(trim(artifact_name_snapshot)) BETWEEN 1 AND 255),
+  version_number_snapshot INTEGER NOT NULL CHECK (version_number_snapshot > 0),
+  version_created_at_snapshot INTEGER NOT NULL,
+  file_name_snapshot TEXT NOT NULL CHECK (length(trim(file_name_snapshot)) BETWEEN 1 AND 255),
+  media_type_snapshot TEXT NOT NULL,
+  content_digest_snapshot TEXT NOT NULL CHECK (length(content_digest_snapshot) = 64),
+  byte_length_snapshot INTEGER NOT NULL CHECK (byte_length_snapshot >= 0),
+  status_snapshot TEXT NOT NULL CHECK (status_snapshot IN ('active', 'deleted', 'purged')),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, submission_id, reference_order),
+  UNIQUE (workspace_id, submission_id, version_id),
+  FOREIGN KEY (workspace_id, submission_id)
+    REFERENCES work_item_submissions(workspace_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (workspace_id, version_id)
+    REFERENCES artifact_versions_v2(workspace_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, artifact_id)
+    REFERENCES project_artifacts_v2(workspace_id, id) ON DELETE RESTRICT
+) STRICT;
+
+CREATE INDEX work_item_submission_artifact_references_submission
+  ON work_item_submission_artifact_references_v2(workspace_id, submission_id, reference_order);
+
+CREATE TRIGGER work_item_submission_artifact_reference_matches_artifact
+BEFORE INSERT ON work_item_submission_artifact_references_v2
+WHEN NOT EXISTS (
+  SELECT 1 FROM artifact_versions_v2 version
+  WHERE version.workspace_id = NEW.workspace_id
+    AND version.id = NEW.version_id
+    AND version.artifact_id = NEW.artifact_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'WorkItem submission Artifact reference does not match Artifact');
+END;
+
+CREATE TRIGGER work_item_submission_artifact_reference_matches_project
+BEFORE INSERT ON work_item_submission_artifact_references_v2
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM work_item_submissions submission
+  JOIN project_artifacts_v2 artifact
+    ON artifact.workspace_id = submission.workspace_id
+   AND artifact.project_id = submission.project_id
+  WHERE submission.workspace_id = NEW.workspace_id
+    AND submission.id = NEW.submission_id
+    AND artifact.id = NEW.artifact_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'WorkItem submission Artifact belongs to another Project');
+END;
+
+CREATE TABLE message_artifact_version_references_v2 (
   workspace_id TEXT NOT NULL,
   message_id TEXT NOT NULL,
   reference_order INTEGER NOT NULL CHECK (reference_order >= 0),
   artifact_id TEXT NOT NULL,
-  artifact_snapshot_id TEXT NOT NULL,
-  artifact_name_snapshot TEXT NOT NULL CHECK (length(trim(artifact_name_snapshot)) BETWEEN 1 AND 500),
-  artifact_snapshot_label_snapshot TEXT,
-  snapshot_created_at INTEGER NOT NULL,
+  version_id TEXT NOT NULL,
+  artifact_name_snapshot TEXT NOT NULL CHECK (length(trim(artifact_name_snapshot)) BETWEEN 1 AND 255),
+  version_number_snapshot INTEGER NOT NULL CHECK (version_number_snapshot > 0),
+  version_created_at_snapshot INTEGER NOT NULL,
+  file_name_snapshot TEXT NOT NULL CHECK (length(trim(file_name_snapshot)) BETWEEN 1 AND 255),
   media_type_snapshot TEXT NOT NULL,
   content_digest_snapshot TEXT NOT NULL CHECK (length(content_digest_snapshot) = 64),
-  byte_length_snapshot INTEGER NOT NULL CHECK (byte_length_snapshot BETWEEN 0 AND 104857600),
+  byte_length_snapshot INTEGER NOT NULL CHECK (byte_length_snapshot >= 0),
+  status_snapshot TEXT NOT NULL CHECK (status_snapshot IN ('active', 'deleted', 'purged')),
   created_at INTEGER NOT NULL,
   PRIMARY KEY (workspace_id, message_id, reference_order),
-  UNIQUE (workspace_id, message_id, artifact_snapshot_id),
-  FOREIGN KEY (workspace_id, message_id) REFERENCES messages(workspace_id, id) ON DELETE CASCADE
+  UNIQUE (workspace_id, message_id, version_id),
+  FOREIGN KEY (workspace_id, message_id) REFERENCES messages(workspace_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (workspace_id, version_id) REFERENCES artifact_versions_v2(workspace_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, artifact_id) REFERENCES project_artifacts_v2(workspace_id, id) ON DELETE RESTRICT
 ) STRICT;
+
+CREATE TRIGGER message_artifact_version_reference_matches_artifact
+BEFORE INSERT ON message_artifact_version_references_v2
+WHEN NOT EXISTS (
+  SELECT 1 FROM artifact_versions_v2 v
+  WHERE v.workspace_id = NEW.workspace_id
+    AND v.id = NEW.version_id
+    AND v.artifact_id = NEW.artifact_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'Artifact version reference does not match Artifact');
+END;
+
+CREATE TABLE message_work_item_references_v2 (
+  workspace_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  reference_order INTEGER NOT NULL CHECK (reference_order >= 0),
+  work_item_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, message_id, reference_order),
+  UNIQUE (workspace_id, message_id, work_item_id),
+  FOREIGN KEY (workspace_id, message_id) REFERENCES messages(workspace_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (workspace_id, project_id, work_item_id)
+    REFERENCES work_items(workspace_id, project_id, id) ON DELETE RESTRICT
+) STRICT;
+
+CREATE INDEX message_work_item_references_message
+  ON message_work_item_references_v2(workspace_id, message_id, reference_order);
+
+CREATE TRIGGER message_work_item_reference_matches_message_project
+BEFORE INSERT ON message_work_item_references_v2
+WHEN NOT EXISTS (
+  SELECT 1 FROM messages message
+  WHERE message.workspace_id = NEW.workspace_id
+    AND message.id = NEW.message_id
+    AND message.project_id = NEW.project_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'WorkItem reference must belong to the message Project');
+END;
 
 CREATE TABLE message_mentions (
   id TEXT PRIMARY KEY,
@@ -1081,6 +1441,9 @@ CREATE INDEX messages_conversation_version
   ON messages(workspace_id, conversation_id, conversation_version);
 CREATE INDEX messages_thread_created
   ON messages(workspace_id, thread_id, created_at, id);
+CREATE INDEX messages_reply_target
+  ON messages(workspace_id, conversation_id, reply_to_message_id)
+  WHERE reply_to_message_id IS NOT NULL;
 
 CREATE TABLE agent_mention_outcomes (
   id TEXT PRIMARY KEY,
@@ -1171,13 +1534,16 @@ CREATE TABLE agent_inbox_items (
   workspace_id TEXT NOT NULL,
   agent_id TEXT NOT NULL,
   sequence INTEGER NOT NULL CHECK (sequence > 0),
-  attention_kind TEXT NOT NULL CHECK (attention_kind IN ('direct_message', 'mention')),
-  message_id TEXT NOT NULL,
-  conversation_id TEXT NOT NULL,
+  attention_kind TEXT NOT NULL CHECK (attention_kind IN (
+    'direct_message', 'mention', 'discussion_change', 'work_item_assignment', 'work_item_mention'
+  )),
+  message_id TEXT,
+  conversation_id TEXT,
   thread_id TEXT,
-  agent_request_id TEXT NOT NULL,
+  agent_request_id TEXT,
+  work_item_id TEXT,
+  work_item_comment_id TEXT,
   state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'claimed', 'handled')),
-  claimed_run_id TEXT,
   claim_receipt TEXT,
   created_at INTEGER NOT NULL,
   claimed_at INTEGER,
@@ -1187,42 +1553,79 @@ CREATE TABLE agent_inbox_items (
   UNIQUE (workspace_id, agent_id, message_id),
   UNIQUE (workspace_id, agent_request_id),
   CHECK (
-    (state = 'pending' AND claimed_run_id IS NULL AND claim_receipt IS NULL AND claimed_at IS NULL AND handled_at IS NULL)
-    OR (state = 'claimed' AND claimed_run_id IS NOT NULL AND claim_receipt IS NOT NULL AND claimed_at IS NOT NULL AND handled_at IS NULL)
+    (attention_kind IN ('direct_message', 'mention')
+      AND message_id IS NOT NULL AND conversation_id IS NOT NULL
+      AND agent_request_id IS NOT NULL)
+    OR
+    (attention_kind = 'discussion_change'
+      AND message_id IS NOT NULL AND conversation_id IS NOT NULL
+      AND agent_request_id IS NULL)
+    OR
+    (attention_kind = 'work_item_assignment'
+      AND message_id IS NULL AND conversation_id IS NULL AND thread_id IS NULL
+      AND agent_request_id IS NULL AND work_item_id IS NOT NULL AND work_item_comment_id IS NULL)
+    OR
+    (attention_kind = 'work_item_mention'
+      AND message_id IS NULL AND conversation_id IS NULL AND thread_id IS NULL
+      AND agent_request_id IS NULL AND work_item_id IS NOT NULL AND work_item_comment_id IS NOT NULL)
+  ),
+  CHECK (
+    (state = 'pending' AND claim_receipt IS NULL AND claimed_at IS NULL AND handled_at IS NULL)
+    OR (state = 'claimed' AND claim_receipt IS NOT NULL AND claimed_at IS NOT NULL AND handled_at IS NULL)
     OR (state = 'handled' AND handled_at IS NOT NULL AND (
-      (claimed_run_id IS NULL AND claim_receipt IS NULL AND claimed_at IS NULL)
-      OR (claimed_run_id IS NOT NULL AND claim_receipt IS NOT NULL AND claimed_at IS NOT NULL)
+      (claim_receipt IS NULL AND claimed_at IS NULL)
+      OR (claim_receipt IS NOT NULL AND claimed_at IS NOT NULL)
     ))
   ),
   FOREIGN KEY (workspace_id, agent_id) REFERENCES agents(workspace_id, actor_id) ON DELETE RESTRICT,
   FOREIGN KEY (workspace_id, message_id) REFERENCES messages(workspace_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (workspace_id, conversation_id, thread_id) REFERENCES threads(workspace_id, conversation_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (workspace_id, agent_request_id) REFERENCES agent_requests(workspace_id, id) ON DELETE RESTRICT,
-  FOREIGN KEY (workspace_id, claimed_run_id) REFERENCES runs(workspace_id, id) ON DELETE RESTRICT
+  FOREIGN KEY (workspace_id, work_item_id) REFERENCES work_items(workspace_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, work_item_id, work_item_comment_id)
+    REFERENCES work_item_comments(workspace_id, work_item_id, id) ON DELETE RESTRICT
 ) STRICT;
 
 CREATE INDEX agent_inbox_items_pending
   ON agent_inbox_items(workspace_id, agent_id, state, conversation_id, thread_id, sequence);
 
+CREATE TABLE agent_inbox_wakes (
+  workspace_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  sequence INTEGER NOT NULL CHECK (sequence > 0),
+  inbox_item_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, agent_id, sequence),
+  UNIQUE (workspace_id, inbox_item_id),
+  FOREIGN KEY (workspace_id, agent_id) REFERENCES agents(workspace_id, actor_id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, inbox_item_id) REFERENCES agent_inbox_items(workspace_id, id) ON DELETE RESTRICT
+) STRICT;
+
+CREATE INDEX agent_inbox_wakes_item
+  ON agent_inbox_wakes(workspace_id, inbox_item_id);
+
 CREATE TABLE agent_inbox_claim_receipts (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
   agent_id TEXT NOT NULL,
+  agent_request_id TEXT NOT NULL DEFAULT 'legacy',
   receipt TEXT NOT NULL CHECK (length(trim(receipt)) BETWEEN 1 AND 500),
-  run_id TEXT NOT NULL,
-  attempt_id TEXT NOT NULL,
   binding_revision INTEGER NOT NULL CHECK (binding_revision > 0),
-  conversation_id TEXT NOT NULL,
+  target_kind TEXT NOT NULL CHECK (target_kind = 'discussion'),
+  target TEXT NOT NULL CHECK (length(trim(target)) BETWEEN 1 AND 500),
+  conversation_id TEXT,
   thread_id TEXT,
   from_position INTEGER NOT NULL CHECK (from_position >= 0),
   through_position INTEGER NOT NULL CHECK (through_position >= from_position),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
+  handled_at INTEGER,
   UNIQUE (workspace_id, agent_id, receipt),
-  UNIQUE (workspace_id, run_id, receipt),
+  CHECK (
+    target_kind = 'discussion' AND conversation_id IS NOT NULL
+  ),
   FOREIGN KEY (workspace_id, agent_id) REFERENCES agents(workspace_id, actor_id) ON DELETE RESTRICT,
-  FOREIGN KEY (workspace_id, attempt_id, run_id)
-    REFERENCES attempts(workspace_id, id, run_id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, agent_request_id) REFERENCES agent_requests(workspace_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (workspace_id, conversation_id) REFERENCES conversations(workspace_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (workspace_id, conversation_id, thread_id)
     REFERENCES threads(workspace_id, conversation_id, id) ON DELETE RESTRICT
@@ -1230,8 +1633,12 @@ CREATE TABLE agent_inbox_claim_receipts (
 
 CREATE INDEX agent_inbox_claim_receipts_checkpoint
   ON agent_inbox_claim_receipts(
-    workspace_id, agent_id, binding_revision, conversation_id, thread_id, through_position
+    workspace_id, agent_id, binding_revision, target, through_position, agent_request_id
   );
+
+CREATE UNIQUE INDEX agent_inbox_claim_receipts_active_request
+  ON agent_inbox_claim_receipts(workspace_id, agent_id, agent_request_id)
+  WHERE handled_at IS NULL;
 
 CREATE TRIGGER agent_requests_match_mention_outcome_insert
 BEFORE INSERT ON agent_requests
@@ -1370,19 +1777,13 @@ CREATE TABLE run_context_snapshots (
   workspace_context_version INTEGER NOT NULL CHECK (workspace_context_version >= 0),
   project_id TEXT,
   project_context_version INTEGER,
-  repository_id TEXT,
-  repository_identity TEXT,
-  repository_base_commit TEXT CHECK (repository_base_commit IS NULL OR length(repository_base_commit) IN (40, 64)),
   conversation_id TEXT NOT NULL,
   conversation_context_version INTEGER NOT NULL CHECK (conversation_context_version >= 0),
   change_cursor INTEGER NOT NULL CHECK (change_cursor >= 0),
   created_at INTEGER NOT NULL,
   CHECK (
-    (project_id IS NULL AND project_context_version IS NULL
-      AND repository_id IS NULL AND repository_identity IS NULL AND repository_base_commit IS NULL)
-    OR (project_id IS NOT NULL AND project_context_version IS NOT NULL AND project_context_version >= 0
-      AND ((repository_id IS NULL AND repository_identity IS NULL AND repository_base_commit IS NULL)
-        OR (repository_id IS NOT NULL AND repository_identity IS NOT NULL AND repository_base_commit IS NOT NULL)))
+    (project_id IS NULL AND project_context_version IS NULL)
+    OR (project_id IS NOT NULL AND project_context_version IS NOT NULL AND project_context_version >= 0)
   ),
   UNIQUE (workspace_id, id),
   UNIQUE (workspace_id, run_id),
@@ -1394,8 +1795,6 @@ CREATE TABLE run_context_snapshots (
   FOREIGN KEY (workspace_id, policy_version_id)
     REFERENCES agent_execution_policy_versions(workspace_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (workspace_id, project_id) REFERENCES projects(workspace_id, id) ON DELETE RESTRICT,
-  FOREIGN KEY (workspace_id, project_id, repository_id)
-    REFERENCES project_repositories(workspace_id, project_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (workspace_id, conversation_id) REFERENCES conversations(workspace_id, id) ON DELETE RESTRICT
 ) STRICT;
 
@@ -1485,9 +1884,6 @@ BEGIN
   SELECT CASE WHEN (SELECT actor_type FROM actors WHERE id = NEW.author_actor_id) = 'human'
     AND (NEW.producing_run_id IS NOT NULL OR NEW.producing_attempt_id IS NOT NULL)
     THEN RAISE(ABORT, 'human message provenance must be empty') END;
-  SELECT CASE WHEN (SELECT actor_type FROM actors WHERE id = NEW.author_actor_id) = 'agent'
-    AND (NEW.producing_run_id IS NULL OR NEW.producing_attempt_id IS NULL)
-    THEN RAISE(ABORT, 'agent message provenance is required') END;
   SELECT CASE WHEN NEW.producing_run_id IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM runs r
     JOIN attempts a
@@ -1555,6 +1951,56 @@ CREATE TABLE workspace_change_recipients (
 CREATE INDEX workspace_change_recipients_membership
   ON workspace_change_recipients(workspace_id, membership_id, change_position);
 
+CREATE TRIGGER workspace_change_recipients_enqueue_agent_inbox
+AFTER INSERT ON workspace_change_recipients
+WHEN EXISTS (
+  SELECT 1
+  FROM workspace_memberships membership
+  JOIN agents agent
+    ON agent.workspace_id = membership.workspace_id
+   AND agent.actor_id = membership.actor_id
+   AND agent.lifecycle_status = 'active'
+  JOIN workspace_changes change
+    ON change.workspace_id = NEW.workspace_id
+   AND change.position = NEW.change_position
+  WHERE membership.workspace_id = NEW.workspace_id
+    AND membership.id = NEW.membership_id
+    AND membership.status = 'active'
+    AND change.change_type = 'message_created'
+)
+BEGIN
+  INSERT OR IGNORE INTO agent_inbox_items (
+    id, workspace_id, agent_id, sequence, attention_kind,
+    message_id, conversation_id, thread_id, agent_request_id, created_at
+  )
+  SELECT
+    lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
+      substr(lower(hex(randomblob(2))), 2) || '-' ||
+      substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
+      lower(hex(randomblob(6))),
+    NEW.workspace_id,
+    membership.actor_id,
+    COALESCE((
+      SELECT MAX(item.sequence) FROM agent_inbox_items item
+      WHERE item.workspace_id = NEW.workspace_id AND item.agent_id = membership.actor_id
+    ), 0) + 1,
+    'discussion_change',
+    message.id,
+    message.conversation_id,
+    message.thread_id,
+    NULL,
+    change.created_at
+  FROM workspace_memberships membership
+  JOIN workspace_changes change
+    ON change.workspace_id = NEW.workspace_id AND change.position = NEW.change_position
+  JOIN messages message
+    ON message.workspace_id = change.workspace_id
+   AND message.id = change.source_id
+  WHERE membership.workspace_id = NEW.workspace_id
+    AND membership.id = NEW.membership_id
+    AND change.change_type = 'message_created';
+END;
+
 CREATE TABLE delivery_jobs (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
@@ -1614,6 +2060,208 @@ CREATE TABLE audit_events (
 
 CREATE INDEX audit_events_target
   ON audit_events(workspace_id, target_type, target_id, seq);
+
+-- Artifact v2 / Project resource model.  These tables intentionally live beside
+-- the legacy tables while callers are migrated; no legacy rows are read by the
+-- v2 services and a development database is expected to be recreated.
+CREATE TABLE project_resources (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  parent_id TEXT,
+  name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 255),
+  kind TEXT NOT NULL CHECK (kind IN ('file', 'directory')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'deleted', 'purged')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+  created_by_actor_id TEXT NOT NULL REFERENCES actors(id) ON DELETE RESTRICT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  deleted_at INTEGER,
+  purge_after INTEGER,
+  purged_at INTEGER,
+  UNIQUE (workspace_id, id),
+  FOREIGN KEY (workspace_id, project_id) REFERENCES projects(workspace_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, parent_id) REFERENCES project_resources(workspace_id, id) ON DELETE RESTRICT,
+  CHECK ((status = 'active' AND deleted_at IS NULL AND purged_at IS NULL)
+      OR (status = 'deleted' AND deleted_at IS NOT NULL AND purged_at IS NULL)
+      OR (status = 'purged' AND deleted_at IS NOT NULL AND purged_at IS NOT NULL))
+) STRICT;
+
+CREATE INDEX project_resources_tree
+  ON project_resources(workspace_id, project_id, status, parent_id, name, id);
+
+CREATE UNIQUE INDEX project_resources_active_name
+  ON project_resources(workspace_id, project_id, COALESCE(parent_id, ''), name)
+  WHERE status = 'active';
+
+CREATE TABLE project_resource_files (
+  resource_id TEXT PRIMARY KEY REFERENCES project_resources(id) ON DELETE CASCADE,
+  workspace_id TEXT NOT NULL,
+  blob_hash TEXT REFERENCES content_blobs(hash) ON DELETE RESTRICT,
+  media_type TEXT NOT NULL,
+  byte_length INTEGER NOT NULL CHECK (byte_length >= 0),
+  content_digest TEXT NOT NULL CHECK (length(content_digest) = 64),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+  updated_by_actor_id TEXT NOT NULL REFERENCES actors(id) ON DELETE RESTRICT,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (workspace_id, resource_id) REFERENCES project_resources(workspace_id, id) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE project_links (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  locator TEXT NOT NULL CHECK (locator GLOB 'http://*' OR locator GLOB 'https://*'),
+  name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 255),
+  description TEXT CHECK (description IS NULL OR length(description) <= 3000),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'deleted', 'purged')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+  created_by_actor_id TEXT NOT NULL REFERENCES actors(id) ON DELETE RESTRICT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  deleted_at INTEGER,
+  purge_after INTEGER,
+  purged_at INTEGER,
+  UNIQUE (workspace_id, id),
+  FOREIGN KEY (workspace_id, project_id) REFERENCES projects(workspace_id, id) ON DELETE RESTRICT,
+  CHECK ((status = 'active' AND deleted_at IS NULL AND purged_at IS NULL)
+      OR (status = 'deleted' AND deleted_at IS NOT NULL AND purged_at IS NULL)
+      OR (status = 'purged' AND deleted_at IS NOT NULL AND purged_at IS NOT NULL))
+) STRICT;
+
+CREATE INDEX project_links_project_status
+  ON project_links(workspace_id, project_id, status, created_at, id);
+
+CREATE UNIQUE INDEX project_links_active_locator
+  ON project_links(workspace_id, project_id, locator)
+  WHERE status = 'active';
+
+CREATE TRIGGER project_links_locator_immutable
+BEFORE UPDATE OF workspace_id, project_id, locator ON project_links
+BEGIN
+  SELECT RAISE(ABORT, 'project link locator is immutable');
+END;
+
+CREATE TABLE project_artifacts_v2 (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 255),
+  project_path TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'deleted', 'purged')),
+  latest_version_id TEXT,
+  next_version_number INTEGER NOT NULL DEFAULT 1 CHECK (next_version_number > 0),
+  created_by_actor_id TEXT NOT NULL REFERENCES actors(id) ON DELETE RESTRICT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  deleted_at INTEGER,
+  purge_after INTEGER,
+  purged_at INTEGER,
+  UNIQUE (workspace_id, id),
+  FOREIGN KEY (workspace_id, project_id) REFERENCES projects(workspace_id, id) ON DELETE RESTRICT,
+  CHECK ((status = 'active' AND deleted_at IS NULL AND purged_at IS NULL)
+      OR (status = 'deleted' AND deleted_at IS NOT NULL AND purged_at IS NULL)
+      OR (status = 'purged' AND deleted_at IS NOT NULL AND purged_at IS NOT NULL))
+) STRICT;
+
+CREATE INDEX project_artifacts_v2_project_path
+  ON project_artifacts_v2(workspace_id, project_id, status, project_path, name, id);
+
+CREATE TABLE artifact_versions_v2 (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  artifact_id TEXT NOT NULL,
+  version_number INTEGER NOT NULL CHECK (version_number > 0),
+  file_name TEXT NOT NULL CHECK (length(trim(file_name)) BETWEEN 1 AND 255),
+  blob_hash TEXT,
+  media_type TEXT NOT NULL,
+  byte_length INTEGER NOT NULL CHECK (byte_length >= 0),
+  content_digest TEXT NOT NULL CHECK (length(content_digest) = 64),
+  parent_version_id TEXT,
+  created_by_actor_id TEXT NOT NULL REFERENCES actors(id) ON DELETE RESTRICT,
+  task_id TEXT,
+  message_id TEXT,
+  publish_batch_id TEXT,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'deleted', 'purged')),
+  created_at INTEGER NOT NULL,
+  deleted_at INTEGER,
+  purge_after INTEGER,
+  purged_at INTEGER,
+  UNIQUE (workspace_id, id),
+  UNIQUE (artifact_id, version_number),
+  FOREIGN KEY (workspace_id, artifact_id) REFERENCES project_artifacts_v2(workspace_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, parent_version_id) REFERENCES artifact_versions_v2(workspace_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (blob_hash) REFERENCES content_blobs(hash) ON DELETE RESTRICT,
+  CHECK ((status = 'active' AND deleted_at IS NULL AND purged_at IS NULL)
+      OR (status = 'deleted' AND deleted_at IS NOT NULL AND purged_at IS NULL)
+      OR (status = 'purged' AND deleted_at IS NOT NULL AND purged_at IS NOT NULL))
+) STRICT;
+
+CREATE INDEX artifact_versions_v2_artifact
+  ON artifact_versions_v2(workspace_id, artifact_id, version_number);
+
+CREATE TRIGGER artifact_versions_v2_identity_immutable
+BEFORE UPDATE OF workspace_id, artifact_id, version_number, file_name, blob_hash, content_digest,
+  parent_version_id, created_by_actor_id, created_at ON artifact_versions_v2
+WHEN NOT (
+  NEW.status = 'purged'
+  AND NEW.blob_hash IS NULL
+  AND NEW.workspace_id IS OLD.workspace_id
+  AND NEW.artifact_id IS OLD.artifact_id
+  AND NEW.version_number IS OLD.version_number
+  AND NEW.file_name IS OLD.file_name
+  AND NEW.content_digest IS OLD.content_digest
+  AND NEW.parent_version_id IS OLD.parent_version_id
+  AND NEW.created_by_actor_id IS OLD.created_by_actor_id
+  AND NEW.created_at IS OLD.created_at
+)
+BEGIN
+  SELECT RAISE(ABORT, 'Artifact versions are immutable');
+END;
+
+CREATE TABLE artifact_version_sources_v2 (
+  version_id TEXT NOT NULL REFERENCES artifact_versions_v2(id) ON DELETE RESTRICT,
+  resource_id TEXT NOT NULL REFERENCES project_resources(id) ON DELETE RESTRICT,
+  resource_revision INTEGER NOT NULL CHECK (resource_revision > 0),
+  resource_digest TEXT NOT NULL CHECK (length(resource_digest) = 64),
+  PRIMARY KEY (version_id, resource_id)
+) STRICT;
+
+CREATE TABLE artifact_derivation_parents_v2 (
+  artifact_id TEXT NOT NULL REFERENCES project_artifacts_v2(id) ON DELETE RESTRICT,
+  parent_version_id TEXT NOT NULL REFERENCES artifact_versions_v2(id) ON DELETE RESTRICT,
+  parent_ordinal INTEGER NOT NULL CHECK (parent_ordinal >= 0),
+  PRIMARY KEY (artifact_id, parent_version_id)
+) STRICT;
+
+CREATE TABLE artifact_preview_caches_v2 (
+  version_id TEXT PRIMARY KEY REFERENCES artifact_versions_v2(id) ON DELETE RESTRICT,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'failed')),
+  blob_hash TEXT REFERENCES content_blobs(hash) ON DELETE RESTRICT,
+  error_message TEXT,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE artifact_v2_held_drafts (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  artifact_id TEXT NOT NULL,
+  blob_hash TEXT NOT NULL REFERENCES content_blobs(hash) ON DELETE RESTRICT,
+  file_name TEXT NOT NULL,
+  expected_latest_version_id TEXT,
+  payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+  status TEXT NOT NULL DEFAULT 'held' CHECK (status IN ('held', 'retried', 'discarded', 'fenced')),
+  created_by_actor_id TEXT NOT NULL REFERENCES actors(id) ON DELETE RESTRICT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (workspace_id, project_id) REFERENCES projects(workspace_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (workspace_id, artifact_id) REFERENCES project_artifacts_v2(workspace_id, id) ON DELETE RESTRICT
+) STRICT;
+
+CREATE INDEX artifact_v2_held_drafts_lookup
+  ON artifact_v2_held_drafts(workspace_id, project_id, artifact_id, status, created_at);
 
 PRAGMA application_id = 1095648087;
 PRAGMA user_version = 1;

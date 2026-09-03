@@ -1,8 +1,19 @@
 export type ActorType = 'human' | 'agent';
 export type MembershipRole = 'owner' | 'member';
-export type ProjectRole = 'manager' | 'member';
+export type ProjectRole = 'owner' | 'manager' | 'member';
+export type WorkItemLifecycleStatus = 'open' | 'blocked' | 'completed' | 'cancelled';
 export type ConversationKind = 'channel' | 'dm';
+export type ConversationVisibility = 'public' | 'private';
+export type ConversationAccessMode = 'content' | 'governance';
 export type ConversationLifecycleStatus = 'active' | 'archived';
+export type ConversationScope =
+  | { type: 'workspace_general' }
+  | { type: 'direct_message' }
+  | {
+      type: 'project_group';
+      projectId: string;
+      membershipMode: 'project_all' | 'explicit';
+    };
 export type AgentMentionOutcomeStatus = 'requested' | 'not_requested';
 export type ContextSourceKind =
   | 'message'
@@ -62,6 +73,9 @@ export interface ComputerPrincipal {
   kind: 'computer';
   computerId: string;
   ownerHumanId: string;
+  /** Set by an Agent-scoped gateway request to prevent one Computer from
+   * borrowing another Agent's Project membership and to preserve provenance. */
+  agentId?: string;
 }
 
 export type Principal = HumanPrincipal | ComputerPrincipal;
@@ -109,53 +123,9 @@ export interface ProjectView {
   governanceOnly: boolean;
   activeMemberCount: number;
   conversationCount: number;
-  repository: ProjectRepositoryView | null;
-  connectedComputerCount: number;
-  readyComputerCount: number;
-  workingCopySummary: 'connected' | 'not_connected' | 'mismatch' | 'computer_offline';
   createdByMembershipId: string;
   createdAt: number;
   updatedAt: number;
-}
-
-export interface ProjectRepositoryView {
-  id: string;
-  cloneUrl: string;
-  repositoryIdentity: string;
-  defaultBranch: string;
-  revision: number;
-}
-
-export interface ProjectResourceLinkView {
-  id: string;
-  projectId: string;
-  title: string;
-  url: string;
-  description: string | null;
-  revision: number;
-  createdByMembershipId: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface ProjectWorkingCopyView {
-  computerId: string;
-  computerName: string;
-  connectionStatus: 'online' | 'offline';
-  availability: 'ready' | 'unavailable' | 'mismatch';
-  branch: string | null;
-  headCommit: string | null;
-  dirty: boolean | null;
-  checkedAt: number;
-}
-
-export interface ProjectWorkingCopyReport {
-  repositoryId: string;
-  repositoryIdentity: string;
-  availability: ProjectWorkingCopyView['availability'];
-  branch: string | null;
-  headCommit: string | null;
-  dirty: boolean | null;
 }
 
 export interface ProjectMemberView {
@@ -165,8 +135,89 @@ export interface ProjectMemberView {
   actorType: ActorType;
   displayName: string;
   role: ProjectRole;
+  sponsoredByProjectMembershipId: string | null;
   revision: number;
   joinedAt: number;
+}
+
+export interface WorkItemAssigneeView {
+  projectMembershipId: string;
+  workspaceMembershipId: string;
+  actorId: string;
+  actorType: ActorType;
+  displayName: string;
+}
+
+export interface WorkItemSubmissionView {
+  id: string;
+  commentId: string | null;
+  submittedByMembershipId: string;
+  submittedByProjectMembershipId: string;
+  submittedByActorId: string;
+  submittedByDisplayName: string;
+  assignmentRevision: number;
+  artifactReferences: WorkItemArtifactReferenceView[];
+  createdAt: number;
+}
+
+export interface WorkItemArtifactReferenceView {
+  artifactId: string;
+  artifactVersionId: string;
+  artifactName: string;
+  version: number;
+  fileName: string;
+  mediaType: string;
+  contentDigest: string;
+  byteLength: number;
+  contentAvailable: boolean;
+  artifactStatus: 'active' | 'deleted' | 'purged';
+}
+
+export interface WorkItemCommentView {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  workItemId: string;
+  authorActorId: string;
+  authorMembershipId: string;
+  authorProjectMembershipId: string;
+  authorActorType: ActorType;
+  authorDisplayName: string;
+  body: string;
+  mentionedActorIds: string[];
+  mentions: MessageMentionView[];
+  workItemReferences: MessageWorkItemReferenceView[];
+  artifactReferences: WorkItemArtifactReferenceView[];
+  position: number;
+  createdAt: number;
+}
+
+export interface WorkItemView {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  taskNumber: number;
+  description: string;
+  relatedWorkItemReferences: MessageWorkItemReferenceView[];
+  sourceConversationId: string | null;
+  sourceMessageId: string | null;
+  sourceThreadId: string | null;
+  lifecycleStatus: WorkItemLifecycleStatus;
+  blockerReason: string | null;
+  cancellationReason: string | null;
+  assignee: WorkItemAssigneeView | null;
+  assignees: WorkItemAssigneeView[];
+  currentSubmission: WorkItemSubmissionView | null;
+  assignmentRevision: number;
+  commentFrontier: number;
+  revision: number;
+  createdByMembershipId: string;
+  createdByProjectMembershipId: string;
+  createdByDisplayName: string;
+  createdAt: number;
+  updatedAt: number;
+  completedAt: number | null;
+  cancelledAt: number | null;
 }
 
 export interface ProjectGovernanceView {
@@ -180,18 +231,29 @@ export interface ProjectGovernanceView {
   updatedAt: number;
 }
 
-export interface WorkspaceInvitationView {
+export interface WorkspaceJoinLinkView {
   id: string;
   workspaceId: string;
-  verifiedEmail: string;
-  membershipRole: MembershipRole;
-  status: 'pending' | 'accepted' | 'revoked';
+  token: string | null;
+  status: 'active' | 'revoked';
   revision: number;
-  invitedByMembershipId: string;
-  acceptedMembershipId: string | null;
+  createdByMembershipId: string;
+  useCount: number;
   createdAt: number;
   updatedAt: number;
-  terminalAt: number | null;
+  lastUsedAt: number | null;
+  revokedAt: number | null;
+}
+
+export interface WorkspaceJoinLinkCreatedView extends WorkspaceJoinLinkView {
+  token: string;
+}
+
+export interface WorkspaceJoinLinkPreviewView {
+  workspaceId: string;
+  workspaceName: string;
+  status: 'active' | 'revoked';
+  alreadyMember: boolean;
 }
 
 export interface AgentView {
@@ -348,7 +410,10 @@ export interface ConversationView {
   id: string;
   workspaceId: string;
   projectId: string | null;
+  scope: ConversationScope;
   kind: ConversationKind;
+  visibility: ConversationVisibility;
+  accessMode: ConversationAccessMode;
   title: string | null;
   lifecycleStatus: ConversationLifecycleStatus;
   revision: number;
@@ -369,6 +434,7 @@ export interface MessageView {
   projectId: string | null;
   threadId: string | null;
   threadRootMessageId: string | null;
+  replyToMessageId: string | null;
   authorActorId: string;
   authorMembershipId: string;
   authorProjectMembershipId: string | null;
@@ -383,83 +449,103 @@ export interface MessageView {
   mentions: MessageMentionView[];
   mentionOutcomes: AgentMentionOutcomeView[];
   artifactReferences: MessageArtifactReferenceView[];
+  workItemReferences: MessageWorkItemReferenceView[];
   createdAt: number;
 }
 
-export type ArtifactType = 'markdown' | 'file';
-export type ArtifactStatus = 'active' | 'deleted' | 'purged';
-
-export interface ArtifactSnapshotView {
-  snapshotId: string;
-  artifactId: string;
-  label: string | null;
-  parentSnapshotId: string | null;
-  contentDigest: string;
-  mediaType: string;
-  byteLength: number;
-  createdByActorId: string;
-  createdByMembershipId: string;
-  createdByDisplayName: string;
-  revision: number;
-  status: 'active' | 'deleted';
-  deletedAt: number | null;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface ArtifactDraftView {
-  artifactId: string;
-  baseVersionId: string | null;
-  draftRevision: number;
-  updatedByMembershipId: string;
-  updatedAt: number;
-}
-
-export interface ArtifactCurrentStateView {
-  artifactId: string;
-  currentRevision: number;
-  contentDigest: string;
-  mediaType: string;
-  byteLength: number;
-  updatedByMembershipId: string;
-  updatedAt: number;
-}
-
-export interface ArtifactSnapshotSaveView {
-  artifact: ArtifactView;
-  snapshot: ArtifactSnapshotView;
-  created: boolean;
-  labelChanged: boolean;
-}
-
-export interface ArtifactView {
-  id: string;
-  workspaceId: string;
+/** Project-scoped resources and immutable Artifact v2 contracts. */
+export type ProjectResourceKind = 'file' | 'directory';
+export type ProjectResourceStatus = 'active' | 'deleted' | 'purged';
+export interface ProjectResourceView {
+  resourceId: string;
+  projectId: string;
+  parentResourceId: string | null;
   name: string;
-  artifactType: ArtifactType;
-  currentState: ArtifactCurrentStateView;
-  latestSnapshot: ArtifactSnapshotView | null;
-  projectIds: string[];
-  createdByMembershipId: string;
+  path: string;
+  kind: ProjectResourceKind;
+  status: ProjectResourceStatus;
   revision: number;
-  status: ArtifactStatus;
+  digest: string | null;
+  mediaType: string | null;
+  byteLength: number | null;
+  createdByActorId: string;
+  createdAt: number;
+  updatedAt: number;
   deletedAt: number | null;
   purgeAfter: number | null;
-  purgedAt: number | null;
-  createdAt: number;
-  updatedAt: number;
 }
 
-export interface MessageArtifactReferenceView {
+export interface ProjectLinkView {
+  linkId: string;
+  projectId: string;
+  locator: string;
+  name: string;
+  description: string | null;
+  status: ProjectResourceStatus;
+  revision: number;
+  createdByActorId: string;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt: number | null;
+  purgeAfter: number | null;
+}
+
+export type ArtifactPreviewStatus = 'pending' | 'ready' | 'failed';
+export interface ArtifactVersionView {
+  versionId: string;
   artifactId: string;
-  artifactSnapshotId: string;
+  version: number;
+  fileName: string;
+  mediaType: string;
+  byteLength: number;
+  digest: string;
+  parentVersionId: string | null;
+  status: ProjectResourceStatus;
+  createdByActorId: string;
+  createdAt: number;
+  taskId: string | null;
+  messageId: string | null;
+  publishBatchId: string | null;
+  note: string | null;
+  preview: { status: ArtifactPreviewStatus; errorMessage: string | null };
+  deletedAt: number | null;
+  purgeAfter: number | null;
+}
+
+export interface ArtifactV2View {
+  artifactId: string;
+  projectId: string;
+  name: string;
+  projectPath: string;
+  status: ProjectResourceStatus;
+  latestVersionId: string | null;
+  latestVersion: ArtifactVersionView | null;
+  createdByActorId: string;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt: number | null;
+  purgeAfter: number | null;
+  derivationParentVersionIds: string[];
+}
+
+export interface ArtifactVersionMessageReferenceView {
+  artifactId: string;
+  artifactVersionId: string;
   artifactName: string;
-  snapshotLabel: string | null;
-  snapshotCreatedAt: number;
+  version: number;
+  fileName: string;
   mediaType: string;
   contentDigest: string;
   byteLength: number;
   contentAvailable: boolean;
+  artifactStatus: ProjectResourceStatus;
+}
+
+export type MessageArtifactReferenceView = ArtifactVersionMessageReferenceView;
+
+export interface MessageWorkItemReferenceView {
+  workItemId: string;
+  taskNumber: number;
 }
 
 export interface MessageMentionView {
@@ -502,7 +588,7 @@ export interface AgentRequestView {
   version: number;
   intake: {
     disposition: 'ready' | 'waiting' | 'blocked';
-    reasons: Array<'runtime_unavailable' | 'project_working_copy_unavailable' | 'agent_suspended' | 'authority_revoked'>;
+    reasons: Array<'runtime_unavailable' | 'agent_suspended' | 'authority_revoked'>;
   } | null;
   terminalReason: {
     code: AgentRequestTerminalReason;
@@ -536,6 +622,7 @@ export interface AgentRequestView {
 }
 
 export interface ConversationParticipantView {
+  scopeMembershipId: string;
   workspaceMembershipId: string;
   projectMembershipId: string | null;
   actorId: string;
@@ -705,9 +792,6 @@ export interface RunContextSnapshotView {
   workspaceContextVersion: number;
   projectId: string | null;
   projectContextVersion: number | null;
-  repositoryId: string | null;
-  repositoryIdentity: string | null;
-  repositoryBaseCommit: string | null;
   conversationContextVersion: number;
   changeCursor: number;
   sources: ContextSourceRef[];
@@ -730,37 +814,150 @@ export interface AttemptExecutionInputView {
   executionScope:
     | { kind: 'workspace_scratch' }
     | {
-        kind: 'project_repository';
+        kind: 'project_scratch';
         projectId: string;
-        repositoryId: string;
-        repositoryIdentity: string;
-        baseCommit: string;
-      };
+      }
   runContext: RunContextSnapshotView;
   developerInstructions: string;
 }
 
-export type AgentInboxAttentionKind = 'direct_message' | 'mention';
+export type AgentSessionKind = 'mention' | 'work_item';
 
-export interface AgentInboxTargetView {
-  conversationId: string;
-  threadId: string | null;
-  target: string;
-  pendingCount: number;
-  firstSequence: number;
-  lastSequence: number;
+export interface AgentSessionRef {
+  kind: AgentSessionKind;
+  key: string;
 }
+
+export type AgentSessionWindowMode = 'dm' | 'isolated';
+export type AgentSessionWindowStatus = 'accepting' | 'frozen' | 'completed';
+
+export interface AgentSessionWindowView {
+  mode: AgentSessionWindowMode;
+  acceptedMessages: number;
+  maxMessages: 10;
+  status: AgentSessionWindowStatus;
+}
+
+/**
+ * Optional Discussion capability carried by a WorkItem Session that was
+ * created from a Conversation message mentioning the same Agent.  The
+ * WorkItem remains the Session's primary identity; this binding lets the
+ * Session claim and answer the source Discussion without opening a second
+ * Runtime Session.
+ */
+export interface AgentDiscussionBindingView {
+  target: string;
+  agentRequestId: string;
+  initialDiscussionFrontier: number;
+  sessionWindow: AgentSessionWindowView;
+}
+
+export interface AgentInboxSessionTriggerView {
+  session: AgentSessionRef;
+  inboxItemId: string;
+  sequence: number;
+  target: string | null;
+  agentRequestId: string | null;
+  messageId: string | null;
+  conversationId: string | null;
+  threadId: string | null;
+  workItemId: string | null;
+  requiresAction: boolean;
+}
+
+export interface AgentSessionInputView {
+  workspaceId: string;
+  agentId: string;
+  session: AgentSessionRef;
+  target: string | null;
+  projectId: string | null;
+  /** Discussion position already materialized in the immutable Session JSONL snapshot. */
+  initialDiscussionFrontier: number | null;
+  /** Source Conversation capability for a composite WorkItem Session, if any. */
+  discussion: AgentDiscussionBindingView | null;
+  sessionWindow: AgentSessionWindowView;
+  contextHash: string;
+  contextJsonl: string;
+  /** WorkItems explicitly referenced by the Mention source message. The Agent may read these via teamctl. */
+  referencedWorkItemIds: string[];
+  runtimeId: RuntimeId;
+  runtimeBindingRevision: number;
+  runtimeConfiguration: {
+    model: string | null;
+    reasoningEffort: ReasoningEffort | null;
+    mode: string | null;
+  };
+  developerInstructions: string;
+}
+
+export type AgentActivityEventType =
+  | 'turn_started'
+  | 'thought'
+  | 'tool'
+  | 'plan'
+  | 'message'
+  | 'turn_completed'
+  | 'turn_failed';
+
+export type AgentActivityStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
+export interface AgentActivityEventInput {
+  eventId: string;
+  turnId: string;
+  sequence: number;
+  eventType: AgentActivityEventType;
+  title: string;
+  status: AgentActivityStatus;
+}
+
+export interface AgentActivityEventView extends AgentActivityEventInput {
+  workspaceId: string;
+  agentId: string;
+  agentName: string;
+  turnStatus: 'active' | 'completed' | 'failed';
+  turnStartedAt: number;
+  turnUpdatedAt: number;
+  turnFinishedAt: number | null;
+  createdAt: number;
+}
+
+export type AgentInboxAttentionKind = 'direct_message' | 'mention' | 'work_item_assignment' | 'work_item_mention';
+
+export type AgentInboxTargetView =
+  | {
+      kind: 'discussion';
+      conversationId: string;
+      threadId: string | null;
+      workItemId: null;
+      target: string;
+      pendingCount: number;
+      firstSequence: number;
+      lastSequence: number;
+      requiresAction: boolean;
+    }
+  | {
+      kind: 'work_item';
+      conversationId: null;
+      threadId: null;
+      workItemId: string;
+      target: string;
+      pendingCount: number;
+      firstSequence: number;
+      lastSequence: number;
+      requiresAction: true;
+    };
 
 export interface AgentInboxSummaryView {
   agentId: string;
   highestSequence: number;
   targets: AgentInboxTargetView[];
+  sessionTriggers: AgentInboxSessionTriggerView[];
 }
 
 export interface AgentInboxWakeEventView {
   type: 'agent.inbox_changed';
   agentId: string;
-  highestSequence: number;
+  wakeSequence: number;
 }
 
 export interface AgentInboxWakeBatchView {
@@ -772,8 +969,10 @@ export interface AgentInboxAttentionView {
   inboxItemId: string;
   sequence: number;
   attentionKind: AgentInboxAttentionKind;
-  agentRequestId: string;
-  messageId: string;
+  agentRequestId: string | null;
+  messageId: string | null;
+  workItemId: string | null;
+  workItemCommentId: string | null;
 }
 
 export interface AgentInboxDiscussionDeltaView {
@@ -787,13 +986,41 @@ export interface AgentInboxDiscussionDeltaView {
 
 export interface AgentInboxClaimView {
   agentId: string;
-  runId: string;
-  attemptId: string;
   receipt: string;
   target: string;
+  targetKind: 'discussion';
+  sessionWindow: AgentSessionWindowView;
   attention: AgentInboxAttentionView[];
   discussion: AgentInboxDiscussionDeltaView;
 }
+
+export type AgentMessagePublicationResultView =
+  | {
+      status: 'published';
+      message: MessageView;
+    }
+  | {
+      status: 'held';
+      draftId: string;
+      expectedDiscussionFrontier: number;
+      currentDiscussionFrontier: number;
+      attention: AgentInboxAttentionView[];
+      discussionDelta: AgentInboxDiscussionDeltaView;
+    };
+
+export type AgentInboxCompletionResultView =
+  | {
+      status: 'completed';
+      receipt: string;
+      handledAt: number;
+    }
+  | {
+      status: 'review_required';
+      expectedDiscussionFrontier: number;
+      currentDiscussionFrontier: number;
+      attention: AgentInboxAttentionView[];
+      discussionDelta: AgentInboxDiscussionDeltaView;
+    };
 
 export interface PrivateContextGrantView {
   id: string;
@@ -823,15 +1050,25 @@ export interface RuntimeContextReadView {
 
 export interface RuntimeReturnEnvelope {
   disposition: ReturnDisposition;
-  messages: Array<{ body: string; privateGrantIds?: string[] }>;
+  messages: Array<{
+    body: string;
+    mentionedActorIds?: string[];
+    workItemIds?: string[];
+    privateGrantIds?: string[];
+  }>;
   artifactPublications: Array<{
-    stagedBlobId: string;
+    stagedBlobId?: string;
     artifactId?: string;
-    name: string;
-    artifactType: ArtifactType;
-    projectIds?: string[];
-    expectedCurrentRevision?: number;
-    expectedContentDigest?: string;
+    fileName?: string;
+    artifactName?: string;
+    artifactPath?: string;
+    expectedLatestVersionId?: string;
+    parentVersionIds?: string[];
+    sourceResourceRefs?: Array<{ resourceId: string; revision?: number; digest?: string }>;
+    taskId?: string;
+    messageId?: string;
+    publishBatchId?: string;
+    note?: string;
     attachToMessageIndexes?: number[];
     privateGrantIds?: string[];
   }>;
@@ -841,7 +1078,7 @@ export interface RuntimeReturnResult {
   run: RunView;
   attempt: AttemptView;
   publishedMessages: MessageView[];
-  publishedArtifacts: ArtifactView[];
+  publishedArtifacts: ArtifactV2View[];
 }
 
 export interface RuntimeFailureResult {

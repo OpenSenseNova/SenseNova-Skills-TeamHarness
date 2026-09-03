@@ -5,10 +5,13 @@ import swagger from '@fastify/swagger';
 import multipart from '@fastify/multipart';
 import { Type } from '@sinclair/typebox';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
+import { extension as mediaTypeExtension } from 'mime-types';
+import { extname } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { DomainError, invariant } from '../lib/errors.js';
 import type { ComputerPrincipal, HumanPrincipal, Principal } from '../domain/types.js';
 import { WorkspaceService } from '../domain/workspace-service.js';
-import { attachArtifactCollaboration } from '../realtime/artifact-collaboration.js';
+import type { ArtifactV2Service } from '../domain/project-resource-service.js';
 import { MAX_ARTIFACT_BYTES } from '../storage/content-blob-store.js';
 
 const Id = Type.String({ format: 'uuid' });
@@ -28,17 +31,30 @@ const WorkspaceParams = Type.Object({ workspaceId: Id });
 const WorkspaceDocumentParams = Type.Object({ workspaceId: Id, documentId: Id });
 const ProjectParams = Type.Object({ projectId: Id });
 const ProjectMemberParams = Type.Object({ projectId: Id, projectMembershipId: Id });
-const ProjectResourceLinkParams = Type.Object({ projectId: Id, linkId: Id });
 const ProjectArtifactParams = Type.Object({ projectId: Id, artifactId: Id });
+const ResourceParams = Type.Object({ resourceId: Id });
+const ProjectResourceParams = Type.Object({ projectId: Id, resourceId: Id });
+const ProjectArtifactV2Params = Type.Object({ projectId: Id, artifactId: Id });
+const ArtifactVersionV2Params = Type.Object({ artifactId: Id, versionId: Id });
+const ProjectArtifactVersionV2Params = Type.Object({ projectId: Id, artifactId: Id, versionId: Id });
+const ArtifactVersionOnlyParams = Type.Object({ versionId: Id });
+const LinkParams = Type.Object({ linkId: Id });
 const ArtifactParams = Type.Object({ artifactId: Id });
-const ArtifactSnapshotParams = Type.Object({ artifactId: Id, snapshotId: Id });
 const AgentParams = Type.Object({ workspaceId: Id, agentId: Id });
 const ComputerAgentParams = Type.Object({ agentId: Id });
+const ComputerAgentProjectParams = Type.Object({ agentId: Id, projectId: Id });
+const ComputerAgentProjectResourceParams = Type.Object({ agentId: Id, projectId: Id, resourceId: Id });
+const ComputerAgentProjectArtifactParams = Type.Object({ agentId: Id, projectId: Id, artifactId: Id });
 const ComputerAgentMessageParams = Type.Object({ agentId: Id, messageId: Id });
+const ComputerAgentWorkItemParams = Type.Object({ agentId: Id, workItemId: Id });
 const ConversationParams = Type.Object({ conversationId: Id });
 const MessageParams = Type.Object({ messageId: Id });
 const AgentRequestParams = Type.Object({ agentRequestId: Id });
-const InvitationParams = Type.Object({ invitationId: Id });
+const WorkItemParams = Type.Object({ workItemId: Id });
+const WorkspaceJoinLinkParams = Type.Object({ joinLinkId: Id });
+const WorkspaceJoinTokenParams = Type.Object({
+  token: Type.String({ minLength: 47, maxLength: 47, pattern: '^anc_[A-Za-z0-9_-]{43}$' }),
+});
 const WorkspaceMemberParams = Type.Object({ workspaceId: Id, membershipId: Id });
 const AttemptParams = Type.Object({ attemptId: Id });
 const RunParams = Type.Object({ runId: Id });
@@ -262,49 +278,12 @@ const WorkspaceMemberResponse = Type.Object({
   revision: Type.Integer(),
   joinedAt: Type.Integer(),
 });
-const ProjectRoleSchema = Type.Union([Type.Literal('manager'), Type.Literal('member')]);
-const ProjectRepositoryResponse = Type.Object({
-  id: Id,
-  cloneUrl: Type.String({ minLength: 1, maxLength: 2000 }),
-  repositoryIdentity: Type.String({ minLength: 3, maxLength: 1000 }),
-  defaultBranch: Type.String({ minLength: 1, maxLength: 255 }),
-  revision: Type.Integer({ minimum: 1 }),
-});
-const ProjectResourceLinkResponse = Type.Object({
-  id: Id,
-  projectId: Id,
-  title: Type.String(),
-  url: Type.String({ format: 'uri' }),
-  description: Type.Union([Type.String(), Type.Null()]),
-  revision: Type.Integer({ minimum: 1 }),
-  createdByMembershipId: Id,
-  createdAt: Type.Integer(),
-  updatedAt: Type.Integer(),
-});
-const ProjectWorkingCopyAvailability = Type.Union([
-  Type.Literal('ready'), Type.Literal('unavailable'), Type.Literal('mismatch'),
+const ProjectRoleSchema = Type.Union([
+  Type.Literal('owner'), Type.Literal('manager'), Type.Literal('member'),
 ]);
-const ProjectWorkingCopyResponse = Type.Object({
-  computerId: Id,
-  computerName: Type.String(),
-  connectionStatus: Type.Union([Type.Literal('online'), Type.Literal('offline')]),
-  availability: ProjectWorkingCopyAvailability,
-  branch: Type.Union([Type.String(), Type.Null()]),
-  headCommit: Type.Union([Type.String(), Type.Null()]),
-  dirty: Type.Union([Type.Boolean(), Type.Null()]),
-  checkedAt: Type.Integer(),
-});
-const ProjectWorkingCopyReportBody = Type.Object({
-  repositoryId: Id,
-  repositoryIdentity: Type.String({ minLength: 3, maxLength: 1000 }),
-  availability: ProjectWorkingCopyAvailability,
-  branch: Type.Union([Type.String({ minLength: 1, maxLength: 255 }), Type.Null()]),
-  headCommit: Type.Union([
-    Type.String({ pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$' }), Type.Null(),
-  ]),
-  dirty: Type.Union([Type.Boolean(), Type.Null()]),
-}, { additionalProperties: false });
-const NewProjectWorkingCopyReportBody = Type.Omit(ProjectWorkingCopyReportBody, ['repositoryId']);
+const ProjectAssignableRoleSchema = Type.Union([
+  Type.Literal('manager'), Type.Literal('member'),
+]);
 const ProjectResponse = Type.Object({
   id: Id,
   workspaceId: Id,
@@ -317,13 +296,6 @@ const ProjectResponse = Type.Object({
   governanceOnly: Type.Boolean(),
   activeMemberCount: Type.Integer(),
   conversationCount: Type.Integer(),
-  repository: Type.Union([ProjectRepositoryResponse, Type.Null()]),
-  connectedComputerCount: Type.Integer({ minimum: 0 }),
-  readyComputerCount: Type.Integer({ minimum: 0 }),
-  workingCopySummary: Type.Union([
-    Type.Literal('connected'), Type.Literal('not_connected'),
-    Type.Literal('mismatch'), Type.Literal('computer_offline'),
-  ]),
   createdByMembershipId: Id,
   createdAt: Type.Integer(),
   updatedAt: Type.Integer(),
@@ -335,21 +307,126 @@ const ProjectMemberResponse = Type.Object({
   actorType: Type.Union([Type.Literal('human'), Type.Literal('agent')]),
   displayName: Type.String(),
   role: ProjectRoleSchema,
+  sponsoredByProjectMembershipId: Type.Union([Id, Type.Null()]),
   revision: Type.Integer(),
   joinedAt: Type.Integer(),
 });
-const InvitationResponse = Type.Object({
+const WorkItemArtifactReferenceResponse = Type.Object({
+  artifactId: Id,
+  artifactVersionId: Id,
+  artifactName: Type.String(),
+  version: Type.Integer({ minimum: 1 }),
+  fileName: Type.String(),
+  mediaType: Type.String(),
+  contentDigest: Type.String({ minLength: 64, maxLength: 64 }),
+  byteLength: Type.Integer({ minimum: 0 }),
+  contentAvailable: Type.Boolean(),
+  artifactStatus: Type.Union([Type.Literal('active'), Type.Literal('deleted'), Type.Literal('purged')]),
+});
+const WorkItemResponse = Type.Object({
   id: Id,
   workspaceId: Id,
-  verifiedEmail: Type.String(),
-  membershipRole: Type.Union([Type.Literal('owner'), Type.Literal('member')]),
-  status: Type.Union([Type.Literal('pending'), Type.Literal('accepted'), Type.Literal('revoked')]),
-  revision: Type.Integer(),
-  invitedByMembershipId: Id,
-  acceptedMembershipId: Type.Union([Id, Type.Null()]),
+  projectId: Id,
+  taskNumber: Type.Integer({ minimum: 1 }),
+  description: Type.String({ minLength: 1, maxLength: 10000 }),
+  relatedWorkItemReferences: Type.Array(Type.Object({ workItemId: Id, taskNumber: Type.Integer({ minimum: 1 }) })),
+  sourceConversationId: Type.Union([Id, Type.Null()]),
+  sourceMessageId: Type.Union([Id, Type.Null()]),
+  sourceThreadId: Type.Union([Id, Type.Null()]),
+  lifecycleStatus: Type.Union([
+    Type.Literal('open'), Type.Literal('blocked'), Type.Literal('completed'), Type.Literal('cancelled'),
+  ]),
+  blockerReason: Type.Union([Type.String(), Type.Null()]),
+  cancellationReason: Type.Union([Type.String(), Type.Null()]),
+  assignee: Type.Union([
+    Type.Object({
+      projectMembershipId: Id,
+      workspaceMembershipId: Id,
+      actorId: Id,
+      actorType: Type.Union([Type.Literal('human'), Type.Literal('agent')]),
+      displayName: Type.String(),
+    }),
+    Type.Null(),
+  ]),
+  assignees: Type.Array(Type.Object({
+    projectMembershipId: Id,
+    workspaceMembershipId: Id,
+    actorId: Id,
+    actorType: Type.Union([Type.Literal('human'), Type.Literal('agent')]),
+    displayName: Type.String(),
+  }), { maxItems: 50 }),
+  currentSubmission: Type.Union([
+    Type.Object({
+      id: Id,
+      commentId: Type.Union([Id, Type.Null()]),
+      submittedByMembershipId: Id,
+      submittedByProjectMembershipId: Id,
+      submittedByActorId: Id,
+      submittedByDisplayName: Type.String(),
+      assignmentRevision: Type.Integer({ minimum: 0 }),
+      artifactReferences: Type.Array(WorkItemArtifactReferenceResponse),
+      createdAt: Type.Integer(),
+    }),
+    Type.Null(),
+  ]),
+  assignmentRevision: Type.Integer({ minimum: 0 }),
+  commentFrontier: Type.Integer({ minimum: 0 }),
+  revision: Type.Integer({ minimum: 1 }),
+  createdByMembershipId: Id,
+  createdByProjectMembershipId: Id,
+  createdByDisplayName: Type.String(),
   createdAt: Type.Integer(),
   updatedAt: Type.Integer(),
-  terminalAt: Type.Union([Type.Integer(), Type.Null()]),
+  completedAt: Type.Union([Type.Integer(), Type.Null()]),
+  cancelledAt: Type.Union([Type.Integer(), Type.Null()]),
+});
+const WorkItemCommentResponse = Type.Object({
+  id: Id,
+  workspaceId: Id,
+  projectId: Id,
+  workItemId: Id,
+  authorActorId: Id,
+  authorMembershipId: Id,
+  authorProjectMembershipId: Id,
+  authorActorType: Type.Union([Type.Literal('human'), Type.Literal('agent')]),
+  authorDisplayName: Type.String(),
+  body: Type.String(),
+  mentionedActorIds: Type.Array(Id),
+  mentions: Type.Array(Type.Object({
+    actorId: Id,
+    actorType: Type.Union([Type.Literal('human'), Type.Literal('agent')]),
+    displayName: Type.String(),
+  })),
+  workItemReferences: Type.Array(Type.Object({ workItemId: Id, taskNumber: Type.Integer({ minimum: 1 }) })),
+  artifactReferences: Type.Array(WorkItemArtifactReferenceResponse),
+  position: Type.Integer({ minimum: 1 }),
+  createdAt: Type.Integer(),
+});
+const WorkspaceJoinLinkResponseProperties = {
+  id: Id,
+  workspaceId: Id,
+  status: Type.Union([Type.Literal('active'), Type.Literal('revoked')]),
+  revision: Type.Integer(),
+  createdByMembershipId: Id,
+  useCount: Type.Integer({ minimum: 0 }),
+  createdAt: Type.Integer(),
+  updatedAt: Type.Integer(),
+  lastUsedAt: Type.Union([Type.Integer(), Type.Null()]),
+  revokedAt: Type.Union([Type.Integer(), Type.Null()]),
+};
+const WorkspaceJoinLinkResponse = Type.Object({
+  ...WorkspaceJoinLinkResponseProperties,
+  token: Type.Union([Type.String({ minLength: 47, maxLength: 47 }), Type.Null()]),
+});
+const WorkspaceJoinLinkCreatedResponse = Type.Object({
+  ...WorkspaceJoinLinkResponseProperties,
+  token: Type.String({ minLength: 47, maxLength: 47 }),
+});
+const WorkspaceJoinLinkPreviewResponse = Type.Object({
+  workspaceId: Id,
+  workspaceName: Type.String(),
+  status: Type.Union([Type.Literal('active'), Type.Literal('revoked')]),
+  alreadyMember: Type.Boolean(),
 });
 const AgentResponse = Type.Object({
   id: Id,
@@ -369,6 +446,39 @@ const AgentResponse = Type.Object({
   createdAt: Type.Integer(),
   updatedAt: Type.Integer(),
 });
+const AgentActivityEventTypeSchema = Type.Union([
+  Type.Literal('turn_started'),
+  Type.Literal('thought'),
+  Type.Literal('tool'),
+  Type.Literal('plan'),
+  Type.Literal('message'),
+  Type.Literal('turn_completed'),
+  Type.Literal('turn_failed'),
+]);
+const AgentActivityStatusSchema = Type.Union([
+  Type.Literal('pending'), Type.Literal('in_progress'), Type.Literal('completed'), Type.Literal('failed'),
+]);
+const AgentActivityEventInput = Type.Object({
+  eventId: Id,
+  turnId: Id,
+  sequence: Type.Integer({ minimum: 1 }),
+  eventType: AgentActivityEventTypeSchema,
+  title: Type.String({ minLength: 1, maxLength: 500 }),
+  status: AgentActivityStatusSchema,
+}, { additionalProperties: false });
+const AgentActivityEventResponse = Type.Composite([
+  AgentActivityEventInput,
+  Type.Object({
+    workspaceId: Id,
+    agentId: Id,
+    agentName: Type.String({ minLength: 1, maxLength: 120 }),
+    turnStatus: Type.Union([Type.Literal('active'), Type.Literal('completed'), Type.Literal('failed')]),
+    turnStartedAt: Type.Integer(),
+    turnUpdatedAt: Type.Integer(),
+    turnFinishedAt: Type.Union([Type.Integer(), Type.Null()]),
+    createdAt: Type.Integer(),
+  }),
+]);
 const TerminateAgentMembershipResponse = Type.Object({
   agentId: Id,
   membershipId: Id,
@@ -382,7 +492,18 @@ const ConversationResponse = Type.Object({
   id: Id,
   workspaceId: Id,
   projectId: Type.Union([Id, Type.Null()]),
+  scope: Type.Union([
+    Type.Object({ type: Type.Literal('workspace_general') }),
+    Type.Object({ type: Type.Literal('direct_message') }),
+    Type.Object({
+      type: Type.Literal('project_group'),
+      projectId: Id,
+      membershipMode: Type.Union([Type.Literal('project_all'), Type.Literal('explicit')]),
+    }),
+  ]),
   kind: Type.Union([Type.Literal('channel'), Type.Literal('dm')]),
+  visibility: Type.Union([Type.Literal('public'), Type.Literal('private')]),
+  accessMode: Type.Union([Type.Literal('content'), Type.Literal('governance')]),
   title: Type.Union([Type.String(), Type.Null()]),
   lifecycleStatus: ConversationLifecycleStatusSchema,
   revision: Type.Integer({ minimum: 1 }),
@@ -417,20 +538,25 @@ const MentionOutcomeResponse = Type.Object({
   reason: MentionReasonResponse,
 });
 const MessageArtifactReferenceResponse = Type.Object({
-  artifactId: Id,
-  artifactSnapshotId: Id,
-  artifactName: Type.String(),
-  snapshotLabel: Type.Union([Type.String(), Type.Null()]),
-  snapshotCreatedAt: Type.Integer(),
-  mediaType: Type.String(),
-  contentDigest: Type.String({ minLength: 64, maxLength: 64 }),
-  byteLength: Type.Integer({ minimum: 0 }),
-  contentAvailable: Type.Boolean(),
+    artifactId: Id,
+    artifactVersionId: Id,
+    artifactName: Type.String(),
+    version: Type.Integer({ minimum: 1 }),
+    fileName: Type.String(),
+    mediaType: Type.String(),
+    contentDigest: Type.String({ minLength: 64, maxLength: 64 }),
+    byteLength: Type.Integer({ minimum: 0 }),
+    contentAvailable: Type.Boolean(),
+    artifactStatus: Type.Union([Type.Literal('active'), Type.Literal('deleted'), Type.Literal('purged')]),
 });
 const MessageMentionResponse = Type.Object({
   actorId: Id,
   actorType: Type.Union([Type.Literal('human'), Type.Literal('agent')]),
   displayName: Type.String(),
+});
+const MessageWorkItemReferenceResponse = Type.Object({
+  workItemId: Id,
+  taskNumber: Type.Integer({ minimum: 1 }),
 });
 const MessageResponse = Type.Object({
   id: Id,
@@ -439,6 +565,7 @@ const MessageResponse = Type.Object({
   projectId: Type.Union([Id, Type.Null()]),
   threadId: Type.Union([Id, Type.Null()]),
   threadRootMessageId: Type.Union([Id, Type.Null()]),
+  replyToMessageId: Type.Union([Id, Type.Null()]),
   authorActorId: Id,
   authorMembershipId: Id,
   authorProjectMembershipId: Type.Union([Id, Type.Null()]),
@@ -453,57 +580,87 @@ const MessageResponse = Type.Object({
   mentions: Type.Array(MessageMentionResponse),
   mentionOutcomes: Type.Array(MentionOutcomeResponse),
   artifactReferences: Type.Array(MessageArtifactReferenceResponse),
+  workItemReferences: Type.Array(MessageWorkItemReferenceResponse),
   createdAt: Type.Integer(),
 });
 
-const ArtifactSnapshotResponse = Type.Object({
-  snapshotId: Id,
-  artifactId: Id,
-  label: Type.Union([Type.String({ minLength: 1, maxLength: 200 }), Type.Null()]),
-  parentSnapshotId: Type.Union([Id, Type.Null()]),
-  contentDigest: Type.String({ minLength: 64, maxLength: 64 }),
-  mediaType: Type.String(),
-  byteLength: Type.Integer({ minimum: 0, maximum: MAX_ARTIFACT_BYTES }),
-  createdByActorId: Id,
-  createdByMembershipId: Id,
-  createdByDisplayName: Type.String(),
+// Project-scoped resources and immutable Artifact v2 contracts.
+const ProjectResourceResponse = Type.Object({
+  resourceId: Id,
+  projectId: Id,
+  parentResourceId: Type.Union([Id, Type.Null()]),
+  name: Type.String(),
+  path: Type.String(),
+  kind: Type.Union([Type.Literal('file'), Type.Literal('directory')]),
+  status: Type.Union([Type.Literal('active'), Type.Literal('deleted'), Type.Literal('purged')]),
   revision: Type.Integer({ minimum: 1 }),
-  status: Type.Union([Type.Literal('active'), Type.Literal('deleted')]),
-  deletedAt: Type.Union([Type.Integer(), Type.Null()]),
+  digest: Type.Union([Type.String({ minLength: 64, maxLength: 64 }), Type.Null()]),
+  mediaType: Type.Union([Type.String(), Type.Null()]),
+  byteLength: Type.Union([Type.Integer({ minimum: 0, maximum: MAX_ARTIFACT_BYTES }), Type.Null()]),
+  createdByActorId: Id,
   createdAt: Type.Integer(),
   updatedAt: Type.Integer(),
-});
-const ArtifactCurrentStateResponse = Type.Object({
-  artifactId: Id,
-  currentRevision: Type.Integer({ minimum: 0 }),
-  contentDigest: Type.String({ minLength: 64, maxLength: 64 }),
-  mediaType: Type.String(),
-  byteLength: Type.Integer({ minimum: 0, maximum: MAX_ARTIFACT_BYTES }),
-  updatedByMembershipId: Id,
-  updatedAt: Type.Integer(),
-});
-const ArtifactResponse = Type.Object({
-  id: Id,
-  workspaceId: Id,
-  name: Type.String(),
-  artifactType: Type.Union([Type.Literal('markdown'), Type.Literal('file')]),
-  currentState: ArtifactCurrentStateResponse,
-  latestSnapshot: Type.Union([ArtifactSnapshotResponse, Type.Null()]),
-  projectIds: Type.Array(Id),
-  createdByMembershipId: Id,
-  revision: Type.Integer({ minimum: 1 }),
-  status: Type.Union([Type.Literal('active'), Type.Literal('deleted'), Type.Literal('purged')]),
   deletedAt: Type.Union([Type.Integer(), Type.Null()]),
   purgeAfter: Type.Union([Type.Integer(), Type.Null()]),
-  purgedAt: Type.Union([Type.Integer(), Type.Null()]),
+});
+const ProjectLinkResponse = Type.Object({
+  linkId: Id,
+  projectId: Id,
+  locator: Type.String({ minLength: 8, maxLength: 2000 }),
+  name: Type.String(),
+  description: Type.Union([Type.String({ maxLength: 3000 }), Type.Null()]),
+  status: Type.Union([Type.Literal('active'), Type.Literal('deleted'), Type.Literal('purged')]),
+  revision: Type.Integer({ minimum: 1 }),
+  createdByActorId: Id,
   createdAt: Type.Integer(),
   updatedAt: Type.Integer(),
+  deletedAt: Type.Union([Type.Integer(), Type.Null()]),
+  purgeAfter: Type.Union([Type.Integer(), Type.Null()]),
 });
-const ArtifactSnapshotSaveResponse = Type.Object({
-  artifact: ArtifactResponse,
-  snapshot: ArtifactSnapshotResponse,
+const ArtifactVersionV2Response = Type.Object({
+  versionId: Id,
+  artifactId: Id,
+  version: Type.Integer({ minimum: 1 }),
+  fileName: Type.String(),
+  mediaType: Type.String(),
+  byteLength: Type.Integer({ minimum: 0, maximum: MAX_ARTIFACT_BYTES }),
+  digest: Type.String({ minLength: 64, maxLength: 64 }),
+  parentVersionId: Type.Union([Id, Type.Null()]),
+  status: Type.Union([Type.Literal('active'), Type.Literal('deleted'), Type.Literal('purged')]),
+  createdByActorId: Id,
+  createdAt: Type.Integer(),
+  taskId: Type.Union([Id, Type.Null()]),
+  messageId: Type.Union([Id, Type.Null()]),
+  publishBatchId: Type.Union([Id, Type.Null()]),
+  note: Type.Union([Type.String(), Type.Null()]),
+  preview: Type.Object({
+    status: Type.Union([Type.Literal('pending'), Type.Literal('ready'), Type.Literal('failed')]),
+    errorMessage: Type.Union([Type.String(), Type.Null()]),
+  }),
+  deletedAt: Type.Union([Type.Integer(), Type.Null()]),
+  purgeAfter: Type.Union([Type.Integer(), Type.Null()]),
+});
+const ArtifactV2Response = Type.Object({
+  artifactId: Id,
+  projectId: Id,
+  name: Type.String(),
+  projectPath: Type.String(),
+  status: Type.Union([Type.Literal('active'), Type.Literal('deleted'), Type.Literal('purged')]),
+  latestVersionId: Type.Union([Id, Type.Null()]),
+  latestVersion: Type.Union([ArtifactVersionV2Response, Type.Null()]),
+  createdByActorId: Id,
+  createdAt: Type.Integer(),
+  updatedAt: Type.Integer(),
+  deletedAt: Type.Union([Type.Integer(), Type.Null()]),
+  purgeAfter: Type.Union([Type.Integer(), Type.Null()]),
+  derivationParentVersionIds: Type.Array(Id),
+  contentBase64: Type.Optional(Type.String()),
+  mediaType: Type.Optional(Type.String()),
+});
+const ArtifactV2PublishResponse = Type.Object({
+  artifact: ArtifactV2Response,
+  version: ArtifactVersionV2Response,
   created: Type.Boolean(),
-  labelChanged: Type.Boolean(),
 });
 const StagedBlobResponse = Type.Object({
   id: Id,
@@ -530,7 +687,7 @@ const AgentRequestResponse = Type.Object({
     Type.Object({
       disposition: Type.Union([Type.Literal('ready'), Type.Literal('waiting'), Type.Literal('blocked')]),
       reasons: Type.Array(Type.Union([
-        Type.Literal('runtime_unavailable'), Type.Literal('project_working_copy_unavailable'),
+        Type.Literal('runtime_unavailable'),
         Type.Literal('agent_suspended'), Type.Literal('authority_revoked'),
       ])),
     }),
@@ -592,6 +749,7 @@ const AgentRequestResponse = Type.Object({
   terminalAt: Type.Union([Type.Integer(), Type.Null()]),
 });
 const ConversationParticipantResponse = Type.Object({
+  scopeMembershipId: Id,
   workspaceMembershipId: Id,
   projectMembershipId: Type.Union([Id, Type.Null()]),
   actorId: Id,
@@ -662,9 +820,6 @@ const RunContextSnapshotResponse = Type.Object({
   workspaceContextVersion: Type.Integer(),
   projectId: Type.Union([Id, Type.Null()]),
   projectContextVersion: Type.Union([Type.Integer(), Type.Null()]),
-  repositoryId: Type.Union([Id, Type.Null()]),
-  repositoryIdentity: Type.Union([Type.String(), Type.Null()]),
-  repositoryBaseCommit: Type.Union([Type.String(), Type.Null()]),
   conversationContextVersion: Type.Integer(), changeCursor: Type.Integer(),
   sources: Type.Array(ContextSourceResponse), createdAt: Type.Integer(),
 });
@@ -716,61 +871,171 @@ const AttemptExecutionInputResponse = Type.Object({
   executionScope: Type.Union([
     Type.Object({ kind: Type.Literal('workspace_scratch') }, { additionalProperties: false }),
     Type.Object({
-      kind: Type.Literal('project_repository'),
+      kind: Type.Literal('project_scratch'),
       projectId: Id,
-      repositoryId: Id,
-      repositoryIdentity: Type.String({ minLength: 3 }),
-      baseCommit: Type.String({ pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$' }),
     }, { additionalProperties: false }),
   ]),
   runContext: RunContextSnapshotResponse,
   developerInstructions: Type.String(),
 });
-const AgentInboxTargetResponse = Type.Object({
-  conversationId: Id,
-  threadId: Type.Union([Id, Type.Null()]),
-  target: Type.String({ minLength: 1 }),
-  pendingCount: Type.Integer({ minimum: 1 }),
-  firstSequence: Type.Integer({ minimum: 1 }),
-  lastSequence: Type.Integer({ minimum: 1 }),
+const AgentSessionInputResponse = Type.Object({
+  workspaceId: Id,
+  agentId: Id,
+  session: Type.Object({ kind: Type.Union([Type.Literal('mention'), Type.Literal('work_item')]), key: Id }),
+  target: Type.Union([Type.String(), Type.Null()]),
+  projectId: Type.Union([Id, Type.Null()]),
+  initialDiscussionFrontier: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+  discussion: Type.Union([
+    Type.Object({
+      target: Type.String({ minLength: 1 }),
+      agentRequestId: Id,
+      initialDiscussionFrontier: Type.Integer({ minimum: 0 }),
+      sessionWindow: Type.Object({
+        mode: Type.Union([Type.Literal('dm'), Type.Literal('isolated')]),
+        acceptedMessages: Type.Integer({ minimum: 0, maximum: 10 }),
+        maxMessages: Type.Literal(10),
+        status: Type.Union([Type.Literal('accepting'), Type.Literal('frozen'), Type.Literal('completed')]),
+      }),
+    }, { additionalProperties: false }),
+    Type.Null(),
+  ]),
+  sessionWindow: Type.Object({
+    mode: Type.Union([Type.Literal('dm'), Type.Literal('isolated')]),
+    acceptedMessages: Type.Integer({ minimum: 0, maximum: 10 }),
+    maxMessages: Type.Literal(10),
+    status: Type.Union([Type.Literal('accepting'), Type.Literal('frozen'), Type.Literal('completed')]),
+  }),
+  contextHash: Type.String({ pattern: '^[a-f0-9]{64}$' }),
+  contextJsonl: Type.String(),
+  referencedWorkItemIds: Type.Array(Id),
+  runtimeId: RuntimeIdSchema,
+  runtimeBindingRevision: Type.Integer({ minimum: 1 }),
+  runtimeConfiguration: Type.Object({
+    model: Type.Union([Type.String(), Type.Null()]),
+    reasoningEffort: Type.Union([ReasoningEffortSchema, Type.Null()]),
+    mode: Type.Union([Type.String(), Type.Null()]),
+  }),
+  developerInstructions: Type.String(),
 });
+const AgentInboxTargetResponse = Type.Union([
+  Type.Object({
+    kind: Type.Literal('discussion'),
+    conversationId: Id,
+    threadId: Type.Union([Id, Type.Null()]),
+    workItemId: Type.Null(),
+    target: Type.String({ minLength: 1 }),
+    pendingCount: Type.Integer({ minimum: 1 }),
+    firstSequence: Type.Integer({ minimum: 1 }),
+    lastSequence: Type.Integer({ minimum: 1 }),
+    requiresAction: Type.Boolean(),
+  }),
+  Type.Object({
+    kind: Type.Literal('work_item'),
+    conversationId: Type.Null(),
+    threadId: Type.Null(),
+    workItemId: Id,
+    target: Type.String({ minLength: 1 }),
+    pendingCount: Type.Integer({ minimum: 1 }),
+    firstSequence: Type.Integer({ minimum: 1 }),
+    lastSequence: Type.Integer({ minimum: 1 }),
+    requiresAction: Type.Literal(true),
+  }),
+]);
 const AgentInboxSummaryResponse = Type.Object({
   agentId: Id,
   highestSequence: Type.Integer({ minimum: 0 }),
   targets: Type.Array(AgentInboxTargetResponse),
+  sessionTriggers: Type.Array(Type.Object({
+    session: Type.Object({ kind: Type.Union([Type.Literal('mention'), Type.Literal('work_item')]), key: Id }),
+    inboxItemId: Id,
+    sequence: Type.Integer({ minimum: 1 }),
+    target: Type.Union([Type.String(), Type.Null()]),
+    agentRequestId: Type.Union([Id, Type.Null()]),
+    messageId: Type.Union([Id, Type.Null()]),
+    conversationId: Type.Union([Id, Type.Null()]),
+    threadId: Type.Union([Id, Type.Null()]),
+    workItemId: Type.Union([Id, Type.Null()]),
+    requiresAction: Type.Boolean(),
+  })),
 });
 const AgentInboxWakeBatchResponse = Type.Object({
   events: Type.Array(Type.Object({
     type: Type.Literal('agent.inbox_changed'),
     agentId: Id,
-    highestSequence: Type.Integer({ minimum: 1 }),
+    wakeSequence: Type.Integer({ minimum: 1 }),
   })),
   cursor: Type.Record(Type.String(), Type.Integer({ minimum: 0 })),
 });
-const AgentInboxClaimResponse = Type.Object({
-  agentId: Id,
-  runId: Id,
-  attemptId: Id,
-  receipt: Type.String({ minLength: 1 }),
-  target: Type.String({ minLength: 1 }),
-  attention: Type.Array(Type.Object({
+const AgentInboxAttentionResponse = Type.Object({
     inboxItemId: Id,
     sequence: Type.Integer({ minimum: 1 }),
-    attentionKind: Type.Union([Type.Literal('direct_message'), Type.Literal('mention')]),
-    agentRequestId: Id,
-    messageId: Id,
-  })),
-  discussion: Type.Object({
-    conversationId: Id,
-    threadId: Type.Union([Id, Type.Null()]),
-    sincePositionExclusive: Type.Integer({ minimum: 0 }),
-    throughPosition: Type.Integer({ minimum: 0 }),
-    rootMessage: Type.Union([MessageResponse, Type.Null()]),
-    messages: Type.Array(MessageResponse),
-  }),
+    attentionKind: Type.Union([
+      Type.Literal('direct_message'), Type.Literal('mention'),
+      Type.Literal('work_item_assignment'), Type.Literal('work_item_mention'),
+    ]),
+    agentRequestId: Type.Union([Id, Type.Null()]),
+    messageId: Type.Union([Id, Type.Null()]),
+    workItemId: Type.Union([Id, Type.Null()]),
+    workItemCommentId: Type.Union([Id, Type.Null()]),
 });
+const AgentInboxDiscussionDeltaResponse = Type.Object({
+      conversationId: Id,
+      threadId: Type.Union([Id, Type.Null()]),
+      sincePositionExclusive: Type.Integer({ minimum: 0 }),
+      throughPosition: Type.Integer({ minimum: 0 }),
+      rootMessage: Type.Union([MessageResponse, Type.Null()]),
+      messages: Type.Array(MessageResponse),
+});
+const AgentInboxClaimResponse = Type.Object({
+  agentId: Id,
+  receipt: Type.String({ minLength: 1 }),
+  target: Type.String({ minLength: 1 }),
+  targetKind: Type.Literal('discussion'),
+  sessionWindow: Type.Object({
+    mode: Type.Union([Type.Literal('dm'), Type.Literal('isolated')]),
+    acceptedMessages: Type.Integer({ minimum: 0, maximum: 10 }),
+    maxMessages: Type.Literal(10),
+    status: Type.Union([Type.Literal('accepting'), Type.Literal('frozen'), Type.Literal('completed')]),
+  }),
+  attention: Type.Array(AgentInboxAttentionResponse),
+  discussion: AgentInboxDiscussionDeltaResponse,
+});
+const AgentMessagePublicationResponse = Type.Union([
+  Type.Object({
+    status: Type.Literal('published'),
+    message: MessageResponse,
+  }, { additionalProperties: false }),
+  Type.Object({
+    status: Type.Literal('held'),
+    draftId: Id,
+    expectedDiscussionFrontier: Type.Integer({ minimum: 0 }),
+    currentDiscussionFrontier: Type.Integer({ minimum: 0 }),
+    attention: Type.Array(AgentInboxAttentionResponse),
+    discussionDelta: AgentInboxDiscussionDeltaResponse,
+  }, { additionalProperties: false }),
+]);
+const AgentInboxCompletionResponse = Type.Union([
+  Type.Object({
+    status: Type.Literal('completed'),
+    receipt: Type.String({ minLength: 1 }),
+    handledAt: Type.Integer(),
+  }, { additionalProperties: false }),
+  Type.Object({
+    status: Type.Literal('review_required'),
+    expectedDiscussionFrontier: Type.Integer({ minimum: 0 }),
+    currentDiscussionFrontier: Type.Integer({ minimum: 0 }),
+    attention: Type.Array(AgentInboxAttentionResponse),
+    discussionDelta: AgentInboxDiscussionDeltaResponse,
+  }, { additionalProperties: false }),
+]);
 
-export async function buildApp(service: WorkspaceService) {
+export interface BuildAppOptions {
+  /** Keep cookie behavior deterministic for embedded servers and tests. */
+  secureCookies?: boolean;
+}
+
+export async function buildApp(service: WorkspaceService, options: BuildAppOptions = {}) {
+  const secureCookies = options.secureCookies ?? process.env.NODE_ENV === 'production';
   const app = Fastify({ logger: false }).withTypeProvider<TypeBoxTypeProvider>();
   await app.register(cookie);
   await app.register(rateLimit, { global: false });
@@ -808,19 +1073,6 @@ export async function buildApp(service: WorkspaceService) {
           },
         },
       });
-      if (paths['/v1/workspaces/{workspaceId}/artifacts/files']?.post) {
-        paths['/v1/workspaces/{workspaceId}/artifacts/files'].post.requestBody = multipartBody({
-          file: { type: 'string', format: 'binary' },
-          name: { type: 'string', minLength: 1, maxLength: 500 },
-          projectIds: { type: 'string', description: 'JSON array of Project UUIDs.' },
-        }, ['file']);
-      }
-      if (paths['/v1/artifacts/{artifactId}/current/file']?.put) {
-        paths['/v1/artifacts/{artifactId}/current/file'].put.requestBody = multipartBody({
-          file: { type: 'string', format: 'binary' },
-          expectedCurrentRevision: { type: 'integer', minimum: 0 },
-        }, ['file', 'expectedCurrentRevision']);
-      }
       if (paths['/v1/attempts/{attemptId}/staged-blobs']?.post) {
         paths['/v1/attempts/{attemptId}/staged-blobs'].post.requestBody = multipartBody({
           file: { type: 'string', format: 'binary' },
@@ -829,7 +1081,6 @@ export async function buildApp(service: WorkspaceService) {
       return openapiObject;
     },
   });
-  const artifactCollaboration = attachArtifactCollaboration(app, service);
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) {
@@ -896,7 +1147,7 @@ export async function buildApp(service: WorkspaceService) {
     },
   }, async (request, reply) => {
     const session = service.auth.verifyEmail(request.body.registrationId, request.body.code);
-    setSessionCookie(reply, session.token, session.expiresAt);
+    setSessionCookie(reply, session.token, session.expiresAt, secureCookies);
     return session.human;
   });
 
@@ -912,7 +1163,7 @@ export async function buildApp(service: WorkspaceService) {
     },
   }, async (request, reply) => {
     const session = await service.auth.login(request.body.email, request.body.password);
-    setSessionCookie(reply, session.token, session.expiresAt);
+    setSessionCookie(reply, session.token, session.expiresAt, secureCookies);
     return session.human;
   });
 
@@ -1031,264 +1282,298 @@ export async function buildApp(service: WorkspaceService) {
     idempotencyKey(request),
   ));
 
-  app.get('/v1/workspaces/:workspaceId/artifacts', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, params: WorkspaceParams,
-      querystring: Type.Object({ projectId: Type.Optional(Id) }),
-      response: { 200: Type.Object({ items: Type.Array(ArtifactResponse) }) },
-    },
-  }, async (request) => ({
-    items: service.artifacts.list(
-      requireHuman(authenticate(request, service)),
-      request.params.workspaceId,
-      request.query.projectId ? { projectId: request.query.projectId } : {},
-    ),
-  }));
+  // Artifact v2: Project-scoped resources, immutable file versions and links.
+  // These routes intentionally do not expose Current State, snapshots or Yjs.
+  app.get('/v1/projects/:projectId/resources', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ProjectParams, response: { 200: Type.Object({ items: Type.Array(ProjectResourceResponse) }) } },
+  }, async (request) => ({ items: service.projectResources.list(authenticate(request, service), request.params.projectId) }));
 
-  app.get('/v1/workspaces/:workspaceId/artifacts/trash', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, params: WorkspaceParams,
-      response: { 200: Type.Object({ items: Type.Array(ArtifactResponse) }) },
-    },
-  }, async (request) => ({
-    items: service.artifacts.list(
-      requireHuman(authenticate(request, service)),
-      request.params.workspaceId,
-      { trash: true },
-    ),
-  }));
+  app.get('/v1/projects/:projectId/resources/trash', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ProjectParams, response: { 200: Type.Object({ items: Type.Array(ProjectResourceResponse) }) } },
+  }, async (request) => ({ items: service.projectResources.list(authenticate(request, service), request.params.projectId, true).filter((item) => item.status !== 'active') }));
 
-  app.get('/v1/workspaces/:workspaceId/artifacts/cleanup-status', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, params: WorkspaceParams,
-      response: { 200: Type.Object({
-        deletedCount: Type.Integer({ minimum: 0 }),
-        expiredDeletedCount: Type.Integer({ minimum: 0 }),
-        stagedBlobCount: Type.Integer({ minimum: 0 }),
-        expiredStagedBlobCount: Type.Integer({ minimum: 0 }),
-        nextPurgeAt: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
-        checkedAt: Type.Integer({ minimum: 0 }),
-      }) },
-    },
-  }, async (request) => service.artifacts.cleanupStatus(
-    requireHuman(authenticate(request, service)), request.params.workspaceId,
-  ));
+  app.get('/v1/projects/:projectId/resources/:resourceId', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ProjectResourceParams, response: { 200: ProjectResourceResponse } },
+  }, async (request) => service.projectResources.getInProject(authenticate(request, service), request.params.projectId, request.params.resourceId));
+  app.get('/v1/projects/:projectId/resources/:resourceId/download', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ProjectResourceParams },
+  }, async (request, reply) => {
+    const principal = authenticate(request, service);
+    const resource = service.projectResources.getInProject(principal, request.params.projectId, request.params.resourceId);
+    const result = service.projectResources.read(principal, resource.resourceId);
+    reply.header('Content-Type', result.resource.mediaType ?? 'application/octet-stream');
+    reply.header('Content-Length', String(result.resource.byteLength ?? 0));
+    reply.header('Content-Disposition', artifactAttachmentDisposition(result.resource.name, result.resource.mediaType ?? 'application/octet-stream', result.resource.resourceId));
+    return reply.send(service.projectResources.blobs.read(result.storagePath));
+  });
+  app.put('/v1/projects/:projectId/resources/:resourceId/content', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ProjectResourceParams, consumes: ['multipart/form-data'], response: { 200: ProjectResourceResponse } },
+  }, async (request) => {
+    const principal = requireHuman(authenticate(request, service));
+    service.projectResources.getInProject(principal, request.params.projectId, request.params.resourceId);
+    const upload = await request.file({ limits: { fileSize: MAX_ARTIFACT_BYTES, files: 1 } });
+    invariant(upload, 'RESOURCE_FILE_REQUIRED', 'A file upload is required.');
+    const expected = Number(multipartString(upload.fields, 'expectedRevision'));
+    invariant(Number.isSafeInteger(expected) && expected > 0, 'EXPECTED_REVISION_REQUIRED', 'expectedRevision is required.');
+    const stored = await service.projectResources.blobs.write(upload.file, upload.mimetype);
+    return service.projectResources.replace(principal, request.params.resourceId, expected, stored);
+  });
+  app.patch('/v1/projects/:projectId/resources/:resourceId', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ProjectResourceParams, body: Type.Object({ name: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })), parentResourceId: Type.Optional(Type.Union([Id, Type.Null()])) }), response: { 200: ProjectResourceResponse } },
+  }, async (request) => {
+    const principal = requireHuman(authenticate(request, service));
+    service.projectResources.getInProject(principal, request.params.projectId, request.params.resourceId);
+    if (request.body.name !== undefined) service.projectResources.rename(principal, request.params.resourceId, request.body.name);
+    if (request.body.parentResourceId !== undefined) return service.projectResources.move(principal, request.params.resourceId, request.body.parentResourceId);
+    return service.projectResources.getInProject(principal, request.params.projectId, request.params.resourceId);
+  });
+  app.delete('/v1/projects/:projectId/resources/:resourceId', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ProjectResourceParams, response: { 200: ProjectResourceResponse } },
+  }, async (request) => { const principal = requireHuman(authenticate(request, service)); service.projectResources.getInProject(principal, request.params.projectId, request.params.resourceId); return service.projectResources.delete(principal, request.params.resourceId); });
+  app.post('/v1/projects/:projectId/resources/:resourceId/restore', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ProjectResourceParams, response: { 200: ProjectResourceResponse } },
+  }, async (request) => { const principal = requireHuman(authenticate(request, service)); service.projectResources.getInProject(principal, request.params.projectId, request.params.resourceId, true); return service.projectResources.restore(principal, request.params.resourceId); });
 
-  app.post('/v1/workspaces/:workspaceId/artifacts/markdown', {
+  app.post('/v1/projects/:projectId/resources/folders', {
     schema: {
-      tags: ['artifact'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkspaceParams,
-      body: Type.Object({
-        name: Type.String({ minLength: 1, maxLength: 500 }),
-        projectIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 100 })),
-      }, { additionalProperties: false }),
-      response: { 201: ArtifactResponse },
+      tags: ['project-resource'], security: HumanSecurity, params: ProjectParams,
+      body: Type.Object({ name: Type.String({ minLength: 1, maxLength: 255 }), parentResourceId: Type.Optional(Type.Union([Id, Type.Null()])) }),
+      response: { 201: ProjectResourceResponse },
     },
-  }, async (request, reply) => reply.status(201).send(service.artifacts.createMarkdown(
-    requireHuman(authenticate(request, service)), request.params.workspaceId, request.body, idempotencyKey(request),
-  )));
+  }, async (request, reply) => reply.status(201).send(service.projectResources.createFolder(requireHuman(authenticate(request, service)), request.params.projectId, request.body)));
 
-  app.post('/v1/workspaces/:workspaceId/artifacts/files', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkspaceParams,
-      consumes: ['multipart/form-data'],
-      response: { 201: ArtifactResponse },
-    },
+  app.post('/v1/projects/:projectId/resources', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ProjectParams, consumes: ['multipart/form-data'], response: { 201: ProjectResourceResponse } },
   }, async (request, reply) => {
     const principal = requireHuman(authenticate(request, service));
     const upload = await request.file({ limits: { fileSize: MAX_ARTIFACT_BYTES, files: 1 } });
-    invariant(upload, 'ARTIFACT_FILE_REQUIRED', 'A file upload is required.');
-    const stored = await service.artifacts.blobs.write(upload.file, upload.mimetype);
-    const name = multipartString(upload.fields, 'name') ?? upload.filename;
-    const projectIds = multipartJsonIds(upload.fields, 'projectIds');
-    return reply.status(201).send(await service.artifacts.createFile(
-      principal, request.params.workspaceId, { name, projectIds }, stored, idempotencyKey(request),
-    ));
+    invariant(upload, 'RESOURCE_FILE_REQUIRED', 'A file upload is required.');
+    const stored = await service.projectResources.blobs.write(upload.file, upload.mimetype);
+    const parentResourceId = multipartString(upload.fields, 'parentResourceId');
+    const path = multipartString(upload.fields, 'path');
+    return reply.status(201).send(await service.projectResources.upload(principal, request.params.projectId, { name: upload.filename, parentResourceId, ...(path ? { path } : {}) }, stored));
   });
 
-  app.get('/v1/artifacts/:artifactId', {
-    schema: { tags: ['artifact'], security: HumanSecurity, params: ArtifactParams, response: { 200: ArtifactResponse } },
-  }, async (request) => service.artifacts.get(
-    requireHuman(authenticate(request, service)), request.params.artifactId,
-  ));
+  app.get('/v1/project-resources/:resourceId', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ResourceParams, response: { 200: ProjectResourceResponse } },
+  }, async (request) => service.projectResources.get(authenticate(request, service), request.params.resourceId));
 
-  app.post('/v1/artifacts/:artifactId/draft/flush', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, params: ArtifactParams,
-      response: { 200: ArtifactResponse },
-    },
-  }, async (request) => {
-    const principal = requireHuman(authenticate(request, service));
-    service.artifacts.authorizeDraft(principal, request.params.artifactId);
-    await artifactCollaboration.flushDocument(request.params.artifactId);
-    return service.artifacts.get(principal, request.params.artifactId);
+  app.get('/v1/project-resources/:resourceId/download', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ResourceParams },
+  }, async (request, reply) => {
+    const result = service.projectResources.read(authenticate(request, service), request.params.resourceId);
+    reply.header('Content-Type', result.resource.mediaType ?? 'application/octet-stream');
+    reply.header('Content-Length', String(result.resource.byteLength ?? 0));
+    reply.header('Content-Disposition', artifactAttachmentDisposition(result.resource.name, result.resource.mediaType ?? 'application/octet-stream', result.resource.resourceId));
+    return reply.send(service.projectResources.blobs.read(result.storagePath));
   });
 
-  app.patch('/v1/artifacts/:artifactId', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, headers: IdempotencyHeaders, params: ArtifactParams,
-      body: Type.Object({
-        name: Type.String({ minLength: 1, maxLength: 500 }),
-        expectedRevision: Type.Integer({ minimum: 1 }),
-      }, { additionalProperties: false }),
-      response: { 200: ArtifactResponse },
-    },
-  }, async (request) => service.artifacts.rename(
-    requireHuman(authenticate(request, service)), request.params.artifactId, request.body, idempotencyKey(request),
-  ));
-
-  app.delete('/v1/artifacts/:artifactId', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, headers: IdempotencyHeaders, params: ArtifactParams,
-      body: RevisionBody,
-      response: { 200: ArtifactResponse },
-    },
-  }, async (request) => service.artifacts.delete(
-    requireHuman(authenticate(request, service)), request.params.artifactId,
-    request.body.expectedRevision, idempotencyKey(request),
-  ));
-
-  app.post('/v1/artifacts/:artifactId/restore', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, headers: IdempotencyHeaders, params: ArtifactParams,
-      body: RevisionBody,
-      response: { 200: ArtifactResponse },
-    },
-  }, async (request) => service.artifacts.restore(
-    requireHuman(authenticate(request, service)), request.params.artifactId,
-    request.body.expectedRevision, idempotencyKey(request),
-  ));
-
-  app.post('/v1/artifacts/:artifactId/snapshots', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, headers: IdempotencyHeaders, params: ArtifactParams,
-      body: Type.Object({
-        expectedCurrentRevision: Type.Integer({ minimum: 0 }),
-        label: Type.Union([Type.String({ maxLength: 200 }), Type.Null()]),
-      }, { additionalProperties: false }),
-      response: { 200: ArtifactSnapshotSaveResponse },
-    },
-  }, async (request) => service.artifacts.saveCurrentSnapshot(
-    requireHuman(authenticate(request, service)), request.params.artifactId, request.body, idempotencyKey(request),
-  ));
-
-  app.put('/v1/artifacts/:artifactId/current/file', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, headers: IdempotencyHeaders, params: ArtifactParams,
-      consumes: ['multipart/form-data'],
-      response: { 200: ArtifactResponse },
-    },
+  app.put('/v1/project-resources/:resourceId/content', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ResourceParams, consumes: ['multipart/form-data'], response: { 200: ProjectResourceResponse } },
   }, async (request) => {
     const principal = requireHuman(authenticate(request, service));
     const upload = await request.file({ limits: { fileSize: MAX_ARTIFACT_BYTES, files: 1 } });
+    invariant(upload, 'RESOURCE_FILE_REQUIRED', 'A file upload is required.');
+    const expected = Number(multipartString(upload.fields, 'expectedRevision'));
+    invariant(Number.isSafeInteger(expected) && expected > 0, 'EXPECTED_REVISION_REQUIRED', 'expectedRevision is required.');
+    const stored = await service.projectResources.blobs.write(upload.file, upload.mimetype);
+    return service.projectResources.replace(principal, request.params.resourceId, expected, stored);
+  });
+
+  app.patch('/v1/project-resources/:resourceId', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ResourceParams, body: Type.Object({ name: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })), parentResourceId: Type.Optional(Type.Union([Id, Type.Null()])) }), response: { 200: ProjectResourceResponse } },
+  }, async (request) => {
+    const principal = requireHuman(authenticate(request, service));
+    if (request.body.name !== undefined) service.projectResources.rename(principal, request.params.resourceId, request.body.name);
+    if (request.body.parentResourceId !== undefined) return service.projectResources.move(principal, request.params.resourceId, request.body.parentResourceId);
+    return service.projectResources.get(principal, request.params.resourceId);
+  });
+
+  app.delete('/v1/project-resources/:resourceId', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ResourceParams, response: { 200: ProjectResourceResponse } },
+  }, async (request) => service.projectResources.delete(requireHuman(authenticate(request, service)), request.params.resourceId));
+
+  app.post('/v1/project-resources/:resourceId/restore', {
+    schema: { tags: ['project-resource'], security: HumanSecurity, params: ResourceParams, response: { 200: ProjectResourceResponse } },
+  }, async (request) => service.projectResources.restore(requireHuman(authenticate(request, service)), request.params.resourceId));
+
+  app.get('/v1/projects/:projectId/links', {
+    schema: { tags: ['project-link'], security: HumanSecurity, params: ProjectParams, response: { 200: Type.Object({ items: Type.Array(ProjectLinkResponse) }) } },
+  }, async (request) => ({ items: service.projectResources.listLinks(authenticate(request, service), request.params.projectId) }));
+  app.get('/v1/projects/:projectId/links/trash', {
+    schema: { tags: ['project-link'], security: HumanSecurity, params: ProjectParams, response: { 200: Type.Object({ items: Type.Array(ProjectLinkResponse) }) } },
+  }, async (request) => ({ items: service.projectResources.listLinks(authenticate(request, service), request.params.projectId, true).filter((item) => item.status !== 'active') }));
+
+  app.patch('/v1/projects/:projectId/links/:linkId', {
+    schema: { tags: ['project-link'], security: HumanSecurity, params: Type.Object({ projectId: Id, linkId: Id }), body: Type.Object({ name: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })), description: Type.Optional(Type.Union([Type.String({ maxLength: 3000 }), Type.Null()])) }), response: { 200: ProjectLinkResponse } },
+  }, async (request) => { const principal = requireHuman(authenticate(request, service)); const link = service.projectResources.listLinks(principal, request.params.projectId, true).find((item) => item.linkId === request.params.linkId); invariant(link, 'LINK_NOT_FOUND', 'Link does not belong to this Project.', 404); return service.projectResources.updateLink(principal, request.params.linkId, request.body); });
+  app.delete('/v1/projects/:projectId/links/:linkId', {
+    schema: { tags: ['project-link'], security: HumanSecurity, params: Type.Object({ projectId: Id, linkId: Id }), response: { 200: ProjectLinkResponse } },
+  }, async (request) => { const principal = requireHuman(authenticate(request, service)); const link = service.projectResources.listLinks(principal, request.params.projectId, true).find((item) => item.linkId === request.params.linkId); invariant(link, 'LINK_NOT_FOUND', 'Link does not belong to this Project.', 404); return service.projectResources.deleteLink(principal, request.params.linkId); });
+  app.post('/v1/projects/:projectId/links/:linkId/restore', {
+    schema: { tags: ['project-link'], security: HumanSecurity, params: Type.Object({ projectId: Id, linkId: Id }), response: { 200: ProjectLinkResponse } },
+  }, async (request) => { const principal = requireHuman(authenticate(request, service)); const link = service.projectResources.listLinks(principal, request.params.projectId, true).find((item) => item.linkId === request.params.linkId); invariant(link, 'LINK_NOT_FOUND', 'Link does not belong to this Project.', 404); return service.projectResources.restoreLink(principal, request.params.linkId); });
+
+  app.post('/v1/projects/:projectId/links', {
+    schema: { tags: ['project-link'], security: HumanSecurity, params: ProjectParams, body: Type.Object({ locator: Type.String({ minLength: 1, maxLength: 2000 }), name: Type.String({ minLength: 1, maxLength: 255 }), description: Type.Optional(Type.Union([Type.String({ maxLength: 3000 }), Type.Null()])) }), response: { 201: ProjectLinkResponse } },
+  }, async (request, reply) => reply.status(201).send(service.projectResources.createLink(requireHuman(authenticate(request, service)), request.params.projectId, request.body)));
+
+  app.patch('/v1/project-links/:linkId', {
+    schema: { tags: ['project-link'], security: HumanSecurity, params: LinkParams, body: Type.Object({ name: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })), description: Type.Optional(Type.Union([Type.String({ maxLength: 3000 }), Type.Null()])) }), response: { 200: ProjectLinkResponse } },
+  }, async (request) => service.projectResources.updateLink(requireHuman(authenticate(request, service)), request.params.linkId, request.body));
+  app.delete('/v1/project-links/:linkId', { schema: { tags: ['project-link'], security: HumanSecurity, params: LinkParams, response: { 200: ProjectLinkResponse } } }, async (request) => service.projectResources.deleteLink(requireHuman(authenticate(request, service)), request.params.linkId));
+  app.post('/v1/project-links/:linkId/restore', { schema: { tags: ['project-link'], security: HumanSecurity, params: LinkParams, response: { 200: ProjectLinkResponse } } }, async (request) => service.projectResources.restoreLink(requireHuman(authenticate(request, service)), request.params.linkId));
+
+  app.get('/v1/projects/:projectId/artifacts', {
+    schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ProjectParams, response: { 200: Type.Object({ items: Type.Array(ArtifactV2Response) }) } },
+  }, async (request) => ({ items: service.artifactV2.listArtifacts(authenticate(request, service), request.params.projectId) }));
+  app.get('/v1/projects/:projectId/artifacts/trash', {
+    schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ProjectParams, response: { 200: Type.Object({ items: Type.Array(ArtifactV2Response) }) } },
+  }, async (request) => ({ items: service.artifactV2.listArtifacts(authenticate(request, service), request.params.projectId, true).filter((item) => item.status !== 'active') }));
+
+  app.post('/v1/projects/:projectId/artifacts', {
+    schema: { tags: ['artifact-v2'], security: HumanSecurity, headers: IdempotencyHeaders, params: ProjectParams, consumes: ['multipart/form-data'], response: { 200: ArtifactV2PublishResponse, 201: ArtifactV2PublishResponse } },
+  }, async (request, reply) => {
+    const principal = authenticate(request, service);
+    const upload = await request.file({ limits: { fileSize: MAX_ARTIFACT_BYTES, files: 1 } });
     invariant(upload, 'ARTIFACT_FILE_REQUIRED', 'A file upload is required.');
-    const expectedCurrentRevisionValue = multipartString(upload.fields, 'expectedCurrentRevision');
-    invariant(expectedCurrentRevisionValue, 'EXPECTED_CURRENT_REVISION_REQUIRED', 'expectedCurrentRevision is required.');
-    const expectedCurrentRevision = Number(expectedCurrentRevisionValue);
-    invariant(Number.isSafeInteger(expectedCurrentRevision) && expectedCurrentRevision >= 0,
-      'INVALID_CURRENT_REVISION', 'expectedCurrentRevision must be a non-negative integer.');
-    const stored = await service.artifacts.blobs.write(upload.file, upload.mimetype);
-    return service.artifacts.replaceFileCurrent(
-      principal, request.params.artifactId, { expectedCurrentRevision }, stored, idempotencyKey(request),
-    );
+    const stored = await service.artifactV2.blobs.write(upload.file, upload.mimetype);
+    const jsonField = (name: string): unknown => {
+      const value = multipartString(upload.fields, name); if (!value) return undefined;
+      try { return JSON.parse(value); } catch { throw new DomainError('INVALID_MULTIPART_FIELD', `${name} must be valid JSON.`, 400); }
+    };
+    const sourceResourceRefs = jsonField('sourceResourceRefs') as Array<{ resourceId: string; revision?: number; digest?: string }> | undefined;
+    const parentVersionIds = jsonField('parentVersionIds') as string[] | undefined;
+    const artifactId = multipartString(upload.fields, 'artifactId');
+    const draftId = multipartString(upload.fields, 'draftId');
+    const artifactName = multipartString(upload.fields, 'artifactName');
+    const artifactPath = multipartString(upload.fields, 'artifactPath');
+    const expectedLatestVersionId = multipartString(upload.fields, 'expectedLatestVersionId');
+    const taskId = multipartString(upload.fields, 'taskId');
+    const messageId = multipartString(upload.fields, 'messageId');
+    const publishBatchId = multipartString(upload.fields, 'publishBatchId');
+    const note = multipartString(upload.fields, 'note');
+    const result = await service.artifactV2.publish(principal, request.params.projectId, {
+      ...(draftId ? { draftId } : {}),
+      fileName: upload.filename,
+      ...(artifactId ? { artifactId } : {}), ...(artifactName ? { artifactName } : {}),
+      ...(artifactPath ? { artifactPath } : {}), ...(expectedLatestVersionId ? { expectedLatestVersionId } : {}),
+      ...(parentVersionIds ? { parentVersionIds } : {}), ...(sourceResourceRefs ? { sourceResourceRefs } : {}),
+      ...(taskId ? { taskId } : {}), ...(messageId ? { messageId } : {}),
+      ...(publishBatchId ? { publishBatchId } : {}), ...(note ? { note } : {}),
+    }, stored, optionalIdempotencyKey(request));
+    return reply.status(result.created ? 201 : 200).send(result);
   });
-
-  app.get('/v1/artifacts/:artifactId/snapshots', {
+  app.post('/v1/projects/:projectId/artifacts/from-resource', {
     schema: {
-      tags: ['artifact'], security: HumanSecurity, params: ArtifactParams,
-      response: { 200: Type.Object({ items: Type.Array(ArtifactSnapshotResponse) }) },
-    },
-  }, async (request) => ({
-    items: service.artifacts.listSnapshots(requireHuman(authenticate(request, service)), request.params.artifactId),
-  }));
-
-  app.get('/v1/artifacts/:artifactId/snapshots/:snapshotId', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, params: ArtifactSnapshotParams,
-      response: { 200: ArtifactSnapshotResponse },
-    },
-  }, async (request) => service.artifacts.getSnapshot(
-    requireHuman(authenticate(request, service)), request.params.artifactId, request.params.snapshotId,
-  ));
-
-  app.patch('/v1/artifacts/:artifactId/snapshots/:snapshotId', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, headers: IdempotencyHeaders, params: ArtifactSnapshotParams,
+      tags: ['artifact-v2'], security: HumanSecurity, params: ProjectParams,
       body: Type.Object({
-        label: Type.Union([Type.String({ maxLength: 200 }), Type.Null()]),
-        expectedRevision: Type.Integer({ minimum: 1 }),
-      }, { additionalProperties: false }),
-      response: { 200: ArtifactSnapshotResponse },
+        resourceId: Id, artifactId: Type.Optional(Id), artifactName: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })),
+        artifactPath: Type.Optional(Type.String({ maxLength: 2000 })), expectedLatestVersionId: Type.Optional(Id),
+        taskId: Type.Optional(Id), messageId: Type.Optional(Id), publishBatchId: Type.Optional(Id), note: Type.Optional(Type.String({ maxLength: 2000 })),
+      }),
+      response: { 200: ArtifactV2PublishResponse, 201: ArtifactV2PublishResponse },
     },
-  }, async (request) => service.artifacts.renameSnapshot(
-    requireHuman(authenticate(request, service)), request.params.artifactId, request.params.snapshotId,
-    request.body, idempotencyKey(request),
-  ));
-
-  app.delete('/v1/artifacts/:artifactId/snapshots/:snapshotId', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, headers: IdempotencyHeaders, params: ArtifactSnapshotParams,
-      body: RevisionBody,
-      response: { 200: ArtifactResponse },
-    },
-  }, async (request) => service.artifacts.deleteSnapshot(
-    requireHuman(authenticate(request, service)), request.params.artifactId, request.params.snapshotId,
-    request.body.expectedRevision, idempotencyKey(request),
-  ));
-
-  app.post('/v1/artifacts/:artifactId/snapshots/:snapshotId/restore', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, headers: IdempotencyHeaders, params: ArtifactSnapshotParams,
-      body: Type.Object({ expectedCurrentRevision: Type.Integer({ minimum: 0 }) }),
-      response: { 200: ArtifactResponse },
-    },
-  }, async (request) => service.artifacts.restoreSnapshot(
-    requireHuman(authenticate(request, service)), request.params.artifactId, request.params.snapshotId,
-    request.body.expectedCurrentRevision, idempotencyKey(request),
-  ));
-
-  app.get('/v1/artifacts/:artifactId/snapshots/:snapshotId/download', {
-    schema: { tags: ['artifact'], security: HumanSecurity, params: ArtifactSnapshotParams },
   }, async (request, reply) => {
-    const result = service.artifacts.snapshotBlob(
-      requireHuman(authenticate(request, service)), request.params.artifactId, request.params.snapshotId,
-    );
-    reply.header('Content-Type', result.snapshot.mediaType);
-    reply.header('Content-Length', String(result.snapshot.byteLength));
-    reply.header('Content-Disposition', `attachment; filename*=UTF-8''snapshot-${result.snapshot.snapshotId}`);
-    return reply.send(service.artifacts.blobs.read(result.storagePath));
+    const result = await service.artifactV2.publishFromResource(authenticate(request, service), request.params.projectId, request.body);
+    return reply.status(result.created ? 201 : 200).send(result);
   });
-
-  app.get('/v1/artifacts/:artifactId/current/download', {
-    schema: { tags: ['artifact'], security: HumanSecurity, params: ArtifactParams },
-  }, async (request, reply) => {
-    const result = service.artifacts.currentBlob(
-      requireHuman(authenticate(request, service)), request.params.artifactId,
-    );
-    reply.header('Content-Type', result.state.mediaType);
-    reply.header('Content-Length', String(result.state.byteLength));
-    reply.header('Content-Disposition', `attachment; filename*=UTF-8''artifact-${request.params.artifactId}`);
-    return reply.send(service.artifacts.blobs.read(result.storagePath));
+  app.post('/v1/projects/:projectId/artifacts/from-resources', {
+    schema: {
+      tags: ['artifact-v2'], security: HumanSecurity, params: ProjectParams,
+      body: Type.Object({
+        // `items` is the v2 batch contract: each source file can explicitly
+        // target an existing Artifact and carry its own CAS token/path.  The
+        // resourceIds form remains a compact convenience for creating one
+        // Artifact per file.
+        items: Type.Optional(Type.Array(Type.Object({
+          resourceId: Id,
+          artifactId: Type.Optional(Id),
+          artifactName: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })),
+          artifactPath: Type.Optional(Type.String({ maxLength: 2000 })),
+          expectedLatestVersionId: Type.Optional(Id),
+          taskId: Type.Optional(Id),
+          messageId: Type.Optional(Id),
+          note: Type.Optional(Type.String({ maxLength: 2000 })),
+        }), { minItems: 1, maxItems: 500 })),
+        resourceIds: Type.Optional(Type.Array(Id, { minItems: 1, maxItems: 500 })),
+        publishBatchId: Type.Optional(Id),
+        artifactPathPrefix: Type.Optional(Type.String({ maxLength: 2000 })),
+      }),
+      response: { 200: Type.Object({ publishBatchId: Type.Union([Id, Type.Null()]), results: Type.Array(Type.Object({ resourceId: Id, ok: Type.Boolean(), result: Type.Optional(ArtifactV2PublishResponse), error: Type.Optional(Type.Object({ code: Type.String(), message: Type.String() })) })) }) },
+    },
+  }, async (request) => {
+    const principal = authenticate(request, service);
+    const results: Array<{ resourceId: string; ok: true; result: Awaited<ReturnType<ArtifactV2Service['publishFromResource']>> } | { resourceId: string; ok: false; error: { code: string; message: string } }> = [];
+    const items: Array<{
+      resourceId: string; artifactId?: string; artifactName?: string; artifactPath?: string;
+      expectedLatestVersionId?: string; taskId?: string; messageId?: string; note?: string;
+    }> = request.body.items ?? (request.body.resourceIds ?? []).map((resourceId) => ({ resourceId }));
+    invariant(items.length > 0, 'BATCH_RESOURCES_REQUIRED', 'At least one Resource is required.');
+    for (const item of items) {
+      const resourceId = item.resourceId;
+      try {
+        const result = await service.artifactV2.publishFromResource(principal, request.params.projectId, {
+          resourceId, ...(request.body.publishBatchId ? { publishBatchId: request.body.publishBatchId } : {}),
+          ...(item.artifactId ? { artifactId: item.artifactId } : {}),
+          ...(item.artifactName ? { artifactName: item.artifactName } : {}),
+          ...(item.expectedLatestVersionId ? { expectedLatestVersionId: item.expectedLatestVersionId } : {}),
+          ...(item.taskId ? { taskId: item.taskId } : {}), ...(item.messageId ? { messageId: item.messageId } : {}),
+          ...(item.note ? { note: item.note } : {}),
+          ...(item.artifactPath ? { artifactPath: item.artifactPath } : request.body.artifactPathPrefix ? { artifactPath: request.body.artifactPathPrefix } : {}),
+        });
+        results.push({ resourceId, ok: true, result });
+      } catch (error) {
+        const domain = error instanceof DomainError ? error : new DomainError('PUBLISH_FAILED', 'Artifact publication failed.', 400);
+        results.push({ resourceId, ok: false, error: { code: domain.code, message: domain.message } });
+      }
+    }
+    return { publishBatchId: request.body.publishBatchId ?? null, results };
   });
+  app.get('/v1/projects/:projectId/artifact-held-drafts', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ProjectParams } }, async (request) => ({ items: service.artifactV2.listHeldDrafts(authenticate(request, service), request.params.projectId) }));
+  app.post('/v1/artifact-held-drafts/:draftId/discard', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: Type.Object({ draftId: Id }) } }, async (request, reply) => { service.artifactV2.discardHeldDraft(requireHuman(authenticate(request, service)), request.params.draftId); return reply.status(204).send(); });
 
-  app.put('/v1/projects/:projectId/artifacts/:artifactId', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, headers: IdempotencyHeaders, params: ProjectArtifactParams,
-      response: { 200: ArtifactResponse },
-    },
-  }, async (request) => service.artifacts.associate(
-    requireHuman(authenticate(request, service)), request.params.projectId, request.params.artifactId,
-    idempotencyKey(request),
-  ));
+  // ID-only aliases are retained for version links embedded in existing
+  // messages. They resolve through the Project-scoped v2 service and never
+  // expose the removed Workspace Artifact model.
+  app.get('/v1/artifact-v2/:artifactId', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ArtifactParams, response: { 200: ArtifactV2Response } } }, async (request) => service.artifactV2.getArtifact(requireHuman(authenticate(request, service)), request.params.artifactId));
+  app.get('/v1/artifact-v2/:artifactId/versions', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ArtifactParams, response: { 200: Type.Object({ items: Type.Array(ArtifactVersionV2Response) }) } } }, async (request) => ({ items: service.artifactV2.listVersions(requireHuman(authenticate(request, service)), request.params.artifactId) }));
+  app.get('/v1/artifact-v2/:artifactId/versions/:versionId', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ArtifactVersionV2Params, response: { 200: ArtifactVersionV2Response } } }, async (request) => service.artifactV2.getVersion(requireHuman(authenticate(request, service)), request.params.versionId));
+  app.patch('/v1/artifact-v2/:artifactId', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ArtifactParams, body: Type.Object({ name: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })), projectPath: Type.Optional(Type.String({ maxLength: 2000 })) }), response: { 200: ArtifactV2Response } } }, async (request) => service.artifactV2.updateArtifact(requireHuman(authenticate(request, service)), request.params.artifactId, request.body));
+  app.delete('/v1/artifact-v2/:artifactId', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ArtifactParams, response: { 200: ArtifactV2Response } } }, async (request) => service.artifactV2.deleteArtifact(requireHuman(authenticate(request, service)), request.params.artifactId));
+  app.post('/v1/artifact-v2/:artifactId/restore', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ArtifactParams, response: { 200: ArtifactV2Response } } }, async (request) => service.artifactV2.restoreArtifact(requireHuman(authenticate(request, service)), request.params.artifactId));
+  app.get('/v1/artifact-versions/:versionId', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ArtifactVersionOnlyParams, response: { 200: ArtifactVersionV2Response } } }, async (request) => service.artifactV2.getVersion(requireHuman(authenticate(request, service)), request.params.versionId));
+  app.get('/v1/artifact-versions/:versionId/download', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ArtifactVersionOnlyParams } }, async (request, reply) => { const result = service.artifactV2.readVersion(requireHuman(authenticate(request, service)), request.params.versionId); reply.header('Content-Type', result.version.mediaType); reply.header('Content-Length', String(result.version.byteLength)); reply.header('Content-Disposition', artifactAttachmentDisposition(result.version.fileName, result.version.mediaType, result.version.versionId)); return reply.send(service.artifactV2.blobs.read(result.storagePath)); });
+  app.get('/v1/artifact-versions/:versionId/preview', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ArtifactVersionOnlyParams } }, async (request, reply) => { const result = service.artifactV2.readVersion(requireHuman(authenticate(request, service)), request.params.versionId); reply.header('Content-Type', result.version.mediaType); reply.header('Content-Length', String(result.version.byteLength)); reply.header('Content-Disposition', 'inline'); return reply.send(service.artifactV2.blobs.read(result.storagePath)); });
+  app.get('/v1/artifact-versions/:versionId/context', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ArtifactVersionOnlyParams } }, async (request) => service.artifactV2.getVersionContext(requireHuman(authenticate(request, service)), request.params.versionId));
+  app.delete('/v1/artifact-versions/:versionId', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ArtifactVersionOnlyParams, response: { 200: ArtifactVersionV2Response } } }, async (request) => service.artifactV2.deleteVersion(requireHuman(authenticate(request, service)), request.params.versionId));
+  app.post('/v1/artifact-versions/:versionId/restore', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ArtifactVersionOnlyParams, response: { 200: ArtifactVersionV2Response } } }, async (request) => service.artifactV2.restoreVersion(requireHuman(authenticate(request, service)), request.params.versionId));
 
-  app.delete('/v1/projects/:projectId/artifacts/:artifactId', {
-    schema: {
-      tags: ['artifact'], security: HumanSecurity, headers: IdempotencyHeaders, params: ProjectArtifactParams,
-      response: { 200: ArtifactResponse },
-    },
-  }, async (request) => service.artifacts.dissociate(
-    requireHuman(authenticate(request, service)), request.params.projectId, request.params.artifactId,
-    idempotencyKey(request),
-  ));
+  // Project-scoped aliases keep the resource boundary explicit for API clients.
+  app.get('/v1/projects/:projectId/artifacts/:artifactId', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ProjectArtifactV2Params, response: { 200: ArtifactV2Response } } }, async (request) => service.artifactV2.getArtifactInProject(authenticate(request, service), request.params.projectId, request.params.artifactId));
+  app.get('/v1/projects/:projectId/artifacts/:artifactId/versions', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ProjectArtifactV2Params, response: { 200: Type.Object({ items: Type.Array(ArtifactVersionV2Response) }) } } }, async (request) => { const principal = authenticate(request, service); service.artifactV2.getArtifactInProject(principal, request.params.projectId, request.params.artifactId); return { items: service.artifactV2.listVersions(principal, request.params.artifactId) }; });
+  app.get('/v1/projects/:projectId/artifacts/:artifactId/versions/:versionId', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ProjectArtifactVersionV2Params, response: { 200: ArtifactVersionV2Response } } }, async (request) => { const principal = authenticate(request, service); service.artifactV2.getArtifactInProject(principal, request.params.projectId, request.params.artifactId); return service.artifactV2.getVersion(principal, request.params.versionId); });
+  app.get('/v1/projects/:projectId/artifacts/:artifactId/versions/:versionId/download', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ProjectArtifactVersionV2Params } }, async (request, reply) => {
+    const principal = authenticate(request, service); service.artifactV2.getArtifactInProject(principal, request.params.projectId, request.params.artifactId);
+    const result = service.artifactV2.readVersion(principal, request.params.versionId);
+    reply.header('Content-Type', result.version.mediaType);
+    reply.header('Content-Length', String(result.version.byteLength));
+    reply.header('Content-Disposition', artifactAttachmentDisposition(result.version.fileName, result.version.mediaType, result.version.versionId));
+    return reply.send(service.artifactV2.blobs.read(result.storagePath));
+  });
+  app.get('/v1/projects/:projectId/artifacts/:artifactId/versions/:versionId/preview', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ProjectArtifactVersionV2Params } }, async (request, reply) => {
+    const principal = authenticate(request, service); service.artifactV2.getArtifactInProject(principal, request.params.projectId, request.params.artifactId);
+    const result = service.artifactV2.readVersion(principal, request.params.versionId);
+    reply.header('Content-Type', result.version.mediaType);
+    reply.header('Content-Length', String(result.version.byteLength));
+    reply.header('Content-Disposition', 'inline');
+    return reply.send(service.artifactV2.blobs.read(result.storagePath));
+  });
+  app.get('/v1/projects/:projectId/artifacts/:artifactId/versions/:versionId/context', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ProjectArtifactVersionV2Params } }, async (request) => { const principal = authenticate(request, service); service.artifactV2.getArtifactInProject(principal, request.params.projectId, request.params.artifactId); return service.artifactV2.getVersionContext(principal, request.params.versionId); });
+  app.delete('/v1/projects/:projectId/artifacts/:artifactId/versions/:versionId', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ProjectArtifactVersionV2Params, response: { 200: ArtifactVersionV2Response } } }, async (request) => { const principal = requireHuman(authenticate(request, service)); service.artifactV2.getArtifactInProject(principal, request.params.projectId, request.params.artifactId, true); return service.artifactV2.deleteVersion(principal, request.params.versionId); });
+  app.post('/v1/projects/:projectId/artifacts/:artifactId/versions/:versionId/restore', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ProjectArtifactVersionV2Params, response: { 200: ArtifactVersionV2Response } } }, async (request) => { const principal = requireHuman(authenticate(request, service)); service.artifactV2.getArtifactInProject(principal, request.params.projectId, request.params.artifactId, true); return service.artifactV2.restoreVersion(principal, request.params.versionId); });
+  app.patch('/v1/projects/:projectId/artifacts/:artifactId', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ProjectArtifactV2Params, body: Type.Object({ name: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })), projectPath: Type.Optional(Type.String({ maxLength: 2000 })) }), response: { 200: ArtifactV2Response } } }, async (request) => { const principal = requireHuman(authenticate(request, service)); service.artifactV2.getArtifactInProject(principal, request.params.projectId, request.params.artifactId); return service.artifactV2.updateArtifact(principal, request.params.artifactId, request.body); });
+  app.post('/v1/projects/:projectId/artifacts/:artifactId/restore', { schema: { tags: ['artifact-v2'], security: HumanSecurity, params: ProjectArtifactV2Params, response: { 200: ArtifactV2Response } } }, async (request) => { const principal = requireHuman(authenticate(request, service)); service.artifactV2.getArtifactInProject(principal, request.params.projectId, request.params.artifactId, true); return service.artifactV2.restoreArtifact(principal, request.params.artifactId); });
 
   app.patch('/v1/workspaces/:workspaceId', {
     schema: {
@@ -1317,10 +1602,6 @@ export async function buildApp(service: WorkspaceService) {
       body: Type.Object({
         name: Type.String({ minLength: 1, maxLength: 120 }),
         description: Type.Optional(Type.Union([Type.String({ maxLength: 3000 }), Type.Null()])),
-        repository: Type.Optional(Type.Object({
-          cloneUrl: Type.String({ minLength: 1, maxLength: 2000 }),
-          defaultBranch: Type.String({ minLength: 1, maxLength: 255, default: 'main' }),
-        }, { additionalProperties: false })),
       }, { additionalProperties: false }),
       response: { 201: ProjectResponse },
     },
@@ -1369,105 +1650,6 @@ export async function buildApp(service: WorkspaceService) {
     idempotencyKey(request),
   ));
 
-  app.put('/v1/projects/:projectId/repository', {
-    schema: {
-      tags: ['project'], security: HumanSecurity, headers: IdempotencyHeaders, params: ProjectParams,
-      body: Type.Object({
-        cloneUrl: Type.String({ minLength: 1, maxLength: 2000 }),
-        defaultBranch: Type.String({ minLength: 1, maxLength: 255 }),
-        expectedProjectRevision: Type.Integer({ minimum: 1 }),
-        expectedRepositoryRevision: Type.Optional(Type.Integer({ minimum: 1 })),
-      }, { additionalProperties: false }),
-      response: { 200: ProjectResponse },
-    },
-  }, async (request) => service.putProjectRepository(
-    requireHuman(authenticate(request, service)),
-    request.params.projectId,
-    request.body,
-    idempotencyKey(request),
-  ));
-
-  app.delete('/v1/projects/:projectId/repository', {
-    schema: {
-      tags: ['project'], security: HumanSecurity, headers: IdempotencyHeaders, params: ProjectParams,
-      body: Type.Object({
-        expectedProjectRevision: Type.Integer({ minimum: 1 }),
-        expectedRepositoryRevision: Type.Integer({ minimum: 1 }),
-      }, { additionalProperties: false }),
-      response: { 200: ProjectResponse },
-    },
-  }, async (request) => service.deleteProjectRepository(
-    requireHuman(authenticate(request, service)),
-    request.params.projectId,
-    request.body,
-    idempotencyKey(request),
-  ));
-
-  app.get('/v1/projects/:projectId/resource-links', {
-    schema: {
-      tags: ['project'], security: HumanSecurity, params: ProjectParams,
-      response: { 200: Type.Object({ items: Type.Array(ProjectResourceLinkResponse) }) },
-    },
-  }, async (request) => ({
-    items: service.listProjectResourceLinks(requireHuman(authenticate(request, service)), request.params.projectId),
-  }));
-
-  app.post('/v1/projects/:projectId/resource-links', {
-    schema: {
-      tags: ['project'], security: HumanSecurity, headers: IdempotencyHeaders, params: ProjectParams,
-      body: Type.Object({
-        title: Type.String({ minLength: 1, maxLength: 200 }),
-        url: Type.String({ minLength: 8, maxLength: 4000 }),
-        description: Type.Optional(Type.Union([Type.String({ maxLength: 3000 }), Type.Null()])),
-      }, { additionalProperties: false }),
-      response: { 201: ProjectResourceLinkResponse },
-    },
-  }, async (request, reply) => reply.status(201).send(service.createProjectResourceLink(
-    requireHuman(authenticate(request, service)),
-    request.params.projectId,
-    request.body,
-    idempotencyKey(request),
-  )));
-
-  app.patch('/v1/projects/:projectId/resource-links/:linkId', {
-    schema: {
-      tags: ['project'], security: HumanSecurity, headers: IdempotencyHeaders, params: ProjectResourceLinkParams,
-      body: Type.Object({
-        title: Type.String({ minLength: 1, maxLength: 200 }),
-        url: Type.String({ minLength: 8, maxLength: 4000 }),
-        description: Type.Optional(Type.Union([Type.String({ maxLength: 3000 }), Type.Null()])),
-        expectedRevision: Type.Integer({ minimum: 1 }),
-      }, { additionalProperties: false }),
-      response: { 200: ProjectResourceLinkResponse },
-    },
-  }, async (request) => service.updateProjectResourceLink(
-    requireHuman(authenticate(request, service)), request.params.projectId, request.params.linkId,
-    request.body, idempotencyKey(request),
-  ));
-
-  app.delete('/v1/projects/:projectId/resource-links/:linkId', {
-    schema: {
-      tags: ['project'], security: HumanSecurity, headers: IdempotencyHeaders, params: ProjectResourceLinkParams,
-      body: RevisionBody,
-      response: { 200: Type.Object({ id: Id, deletedAt: Type.Integer() }) },
-    },
-  }, async (request) => service.deleteProjectResourceLink(
-    requireHuman(authenticate(request, service)), request.params.projectId, request.params.linkId,
-    request.body.expectedRevision, idempotencyKey(request),
-  ));
-
-  app.get('/v1/projects/:projectId/working-copies', {
-    schema: {
-      tags: ['project'], security: HumanSecurity, params: ProjectParams,
-      response: { 200: Type.Object({ items: Type.Array(ProjectWorkingCopyResponse) }) },
-    },
-  }, async (request) => ({
-    items: service.listProjectWorkingCopies(
-      requireHuman(authenticate(request, service)),
-      request.params.projectId,
-    ),
-  }));
-
   app.get('/v1/projects/:projectId/members', {
     schema: {
       tags: ['project'], security: HumanSecurity, params: ProjectParams, querystring: CursorQuery,
@@ -1485,7 +1667,7 @@ export async function buildApp(service: WorkspaceService) {
   app.post('/v1/projects/:projectId/members', {
     schema: {
       tags: ['project'], security: HumanSecurity, headers: IdempotencyHeaders, params: ProjectParams,
-      body: Type.Object({ workspaceMembershipId: Id, role: ProjectRoleSchema }),
+      body: Type.Object({ workspaceMembershipId: Id, role: ProjectAssignableRoleSchema }),
       response: { 201: ProjectMemberResponse },
     },
   }, async (request, reply) => reply.status(201).send(service.addProjectMember(
@@ -1543,57 +1725,238 @@ export async function buildApp(service: WorkspaceService) {
     idempotencyKey(request),
   ));
 
-  app.get('/v1/workspaces/:workspaceId/invitations', {
+  app.post('/v1/projects/:projectId/work-items', {
+    schema: {
+      tags: ['work-item'], security: HumanSecurity, headers: IdempotencyHeaders, params: ProjectParams,
+      body: Type.Object({
+        description: Type.String({ minLength: 1, maxLength: 10000 }),
+        assigneeProjectMembershipId: Type.Optional(Type.Union([Id, Type.Null()])),
+        assigneeProjectMembershipIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 50 })),
+      }, { additionalProperties: false }),
+      response: { 201: WorkItemResponse },
+    },
+  }, async (request, reply) => reply.status(201).send(service.createWorkItem(
+    requireHuman(authenticate(request, service)),
+    request.params.projectId,
+    request.body,
+    idempotencyKey(request),
+  )));
+
+  app.post('/v1/messages/:messageId/work-item', {
+    schema: {
+      tags: ['work-item'], security: HumanSecurity, headers: IdempotencyHeaders, params: MessageParams,
+      body: Type.Object({
+        description: Type.Optional(Type.String({ minLength: 1, maxLength: 10000 })),
+        assigneeProjectMembershipId: Type.Optional(Type.Union([Id, Type.Null()])),
+        assigneeProjectMembershipIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 50 })),
+      }, { additionalProperties: false }),
+      response: { 201: WorkItemResponse },
+    },
+  }, async (request, reply) => reply.status(201).send(service.createWorkItemFromMessage(
+    requireHuman(authenticate(request, service)),
+    request.params.messageId,
+    request.body,
+    idempotencyKey(request),
+  )));
+
+  app.get('/v1/projects/:projectId/work-items', {
+    schema: {
+      tags: ['work-item'], security: HumanSecurity, params: ProjectParams,
+      response: { 200: Type.Object({ items: Type.Array(WorkItemResponse) }) },
+    },
+  }, async (request) => ({
+    items: service.listProjectWorkItems(
+      requireHuman(authenticate(request, service)),
+      request.params.projectId,
+    ),
+  }));
+
+  app.get('/v1/work-items/:workItemId', {
+    schema: { tags: ['work-item'], security: HumanSecurity, params: WorkItemParams, response: { 200: WorkItemResponse } },
+  }, async (request) => service.getWorkItem(
+    requireHuman(authenticate(request, service)),
+    request.params.workItemId,
+  ));
+
+  app.patch('/v1/work-items/:workItemId', {
+    schema: {
+      tags: ['work-item'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkItemParams,
+      body: Type.Object({
+        description: Type.String({ minLength: 1, maxLength: 10000 }),
+        expectedRevision: Type.Integer({ minimum: 1 }),
+      }, { additionalProperties: false }),
+      response: { 200: WorkItemResponse },
+    },
+  }, async (request) => service.updateWorkItemDetails(
+    requireHuman(authenticate(request, service)),
+    request.params.workItemId,
+    request.body,
+    idempotencyKey(request),
+  ));
+
+  app.get('/v1/work-items/:workItemId/comments', {
+    schema: {
+      tags: ['work-item'], security: HumanSecurity, params: WorkItemParams,
+      response: { 200: Type.Object({ items: Type.Array(WorkItemCommentResponse) }) },
+    },
+  }, async (request) => ({
+    items: service.listWorkItemComments(
+      requireHuman(authenticate(request, service)),
+      request.params.workItemId,
+    ),
+  }));
+
+  app.post('/v1/work-items/:workItemId/comments', {
+    schema: {
+      tags: ['work-item'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkItemParams,
+      body: Type.Object({
+        body: Type.String({ minLength: 1, maxLength: 10_000 }),
+        mentionedActorIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 100 })),
+        workItemIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 50 })),
+        artifactSelections: Type.Optional(Type.Array(Type.Object({ artifactId: Id, artifactVersionId: Id }), { maxItems: 100 })),
+      }, { additionalProperties: false }),
+      response: { 201: WorkItemCommentResponse },
+    },
+  }, async (request, reply) => reply.status(201).send(service.postWorkItemComment(
+    requireHuman(authenticate(request, service)),
+    request.params.workItemId,
+    request.body,
+    idempotencyKey(request),
+  )));
+
+  app.post('/v1/work-items/:workItemId/submissions', {
+    schema: {
+      tags: ['work-item'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkItemParams,
+      body: Type.Object({
+        artifactVersionIds: Type.Array(Id, { minItems: 1, uniqueItems: true, maxItems: 100 }),
+        expectedRevision: Type.Integer({ minimum: 1 }),
+      }, { additionalProperties: false }),
+      response: { 201: WorkItemResponse },
+    },
+  }, async (request, reply) => reply.status(201).send(service.submitHumanWorkItemResult(
+    requireHuman(authenticate(request, service)),
+    request.params.workItemId,
+    request.body,
+    idempotencyKey(request),
+  )));
+
+  app.post('/v1/work-items/:workItemId/assignment', {
+    schema: {
+      tags: ['work-item'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkItemParams,
+      body: Type.Object({
+        assigneeProjectMembershipId: Type.Union([Id, Type.Null()]),
+        assigneeProjectMembershipIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 50 })),
+        expectedRevision: Type.Integer({ minimum: 1 }),
+        expectedAssignmentRevision: Type.Integer({ minimum: 0 }),
+      }, { additionalProperties: false }),
+      response: { 200: WorkItemResponse },
+    },
+  }, async (request) => service.assignWorkItem(
+    requireHuman(authenticate(request, service)), request.params.workItemId, request.body, idempotencyKey(request),
+  ));
+
+  app.post('/v1/work-items/:workItemId/block', {
+    schema: {
+      tags: ['work-item'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkItemParams,
+      body: Type.Object({
+        reason: Type.String({ minLength: 1, maxLength: 2000 }),
+        expectedRevision: Type.Integer({ minimum: 1 }),
+      }, { additionalProperties: false }),
+      response: { 200: WorkItemResponse },
+    },
+  }, async (request) => service.blockWorkItem(
+    requireHuman(authenticate(request, service)), request.params.workItemId, request.body, idempotencyKey(request),
+  ));
+
+  app.post('/v1/work-items/:workItemId/unblock', {
+    schema: {
+      tags: ['work-item'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkItemParams,
+      body: RevisionBody, response: { 200: WorkItemResponse },
+    },
+  }, async (request) => service.unblockWorkItem(
+    requireHuman(authenticate(request, service)), request.params.workItemId,
+    request.body.expectedRevision, idempotencyKey(request),
+  ));
+
+  app.post('/v1/work-items/:workItemId/complete', {
+    schema: {
+      tags: ['work-item'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkItemParams,
+      body: RevisionBody, response: { 200: WorkItemResponse },
+    },
+  }, async (request) => service.completeWorkItem(
+    requireHuman(authenticate(request, service)), request.params.workItemId,
+    request.body.expectedRevision, idempotencyKey(request),
+  ));
+
+  app.post('/v1/work-items/:workItemId/cancel', {
+    schema: {
+      tags: ['work-item'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkItemParams,
+      body: Type.Object({
+        reason: Type.Optional(Type.String({ maxLength: 2000 })),
+        expectedRevision: Type.Integer({ minimum: 1 }),
+      }, { additionalProperties: false }),
+      response: { 200: WorkItemResponse },
+    },
+  }, async (request) => service.cancelWorkItem(
+    requireHuman(authenticate(request, service)), request.params.workItemId, request.body, idempotencyKey(request),
+  ));
+
+  app.get('/v1/workspaces/:workspaceId/join-links', {
     schema: {
       tags: ['membership'], security: HumanSecurity, params: WorkspaceParams, querystring: CursorQuery,
-      response: { 200: Type.Object({ items: Type.Array(InvitationResponse), nextCursor: Type.Union([Type.String(), Type.Null()]) }) },
+      response: { 200: Type.Object({ items: Type.Array(WorkspaceJoinLinkResponse), nextCursor: Type.Union([Type.String(), Type.Null()]) }) },
     },
   }, async (request) => {
     const principal = requireHuman(authenticate(request, service));
-    return service.listInvitations(principal, request.params.workspaceId, request.query.cursor, request.query.limit ?? 100);
+    return service.listWorkspaceJoinLinks(principal, request.params.workspaceId, request.query.cursor, request.query.limit ?? 100);
   });
 
-  app.post('/v1/workspaces/:workspaceId/invitations', {
+  app.post('/v1/workspaces/:workspaceId/join-links', {
     schema: {
-      tags: ['membership'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkspaceParams,
-      body: Type.Object({
-        verifiedEmail: Type.String({ minLength: 3, maxLength: 320 }),
-        membershipRole: Type.Union([Type.Literal('owner'), Type.Literal('member')]),
-      }),
-      response: { 201: InvitationResponse },
+      tags: ['membership'], security: HumanSecurity, params: WorkspaceParams,
+      response: { 201: WorkspaceJoinLinkCreatedResponse },
     },
   }, async (request, reply) => {
     const principal = requireHuman(authenticate(request, service));
     return reply.status(201).send(
-      service.createInvitation(principal, request.params.workspaceId, request.body, idempotencyKey(request)),
+      service.createWorkspaceJoinLink(principal, request.params.workspaceId),
     );
   });
 
-  app.post('/v1/invitations/:invitationId/accept', {
+  app.get('/v1/workspace-join-links/:token', {
     schema: {
-      tags: ['membership'], security: HumanSecurity, headers: IdempotencyHeaders, params: InvitationParams,
-      body: RevisionBody, response: { 200: WorkspaceMemberResponse },
+      tags: ['membership'], security: HumanSecurity, params: WorkspaceJoinTokenParams,
+      response: { 200: WorkspaceJoinLinkPreviewResponse },
+    },
+  }, async (request) => service.previewWorkspaceJoinLink(
+    requireHuman(authenticate(request, service)),
+    request.params.token,
+  ));
+
+  app.post('/v1/workspace-join-links/:token/accept', {
+    schema: {
+      tags: ['membership'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkspaceJoinTokenParams,
+      response: { 200: WorkspaceMemberResponse },
     },
   }, async (request) => {
     const principal = requireHuman(authenticate(request, service));
-    return service.acceptInvitation(
+    return service.acceptWorkspaceJoinLink(
       principal,
-      request.params.invitationId,
-      request.body.expectedRevision,
+      request.params.token,
       idempotencyKey(request),
     );
   });
 
-  app.post('/v1/invitations/:invitationId/revoke', {
+  app.post('/v1/workspace-join-links/:joinLinkId/revoke', {
     schema: {
-      tags: ['membership'], security: HumanSecurity, headers: IdempotencyHeaders, params: InvitationParams,
-      body: RevisionBody, response: { 200: InvitationResponse },
+      tags: ['membership'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkspaceJoinLinkParams,
+      body: RevisionBody, response: { 200: WorkspaceJoinLinkResponse },
     },
   }, async (request) => {
     const principal = requireHuman(authenticate(request, service));
-    return service.revokeInvitation(
+    return service.revokeWorkspaceJoinLink(
       principal,
-      request.params.invitationId,
+      request.params.joinLinkId,
       request.body.expectedRevision,
       idempotencyKey(request),
     );
@@ -1702,81 +2065,6 @@ export async function buildApp(service: WorkspaceService) {
     },
   }, async (request) => service.heartbeatComputer(requireComputer(authenticate(request, service))));
 
-  app.post('/v1/computers/self/projects', {
-    schema: {
-      tags: ['project'], security: BearerSecurity, headers: IdempotencyHeaders,
-      body: Type.Object({
-        workspaceId: Id,
-        name: Type.String({ minLength: 1, maxLength: 120 }),
-        description: Type.Optional(Type.Union([Type.String({ maxLength: 3000 }), Type.Null()])),
-        repository: Type.Object({
-          cloneUrl: Type.String({ minLength: 1, maxLength: 2000 }),
-          repositoryIdentity: Type.String({ minLength: 3, maxLength: 1000 }),
-          defaultBranch: Type.String({ minLength: 1, maxLength: 255 }),
-        }, { additionalProperties: false }),
-        workingCopy: NewProjectWorkingCopyReportBody,
-      }, { additionalProperties: false }),
-      response: { 201: ProjectResponse },
-    },
-  }, async (request, reply) => reply.status(201).send(service.createProjectFromComputer(
-    requireComputer(authenticate(request, service)),
-    request.body,
-    idempotencyKey(request),
-  )));
-
-  app.get('/v1/computers/self/projects/:projectId/repository', {
-    schema: {
-      tags: ['project'], security: BearerSecurity, params: ProjectParams,
-      response: { 200: Type.Object({
-        projectId: Id,
-        workspaceId: Id,
-        repository: ProjectRepositoryResponse,
-      }) },
-    },
-  }, async (request) => service.getComputerProjectRepository(
-    requireComputer(authenticate(request, service)),
-    request.params.projectId,
-  ));
-
-  app.put('/v1/computers/self/projects/:projectId/working-copy', {
-    schema: {
-      tags: ['project'], security: BearerSecurity, headers: IdempotencyHeaders,
-      params: ProjectParams,
-      body: ProjectWorkingCopyReportBody,
-      response: { 200: ProjectWorkingCopyResponse },
-    },
-  }, async (request) => service.reportProjectWorkingCopy(
-    requireComputer(authenticate(request, service)),
-    request.params.projectId,
-    request.body,
-    idempotencyKey(request),
-  ));
-
-  app.delete('/v1/computers/self/projects/:projectId/working-copy', {
-    schema: {
-      tags: ['project'], security: BearerSecurity, headers: IdempotencyHeaders,
-      params: ProjectParams,
-      response: { 200: Type.Object({ projectId: Id, computerId: Id, removedAt: Type.Integer() }) },
-    },
-  }, async (request) => service.removeProjectWorkingCopy(
-    requireComputer(authenticate(request, service)),
-    request.params.projectId,
-    idempotencyKey(request),
-  ));
-
-  app.get('/v1/computers/self/agent-requests', {
-    schema: {
-      tags: ['execution'], security: BearerSecurity,
-      querystring: Type.Object({
-        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 20 })),
-      }),
-      response: { 200: Type.Object({ items: Type.Array(AgentRequestResponse) }) },
-    },
-  }, async (request) => {
-    const principal = requireComputer(authenticate(request, service));
-    return { items: service.listComputerAgentRequests(principal.computerId, request.query.limit ?? 20) };
-  });
-
   app.post('/v1/workspaces/:workspaceId/agents', {
     schema: {
       tags: ['agent'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkspaceParams,
@@ -1803,6 +2091,24 @@ export async function buildApp(service: WorkspaceService) {
     const principal = requireHuman(authenticate(request, service));
     return service.listAgents(principal, request.params.workspaceId, request.query.cursor, request.query.limit ?? 100);
   });
+
+  app.get('/v1/workspaces/:workspaceId/agent-activity', {
+    schema: {
+      tags: ['agent', 'runtime'], security: HumanSecurity, params: WorkspaceParams,
+      querystring: Type.Object({
+        agentId: Type.Optional(Id),
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, default: 100 })),
+      }),
+      response: { 200: Type.Object({ items: Type.Array(AgentActivityEventResponse) }) },
+    },
+  }, async (request) => ({
+    items: service.listAgentActivity(
+      requireHuman(authenticate(request, service)),
+      request.params.workspaceId,
+      request.query.agentId,
+      request.query.limit ?? 100,
+    ),
+  }));
 
   app.get('/v1/workspaces/:workspaceId/agents/:agentId', {
     schema: {
@@ -1992,8 +2298,9 @@ export async function buildApp(service: WorkspaceService) {
     schema: {
       tags: ['conversation'], security: HumanSecurity, headers: IdempotencyHeaders, params: WorkspaceParams,
       body: Type.Object({
-        kind: Type.Union([Type.Literal('channel'), Type.Literal('dm')]),
+        kind: Type.Literal('dm'),
         title: Type.Optional(Type.String({ maxLength: 200 })),
+        visibility: Type.Optional(Type.Literal('private')),
         directWorkspaceMembershipIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 1 })),
       }, { additionalProperties: false }),
       response: { 201: ConversationResponse },
@@ -2027,6 +2334,7 @@ export async function buildApp(service: WorkspaceService) {
       body: Type.Object({
         kind: Type.Literal('channel'),
         title: Type.Optional(Type.String({ maxLength: 200 })),
+        participantProjectMembershipIds: Type.Array(Id, { uniqueItems: true, maxItems: 200 }),
       }, { additionalProperties: false }),
       response: { 201: ConversationResponse },
     },
@@ -2091,8 +2399,9 @@ export async function buildApp(service: WorkspaceService) {
         mentionedActorIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 50 })),
         artifactSelections: Type.Optional(Type.Array(Type.Object({
           artifactId: Id,
-          snapshotId: Type.Union([Id, Type.Null()]),
+          artifactVersionId: Id,
         }, { additionalProperties: false }), { maxItems: 100 })),
+        workItemIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 50 })),
       }, { additionalProperties: false }),
       response: { 201: MessageResponse },
     },
@@ -2111,8 +2420,9 @@ export async function buildApp(service: WorkspaceService) {
         mentionedActorIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 50 })),
         artifactSelections: Type.Optional(Type.Array(Type.Object({
           artifactId: Id,
-          snapshotId: Type.Union([Id, Type.Null()]),
+          artifactVersionId: Id,
         }, { additionalProperties: false }), { maxItems: 100 })),
+        workItemIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 50 })),
       }, { additionalProperties: false }),
       response: { 201: MessageResponse },
     },
@@ -2153,6 +2463,47 @@ export async function buildApp(service: WorkspaceService) {
     const principal = requireHuman(authenticate(request, service));
     return { items: service.listConversationParticipants(principal, request.params.conversationId) };
   });
+
+  const ConversationParticipantParams = Type.Object({
+    conversationId: Id,
+    scopeMembershipId: Id,
+  });
+  const ConversationParticipantRemovalResponse = Type.Object({
+    scopeMembershipId: Id,
+    revision: Type.Integer({ minimum: 1 }),
+    contextVersion: Type.Integer({ minimum: 1 }),
+    removedAt: Type.Integer(),
+    cancelledAgentRequestIds: Type.Array(Id),
+    cancelledRunIds: Type.Array(Id),
+  });
+
+  app.put('/v1/conversations/:conversationId/participants/:scopeMembershipId', {
+    schema: {
+      tags: ['conversation'], security: HumanSecurity, headers: IdempotencyHeaders,
+      params: ConversationParticipantParams, body: RevisionBody,
+      response: { 200: ConversationParticipantResponse },
+    },
+  }, async (request) => service.addConversationParticipant(
+    requireHuman(authenticate(request, service)),
+    request.params.conversationId,
+    request.params.scopeMembershipId,
+    request.body.expectedRevision,
+    idempotencyKey(request),
+  ));
+
+  app.delete('/v1/conversations/:conversationId/participants/:scopeMembershipId', {
+    schema: {
+      tags: ['conversation'], security: HumanSecurity, headers: IdempotencyHeaders,
+      params: ConversationParticipantParams, body: RevisionBody,
+      response: { 200: ConversationParticipantRemovalResponse },
+    },
+  }, async (request) => service.removeConversationParticipant(
+    requireHuman(authenticate(request, service)),
+    request.params.conversationId,
+    request.params.scopeMembershipId,
+    request.body.expectedRevision,
+    idempotencyKey(request),
+  ));
 
   app.get('/v1/conversations/:conversationId/agent-requests', {
     schema: {
@@ -2196,22 +2547,6 @@ export async function buildApp(service: WorkspaceService) {
   }, async (request) => {
     const principal = requireHuman(authenticate(request, service));
     return service.cancelAgentRequest(principal, request.params.agentRequestId, request.body, idempotencyKey(request));
-  });
-
-  app.post('/v1/agent-requests/:agentRequestId/accept', {
-    schema: {
-      tags: ['execution'], security: BearerSecurity, headers: IdempotencyHeaders, params: AgentRequestParams,
-      body: Type.Object({
-        expectedVersion: Type.Integer({ minimum: 1 }),
-        budget: Type.Optional(Type.Partial(BudgetResponse)),
-      }),
-      response: { 201: RunResponse },
-    },
-  }, async (request, reply) => {
-    const principal = requireComputer(authenticate(request, service));
-    return reply.status(201).send(service.acceptAgentRequest(
-      principal.computerId, request.params.agentRequestId, request.body, idempotencyKey(request),
-    ));
   });
 
   app.post('/v1/runs/:runId/attempts', {
@@ -2258,7 +2593,7 @@ export async function buildApp(service: WorkspaceService) {
     },
   }, async (request) => {
     const principal = requireComputer(authenticate(request, service));
-    return service.getAttemptExecutionInput(principal.computerId, request.params.attemptId);
+    return service.getAttemptExecutionInput(principal.computerId, request.params.attemptId) as any;
   });
 
   app.get('/v1/computers/self/agents/:agentId/inbox', {
@@ -2270,6 +2605,32 @@ export async function buildApp(service: WorkspaceService) {
     const principal = requireComputer(authenticate(request, service));
     return service.getComputerAgentInbox(principal.computerId, request.params.agentId);
   });
+
+  app.get('/v1/computers/self/agents/:agentId/session-input', {
+    schema: {
+      tags: ['agent-inbox', 'runtime'], security: BearerSecurity, params: ComputerAgentParams,
+      querystring: Type.Object({
+        kind: Type.Union([Type.Literal('mention'), Type.Literal('work_item')]),
+        key: Id,
+      }),
+      response: { 200: AgentSessionInputResponse },
+    },
+  }, async (request) => {
+    const principal = requireComputer(authenticate(request, service));
+    return service.getComputerAgentSessionInput(principal.computerId, request.params.agentId, request.query);
+  });
+
+  app.post('/v1/computers/self/agents/:agentId/activity', {
+    schema: {
+      tags: ['agent-inbox', 'runtime'], security: BearerSecurity, headers: IdempotencyHeaders,
+      params: ComputerAgentParams, body: AgentActivityEventInput,
+      response: { 200: AgentActivityEventResponse },
+    },
+  }, async (request) => service.recordComputerAgentActivity(
+    requireComputer(authenticate(request, service)).computerId,
+    request.params.agentId,
+    request.body,
+  ));
 
   app.post('/v1/computers/self/agent-inbox-wakes', {
     schema: {
@@ -2284,14 +2645,141 @@ export async function buildApp(service: WorkspaceService) {
     return service.waitForComputerAgentInboxWakes(principal.computerId, request.body.after);
   });
 
+  app.get('/v1/computers/self/agent-inbox-wakes', {
+    schema: {
+      tags: ['agent-inbox'], security: BearerSecurity,
+      response: { 200: AgentInboxWakeBatchResponse },
+    },
+  }, async (request) => {
+    const principal = requireComputer(authenticate(request, service));
+    return service.getComputerAgentInboxWakes(principal.computerId, {});
+  });
+
+  app.get('/v1/computers/self/agents/:agentId/work-items', {
+    schema: {
+      tags: ['work-item', 'agent-inbox'], security: BearerSecurity, params: ComputerAgentParams,
+      querystring: Type.Object({ projectId: Type.Optional(Id) }),
+      response: { 200: Type.Object({ items: Type.Array(WorkItemResponse) }) },
+    },
+  }, async (request) => {
+    const principal = requireComputer(authenticate(request, service));
+    return {
+      items: service.listComputerAgentWorkItems(
+        principal.computerId,
+        request.params.agentId,
+        request.query.projectId,
+      ),
+    };
+  });
+
+  app.get('/v1/computers/self/agents/:agentId/work-items/:workItemId', {
+    schema: {
+      tags: ['work-item', 'agent-inbox'], security: BearerSecurity,
+      params: ComputerAgentWorkItemParams,
+      response: { 200: WorkItemResponse },
+    },
+  }, async (request) => {
+    const principal = requireComputer(authenticate(request, service));
+    return service.getComputerAgentWorkItem(
+      principal.computerId,
+      request.params.agentId,
+      request.params.workItemId,
+    );
+  });
+
+  app.get('/v1/computers/self/agents/:agentId/work-items/:workItemId/comments', {
+    schema: {
+      tags: ['work-item', 'agent-inbox'], security: BearerSecurity,
+      params: ComputerAgentWorkItemParams,
+      response: { 200: Type.Object({ items: Type.Array(WorkItemCommentResponse) }) },
+    },
+  }, async (request) => {
+    const principal = requireComputer(authenticate(request, service));
+    return {
+      items: service.listComputerAgentWorkItemComments(
+        principal.computerId,
+        request.params.agentId,
+        request.params.workItemId,
+      ),
+    };
+  });
+
+  app.post('/v1/computers/self/agents/:agentId/work-items/:workItemId/comments', {
+    schema: {
+      tags: ['work-item', 'agent-inbox'], security: BearerSecurity, headers: IdempotencyHeaders,
+      params: ComputerAgentWorkItemParams,
+      body: Type.Object({
+        body: Type.String({ minLength: 1, maxLength: 10_000 }),
+        mentionedActorIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 100 })),
+        workItemIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 50 })),
+        artifactSelections: Type.Optional(Type.Array(Type.Object({ artifactId: Id, artifactVersionId: Id }), { maxItems: 100 })),
+      }, { additionalProperties: false }),
+      response: { 201: WorkItemCommentResponse },
+    },
+  }, async (request, reply) => {
+    const principal = requireComputer(authenticate(request, service));
+    return reply.status(201).send(service.postComputerAgentWorkItemComment(
+      principal.computerId,
+      request.params.agentId,
+      request.params.workItemId,
+      request.body,
+      idempotencyKey(request),
+    ));
+  });
+
+  app.post('/v1/computers/self/agents/:agentId/work-items/:workItemId/block', {
+    schema: {
+      tags: ['work-item', 'agent-inbox'], security: BearerSecurity, headers: IdempotencyHeaders,
+      params: ComputerAgentWorkItemParams,
+      body: Type.Object({
+        reason: Type.String({ minLength: 1, maxLength: 2000 }),
+        expectedRevision: Type.Integer({ minimum: 1 }),
+        expectedAssignmentRevision: Type.Integer({ minimum: 1 }),
+      }, { additionalProperties: false }),
+      response: { 200: WorkItemResponse },
+    },
+  }, async (request) => {
+    const principal = requireComputer(authenticate(request, service));
+    return service.blockComputerAgentWorkItem(
+      principal.computerId,
+      request.params.agentId,
+      request.params.workItemId,
+      request.body,
+      idempotencyKey(request),
+    );
+  });
+
+  app.post('/v1/computers/self/agents/:agentId/work-items/:workItemId/submissions', {
+    schema: {
+      tags: ['work-item', 'agent-inbox'], security: BearerSecurity, headers: IdempotencyHeaders,
+      params: ComputerAgentWorkItemParams,
+      body: Type.Object({
+        commentId: Type.Optional(Type.Union([Id, Type.Null()])),
+        artifactVersionIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 100 })),
+        expectedRevision: Type.Integer({ minimum: 1 }),
+        expectedAssignmentRevision: Type.Integer({ minimum: 0 }),
+      }, { additionalProperties: false }),
+      response: { 201: WorkItemResponse },
+    },
+  }, async (request, reply) => {
+    const principal = requireComputer(authenticate(request, service));
+    return reply.status(201).send(service.submitComputerAgentWorkItemResult(
+      principal.computerId,
+      request.params.agentId,
+      request.params.workItemId,
+      request.body,
+      idempotencyKey(request),
+    ));
+  });
+
   app.post('/v1/computers/self/agents/:agentId/inbox/claim', {
     schema: {
       tags: ['agent-inbox'], security: BearerSecurity, headers: IdempotencyHeaders, params: ComputerAgentParams,
       body: Type.Object({
-        attemptId: Id,
-        conversationId: Id,
-        threadId: Type.Union([Id, Type.Null()]),
+        target: Type.String({ minLength: 1, maxLength: 500 }),
         receipt: Type.String({ minLength: 1, maxLength: 500 }),
+        agentRequestId: Id,
+        initialDiscussionFrontier: Type.Optional(Type.Integer({ minimum: 0 })),
       }, { additionalProperties: false }),
       response: { 200: AgentInboxClaimResponse },
     },
@@ -2304,7 +2792,6 @@ export async function buildApp(service: WorkspaceService) {
     schema: {
       tags: ['agent-inbox'], security: BearerSecurity, params: ComputerAgentParams,
       querystring: Type.Object({
-        attemptId: Id,
         conversationId: Id,
         threadId: Type.Optional(Id),
         before: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -2316,7 +2803,6 @@ export async function buildApp(service: WorkspaceService) {
   }, async (request) => {
     const principal = requireComputer(authenticate(request, service));
     return { items: service.readComputerAgentMessages(principal.computerId, request.params.agentId, {
-      attemptId: request.query.attemptId,
       conversationId: request.query.conversationId,
       threadId: request.query.threadId ?? null,
       ...(request.query.before === undefined ? {} : { before: request.query.before }),
@@ -2328,13 +2814,12 @@ export async function buildApp(service: WorkspaceService) {
   app.get('/v1/computers/self/agents/:agentId/messages/:messageId', {
     schema: {
       tags: ['agent-inbox'], security: BearerSecurity, params: ComputerAgentMessageParams,
-      querystring: Type.Object({ attemptId: Id, conversationId: Id, threadId: Type.Optional(Id) }),
+      querystring: Type.Object({ conversationId: Id, threadId: Type.Optional(Id) }),
       response: { 200: MessageResponse },
     },
   }, async (request) => {
     const principal = requireComputer(authenticate(request, service));
     return service.resolveComputerAgentMessage(principal.computerId, request.params.agentId, {
-      attemptId: request.query.attemptId,
       conversationId: request.query.conversationId,
       threadId: request.query.threadId ?? null,
       messageId: request.params.messageId,
@@ -2345,22 +2830,130 @@ export async function buildApp(service: WorkspaceService) {
     schema: {
       tags: ['agent-inbox'], security: BearerSecurity, headers: IdempotencyHeaders, params: ComputerAgentParams,
       body: Type.Object({
-        attemptId: Id,
         conversationId: Id,
         threadId: Type.Union([Id, Type.Null()]),
         receipt: Type.String({ minLength: 1, maxLength: 500 }),
+        draftId: Id,
+        expectedDiscussionFrontier: Type.Integer({ minimum: 0 }),
         body: Type.String({ minLength: 1, maxLength: 100000 }),
+        artifactVersionIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 100 })),
+        mentionedActorIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 50 })),
+        workItemIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 50 })),
+        mode: Type.Union([Type.Literal('check'), Type.Literal('override')]),
       }, { additionalProperties: false }),
-      response: { 201: MessageResponse },
+      response: { 200: AgentMessagePublicationResponse },
     },
-  }, async (request, reply) => {
+  }, async (request) => {
     const principal = requireComputer(authenticate(request, service));
-    return reply.status(201).send(service.sendComputerAgentMessage(
+    return service.sendComputerAgentMessage(
       principal.computerId,
       request.params.agentId,
       request.body,
       idempotencyKey(request),
-    ));
+    );
+  });
+
+  app.post('/v1/computers/self/agents/:agentId/inbox/complete', {
+    schema: {
+      tags: ['agent-inbox'], security: BearerSecurity, headers: IdempotencyHeaders, params: ComputerAgentParams,
+      body: Type.Object({
+        receipt: Type.String({ minLength: 1, maxLength: 500 }),
+        target: Type.String({ minLength: 1, maxLength: 500 }),
+        expectedDiscussionFrontier: Type.Optional(Type.Integer({ minimum: 0 })),
+        draftId: Type.Optional(Id),
+      }, { additionalProperties: false }),
+      response: { 200: AgentInboxCompletionResponse },
+    },
+  }, async (request) => {
+    const principal = requireComputer(authenticate(request, service));
+    return service.completeComputerAgentInbox(
+      principal.computerId,
+      request.params.agentId,
+      request.body,
+      idempotencyKey(request),
+    );
+  });
+
+  // Agent-scoped v2 runtime surface.  The URL binds both the Agent and
+  // Project, so the Computer token cannot silently publish under its owner's
+  // unrelated Project membership.  Only read operations exist for resources;
+  // Artifact publication is the sole Agent write operation.
+  app.get('/v1/computers/self/agents/:agentId/projects/:projectId/resources', {
+    schema: { tags: ['agent-runtime', 'project-resource'], security: BearerSecurity, params: ComputerAgentProjectParams, response: { 200: Type.Object({ items: Type.Array(ProjectResourceResponse) }) } },
+  }, async (request) => {
+    const principal = requireComputer(authenticate(request, service));
+    return { items: service.projectResources.list({ ...principal, agentId: request.params.agentId }, request.params.projectId) };
+  });
+  app.get('/v1/computers/self/agents/:agentId/projects/:projectId/resources/:resourceId', {
+    schema: { tags: ['agent-runtime', 'project-resource'], security: BearerSecurity, params: ComputerAgentProjectResourceParams, response: { 200: Type.Object({ resource: ProjectResourceResponse, contentBase64: Type.Optional(Type.String()) }) } },
+  }, async (request) => {
+    const principal = requireComputer(authenticate(request, service));
+    const scoped = { ...principal, agentId: request.params.agentId };
+    const resource = service.projectResources.get(scoped, request.params.resourceId);
+    invariant(resource.projectId === request.params.projectId, 'PROJECT_SCOPE_VIOLATION', 'Resource does not belong to this Project.', 404);
+    if (resource.kind === 'directory') return { resource };
+    const content = service.projectResources.read(scoped, request.params.resourceId);
+    return { resource, contentBase64: readFileSync(content.storagePath).toString('base64') };
+  });
+  app.get('/v1/computers/self/agents/:agentId/projects/:projectId/links', {
+    schema: { tags: ['agent-runtime', 'project-link'], security: BearerSecurity, params: ComputerAgentProjectParams, response: { 200: Type.Object({ items: Type.Array(ProjectLinkResponse) }) } },
+  }, async (request) => {
+    const principal = requireComputer(authenticate(request, service));
+    return { items: service.projectResources.listLinks({ ...principal, agentId: request.params.agentId }, request.params.projectId) };
+  });
+  app.get('/v1/computers/self/agents/:agentId/projects/:projectId/artifacts/:artifactId', {
+    schema: { tags: ['agent-runtime', 'artifact-v2'], security: BearerSecurity, params: ComputerAgentProjectArtifactParams, response: { 200: ArtifactV2Response } },
+  }, async (request) => {
+    const principal = { ...requireComputer(authenticate(request, service)), agentId: request.params.agentId };
+    const artifact = service.artifactV2.getArtifactInProject(principal, request.params.projectId, request.params.artifactId);
+    if (!artifact.latestVersion || artifact.latestVersion.status !== 'active') return artifact;
+    const content = service.artifactV2.readVersion(principal, artifact.latestVersion.versionId);
+    return { ...artifact, contentBase64: readFileSync(content.storagePath).toString('base64'), mediaType: content.version.mediaType };
+  });
+  app.post('/v1/computers/self/agents/:agentId/projects/:projectId/artifacts', {
+    schema: { tags: ['agent-runtime', 'artifact-v2'], security: BearerSecurity, headers: IdempotencyHeaders, params: ComputerAgentProjectParams, consumes: ['multipart/form-data'], response: { 200: ArtifactV2PublishResponse, 201: ArtifactV2PublishResponse } },
+  }, async (request, reply) => {
+    const principal = { ...requireComputer(authenticate(request, service)), agentId: request.params.agentId };
+    const upload = await request.file({ limits: { fileSize: MAX_ARTIFACT_BYTES, files: 1 } });
+    invariant(upload, 'ARTIFACT_FILE_REQUIRED', 'An Artifact file upload is required.');
+    const stored = await service.artifactV2.blobs.write(upload.file, upload.mimetype);
+    const jsonField = (name: string): unknown => {
+      const value = multipartString(upload.fields, name); if (!value) return undefined;
+      try { return JSON.parse(value); } catch { throw new DomainError('INVALID_MULTIPART_FIELD', `${name} must be valid JSON.`, 400); }
+    };
+    const artifactId = multipartString(upload.fields, 'artifactId');
+    const draftId = multipartString(upload.fields, 'draftId');
+    const expectedLatestVersionId = multipartString(upload.fields, 'expectedLatestVersionId');
+    const parentVersionIds = jsonField('parentVersionIds') as string[] | undefined;
+    const sourceResourceRefs = jsonField('sourceResourceRefs') as Array<{ resourceId: string; revision?: number; digest?: string }> | undefined;
+    const result = await service.artifactV2.publish(principal, request.params.projectId, {
+      ...(draftId ? { draftId } : {}),
+      fileName: upload.filename,
+      ...(artifactId ? { artifactId } : {}),
+      ...(multipartString(upload.fields, 'artifactName') ? { artifactName: multipartString(upload.fields, 'artifactName')! } : {}),
+      ...(multipartString(upload.fields, 'artifactPath') ? { artifactPath: multipartString(upload.fields, 'artifactPath')! } : {}),
+      ...(expectedLatestVersionId ? { expectedLatestVersionId } : {}),
+      ...(parentVersionIds ? { parentVersionIds } : {}), ...(sourceResourceRefs ? { sourceResourceRefs } : {}),
+      ...(multipartString(upload.fields, 'taskId') ? { taskId: multipartString(upload.fields, 'taskId')! } : {}),
+      ...(multipartString(upload.fields, 'messageId') ? { messageId: multipartString(upload.fields, 'messageId')! } : {}),
+      ...(multipartString(upload.fields, 'publishBatchId') ? { publishBatchId: multipartString(upload.fields, 'publishBatchId')! } : {}),
+      ...(multipartString(upload.fields, 'note') ? { note: multipartString(upload.fields, 'note')! } : {}),
+    }, stored, optionalIdempotencyKey(request));
+    return reply.status(result.created ? 201 : 200).send(result);
+  });
+  app.post('/v1/computers/self/agents/:agentId/projects/:projectId/artifact-held-drafts/:draftId/retry', {
+    schema: { tags: ['agent-runtime', 'artifact-v2'], security: BearerSecurity, headers: IdempotencyHeaders, params: Type.Object({ agentId: Id, projectId: Id, draftId: Id }), body: Type.Object({ mode: Type.Optional(Type.Union([Type.Literal('retry'), Type.Literal('force')])) }, { additionalProperties: false }), response: { 200: ArtifactV2PublishResponse, 201: ArtifactV2PublishResponse } },
+  }, async (request, reply) => {
+    const principal = { ...requireComputer(authenticate(request, service)), agentId: request.params.agentId };
+    const result = await service.artifactV2.retryHeldDraft(principal, request.params.draftId, request.body.mode ?? 'retry', request.params.projectId);
+    return reply.status(result.created ? 201 : 200).send(result);
+  });
+  app.post('/v1/computers/self/agents/:agentId/projects/:projectId/artifact-held-drafts/:draftId/discard', {
+    schema: { tags: ['agent-runtime', 'artifact-v2'], security: BearerSecurity, headers: IdempotencyHeaders, params: Type.Object({ agentId: Id, projectId: Id, draftId: Id }), response: { 204: Type.Null() } },
+  }, async (request, reply) => {
+    const principal = { ...requireComputer(authenticate(request, service)), agentId: request.params.agentId };
+    service.artifactV2.discardHeldDraft(principal, request.params.draftId, request.params.projectId);
+    return reply.status(204).send(null);
   });
 
   app.post('/v1/attempts/:attemptId/context-reads', {
@@ -2414,16 +3007,21 @@ export async function buildApp(service: WorkspaceService) {
 
   const ReturnMessageDraft = Type.Object({
     body: Type.String({ minLength: 1, maxLength: 100000 }),
+    mentionedActorIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 50 })),
+    workItemIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 50 })),
     privateGrantIds: Type.Optional(Type.Array(Id, { uniqueItems: true })),
-  });
+  }, { additionalProperties: false });
   const ArtifactPublicationIntent = Type.Object({
     stagedBlobId: Id,
     artifactId: Type.Optional(Id),
-    name: Type.String({ minLength: 1, maxLength: 500 }),
-    artifactType: Type.Union([Type.Literal('markdown'), Type.Literal('file')]),
-    projectIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 100 })),
-    expectedCurrentRevision: Type.Optional(Type.Integer({ minimum: 0 })),
-    expectedContentDigest: Type.Optional(Type.String({ minLength: 64, maxLength: 64 })),
+    fileName: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })),
+    artifactName: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })),
+    artifactPath: Type.Optional(Type.String({ maxLength: 2000 })),
+    expectedLatestVersionId: Type.Optional(Id),
+    parentVersionIds: Type.Optional(Type.Array(Id, { uniqueItems: true, maxItems: 100 })),
+    sourceResourceRefs: Type.Optional(Type.Array(Type.Object({ resourceId: Id, revision: Type.Optional(Type.Integer({ minimum: 1 })), digest: Type.Optional(Type.String({ minLength: 64, maxLength: 64 })) }), { uniqueItems: true, maxItems: 100 })),
+    taskId: Type.Optional(Id), messageId: Type.Optional(Id), publishBatchId: Type.Optional(Id),
+    note: Type.Optional(Type.String({ maxLength: 3000 })),
     attachToMessageIndexes: Type.Optional(Type.Array(Type.Integer({ minimum: 0 }), { uniqueItems: true, maxItems: 50 })),
     privateGrantIds: Type.Optional(Type.Array(Id, { uniqueItems: true })),
   }, { additionalProperties: false });
@@ -2436,7 +3034,7 @@ export async function buildApp(service: WorkspaceService) {
     const principal = requireComputer(authenticate(request, service));
     const upload = await request.file({ limits: { fileSize: MAX_ARTIFACT_BYTES, files: 1 } });
     invariant(upload, 'STAGED_BLOB_FILE_REQUIRED', 'A staged file upload is required.');
-    const stored = await service.artifacts.blobs.write(upload.file, upload.mimetype);
+    const stored = await service.artifactV2.blobs.write(upload.file, upload.mimetype);
     return reply.status(201).send(service.stageAttemptBlob(principal.computerId, request.params.attemptId, stored));
   });
   app.post('/v1/attempts/:attemptId/return', {
@@ -2451,12 +3049,12 @@ export async function buildApp(service: WorkspaceService) {
         run: RunResponse,
         attempt: AttemptResponse,
         publishedMessages: Type.Array(MessageResponse),
-        publishedArtifacts: Type.Array(ArtifactResponse),
+        publishedArtifacts: Type.Array(ArtifactV2Response),
       }) },
     },
   }, async (request) => {
     const principal = requireComputer(authenticate(request, service));
-    return service.returnAttempt(principal.computerId, request.params.attemptId, request.body, idempotencyKey(request));
+    return service.returnAttempt(principal.computerId, request.params.attemptId, request.body, idempotencyKey(request)) as any;
   });
 
   app.post('/v1/attempts/:attemptId/fail', {
@@ -2490,12 +3088,12 @@ function authToken(request: FastifyRequest): string {
   throw new DomainError('UNAUTHORIZED', 'A valid login session or Bearer token is required.', 401);
 }
 
-function setSessionCookie(reply: FastifyReply, token: string, expiresAt: number): void {
+function setSessionCookie(reply: FastifyReply, token: string, expiresAt: number, secure: boolean): void {
   reply.setCookie(SESSION_COOKIE, token, {
     path: '/',
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure,
     expires: new Date(expiresAt),
   });
 }
@@ -2514,6 +3112,11 @@ function idempotencyKey(request: FastifyRequest): string {
   const value = request.headers['idempotency-key'];
   invariant(typeof value === 'string' && value.length > 0, 'IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key is required.');
   return value;
+}
+
+function optionalIdempotencyKey(request: FastifyRequest): string | undefined {
+  const value = request.headers['idempotency-key'];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 function multipartString(fields: object, name: string): string | null {
@@ -2536,4 +3139,11 @@ function multipartJsonIds(fields: object, name: string): string[] {
   invariant(Array.isArray(parsed) && parsed.every((item) => typeof item === 'string'),
     'INVALID_MULTIPART_FIELD', `${name} must be a JSON array of IDs.`);
   return parsed;
+}
+
+function artifactAttachmentDisposition(name: string, mediaType: string, fallback: string): string {
+  const safeName = name.trim().replaceAll(/[\\/\r\n]/gu, '_') || fallback;
+  const inferredExtension = mediaTypeExtension(mediaType.split(';', 1)[0]!.trim());
+  const fileName = extname(safeName) || !inferredExtension ? safeName : `${safeName}.${inferredExtension}`;
+  return `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 }

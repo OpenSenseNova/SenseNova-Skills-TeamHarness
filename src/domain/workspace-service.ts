@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type {
+  AgentActivityEventInput,
+  AgentActivityEventView,
   AgentMentionOutcomeView,
   AgentRequestStatus,
   AgentRequestView,
@@ -8,9 +10,19 @@ import type {
   AgentExecutionPolicy,
   AgentExecutionPolicyView,
   AgentInboxClaimView,
+  AgentInboxCompletionResultView,
+  AgentInboxDiscussionDeltaView,
+  AgentInboxAttentionView,
   AgentInboxSummaryView,
+  AgentInboxSessionTriggerView,
   AgentInboxWakeBatchView,
+  AgentMessagePublicationResultView,
+  AgentDiscussionBindingView,
+  AgentSessionInputView,
+  AgentSessionWindowView,
+  AgentSessionKind,
   AgentView,
+  ArtifactV2View,
   AttemptExecutionInputView,
   AttemptView,
   ChangePage,
@@ -20,25 +32,24 @@ import type {
   ContextSourceKind,
   ContextSourceRef,
   ConversationParticipantView,
+  ConversationAccessMode,
   ConversationKind,
+  ConversationVisibility,
   ConversationView,
   HumanPrincipal,
   MembershipRole,
   MentionNotRequestedReason,
   MessageView,
+  MessageArtifactReferenceView,
+  MessageWorkItemReferenceView,
   Page,
   ProjectMemberView,
-  ProjectRepositoryView,
-  ProjectResourceLinkView,
   ProjectRole,
   ProjectView,
-  ProjectWorkingCopyReport,
-  ProjectWorkingCopyView,
   PrivateContextGrantView,
   Principal,
   ReasoningEffort,
   WorkspaceBootstrapView,
-  WorkspaceInvitationView,
   WorkspaceMemberView,
   WorkspaceView,
   RunContextSnapshotView,
@@ -54,6 +65,13 @@ import type {
   RuntimeReturnEnvelope,
   RuntimeReturnResult,
   WorkspaceDocumentView,
+  WorkspaceJoinLinkCreatedView,
+  WorkspaceJoinLinkPreviewView,
+  WorkspaceJoinLinkView,
+  WorkItemCommentView,
+  WorkItemArtifactReferenceView,
+  WorkItemLifecycleStatus,
+  WorkItemView,
 } from './types.js';
 import { RUNTIME_CATALOG, runtimeCatalogDefinition } from './runtime-catalog.js';
 import { DomainError, invariant, isSqliteConstraintError } from '../lib/errors.js';
@@ -61,11 +79,11 @@ import { canonicalJson, decodePageCursor, encodePageCursor, issueToken, newId, n
 import { SqliteDatabase } from '../storage/database.js';
 import { LocalExecutionStore } from '../storage/local-execution-store.js';
 import { AuthService, type VerificationCodeSink } from './auth-service.js';
-import { normalizeDefaultBranch, normalizeGitCloneUrl } from '../lib/git-repository.js';
-import { ArtifactService } from './artifact-service.js';
 import { ContentBlobStore } from '../storage/content-blob-store.js';
 import type { StoredContentBlob } from '../storage/content-blob-store.js';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { WorkspaceJoinLinkTokenCipher } from '../security/workspace-join-link-token-cipher.js';
+import { ArtifactV2Service, ProjectResourceService } from './project-resource-service.js';
 
 interface MembershipRow {
   id: string;
@@ -106,31 +124,57 @@ interface ProjectRow {
   updated_at: number;
 }
 
-interface ProjectRepositoryRow {
-  id: string;
-  workspace_id: string;
-  project_id: string;
-  clone_url: string;
-  repository_identity: string;
-  default_branch: string;
-  status: 'active' | 'detached';
-  revision: number;
-  created_at: number;
-  updated_at: number;
-  detached_at: number | null;
-}
-
 interface ProjectMembershipRow {
   id: string;
   workspace_id: string;
   project_id: string;
   workspace_membership_id: string;
   project_role: ProjectRole;
+  sponsored_by_project_membership_id: string | null;
   status: 'active' | 'removed';
   revision: number;
   joined_at: number;
   updated_at: number;
   removed_at: number | null;
+}
+
+interface WorkItemRow {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  description: string;
+  task_number: number;
+  source_conversation_id: string | null;
+  source_message_id: string | null;
+  source_thread_id: string | null;
+  created_by_membership_id: string;
+  created_by_project_membership_id: string;
+  lifecycle_status: WorkItemLifecycleStatus;
+  blocker_reason: string | null;
+  cancellation_reason: string | null;
+  assignee_membership_id: string | null;
+  assignee_project_membership_id: string | null;
+  current_submission_id: string | null;
+  assignment_revision: number;
+  comment_frontier: number;
+  revision: number;
+  created_at: number;
+  updated_at: number;
+  completed_at: number | null;
+  cancelled_at: number | null;
+}
+
+interface WorkItemCommentRow {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  work_item_id: string;
+  author_actor_id: string;
+  author_membership_id: string;
+  author_project_membership_id: string;
+  body: string;
+  comment_position: number;
+  created_at: number;
 }
 
 interface AgentRow {
@@ -151,18 +195,19 @@ interface AgentRow {
   membership_status: 'active' | 'removed';
 }
 
-interface InvitationRow {
+interface WorkspaceJoinLinkRow {
   id: string;
   workspace_id: string;
-  verified_email: string;
-  membership_role: MembershipRole;
-  status: 'pending' | 'accepted' | 'revoked';
+  token_hash: string;
+  token_ciphertext: string | null;
+  status: 'active' | 'revoked';
   revision: number;
-  invited_by_membership_id: string;
-  accepted_membership_id: string | null;
+  created_by_membership_id: string;
+  use_count: number;
   created_at: number;
   updated_at: number;
-  terminal_at: number | null;
+  last_used_at: number | null;
+  revoked_at: number | null;
 }
 
 interface ExecutionContextRow {
@@ -237,6 +282,7 @@ interface MessageRow {
   conversation_id: string;
   project_id: string | null;
   thread_id: string | null;
+  reply_to_message_id: string | null;
   author_actor_id: string;
   author_membership_id: string;
   author_project_membership_id: string | null;
@@ -269,13 +315,14 @@ interface AgentInboxItemRow {
   workspace_id: string;
   agent_id: string;
   sequence: number;
-  attention_kind: 'direct_message' | 'mention';
-  message_id: string;
-  conversation_id: string;
+  attention_kind: 'direct_message' | 'mention' | 'discussion_change' | 'work_item_assignment' | 'work_item_mention';
+  message_id: string | null;
+  conversation_id: string | null;
   thread_id: string | null;
-  agent_request_id: string;
+  agent_request_id: string | null;
+  work_item_id: string | null;
+  work_item_comment_id: string | null;
   state: 'pending' | 'claimed' | 'handled';
-  claimed_run_id: string | null;
   claim_receipt: string | null;
   created_at: number;
   claimed_at: number | null;
@@ -286,16 +333,35 @@ interface AgentInboxClaimReceiptRow {
   id: string;
   workspace_id: string;
   agent_id: string;
+  agent_request_id: string;
   receipt: string;
-  run_id: string;
-  attempt_id: string;
   binding_revision: number;
-  conversation_id: string;
+  target_kind: 'discussion';
+  target: string;
+  conversation_id: string | null;
   thread_id: string | null;
   from_position: number;
   through_position: number;
   created_at: number;
   updated_at: number;
+  handled_at: number | null;
+}
+
+interface AgentActivityEventRow {
+  id: string;
+  workspace_id: string;
+  turn_id: string;
+  agent_id: string;
+  agent_name: string;
+  sequence: number;
+  event_type: AgentActivityEventView['eventType'];
+  title: string;
+  status: AgentActivityEventView['status'];
+  turn_status: AgentActivityEventView['turnStatus'];
+  turn_started_at: number;
+  turn_updated_at: number;
+  turn_finished_at: number | null;
+  created_at: number;
 }
 
 interface ConversationAccess {
@@ -303,7 +369,10 @@ interface ConversationAccess {
     id: string;
     workspace_id: string;
     project_id: string | null;
+    scope_type: 'workspace_general' | 'direct_message' | 'project_group';
+    membership_mode: 'workspace_all' | 'project_all' | 'explicit';
     conversation_kind: ConversationKind;
+    visibility: ConversationVisibility;
     title: string | null;
     lifecycle_status: 'active' | 'archived';
     revision: number;
@@ -318,9 +387,11 @@ interface ConversationAccess {
   };
   membership: MembershipRow;
   projectMembership: ProjectMembershipRow | null;
+  accessMode: ConversationAccessMode;
 }
 
 interface ConversationParticipantRow {
+  scope_membership_id: string;
   membership_id: string;
   project_membership_id: string | null;
   actor_id: string;
@@ -381,8 +452,11 @@ const DEFAULT_EXECUTION_POLICY: AgentExecutionPolicy = {
 export class WorkspaceService {
   readonly localExecutions: LocalExecutionStore;
   readonly auth: AuthService;
-  readonly artifacts: ArtifactService;
+  /** Project-scoped resources and immutable Artifact versions. */
+  readonly projectResources: ProjectResourceService;
+  readonly artifactV2: ArtifactV2Service;
   private readonly agentInboxWakeEmitter = new EventEmitter();
+  private readonly workspaceJoinLinkTokenCipher: WorkspaceJoinLinkTokenCipher;
 
   constructor(
     readonly workspaceDatabase: SqliteDatabase,
@@ -391,9 +465,27 @@ export class WorkspaceService {
     contentDirectory = resolve(process.cwd(), '.data', 'content-blobs'),
     exposeDevelopmentVerificationCode = false,
   ) {
+    const legacyActiveLink = workspaceDatabase.raw
+      .prepare("SELECT id FROM workspace_join_links WHERE status = 'active' AND token_ciphertext IS NULL LIMIT 1")
+      .get() as { id: string } | undefined;
+    if (legacyActiveLink) {
+      throw new Error(
+        `Active Workspace join-link ${legacyActiveLink.id} has no recoverable encrypted token; revoke it before starting this build.`,
+      );
+    }
+    const encryptedLink = workspaceDatabase.raw
+      .prepare('SELECT * FROM workspace_join_links WHERE token_ciphertext IS NOT NULL LIMIT 1')
+      .get() as WorkspaceJoinLinkRow | undefined;
+    this.workspaceJoinLinkTokenCipher = WorkspaceJoinLinkTokenCipher.open(
+      resolve(dirname(contentDirectory), 'workspace-join-link.key'),
+      Boolean(encryptedLink),
+    );
+    if (encryptedLink) this.decryptWorkspaceJoinLinkToken(encryptedLink);
     this.localExecutions = new LocalExecutionStore(localDatabase);
     this.auth = new AuthService(workspaceDatabase, verificationCodeSink, exposeDevelopmentVerificationCode);
-    this.artifacts = new ArtifactService(workspaceDatabase, new ContentBlobStore(contentDirectory));
+    const v2Blobs = new ContentBlobStore(contentDirectory);
+    this.projectResources = new ProjectResourceService(workspaceDatabase, v2Blobs);
+    this.artifactV2 = new ArtifactV2Service(workspaceDatabase, v2Blobs);
   }
 
   bootstrapHuman(displayName: string, verifiedEmail: string, label = 'bootstrap'): { humanId: string; verifiedEmail: string; token: string } {
@@ -466,6 +558,17 @@ export class WorkspaceService {
            ) VALUES (?, ?, ?, 'owner', 'active', 1, ?, ?)`,
         )
         .run(membershipId, workspaceId, principal.actorId, timestamp, timestamp);
+      this.insertConversation(
+        principal,
+        workspaceId,
+        null,
+        this.requireMembership(workspaceId, principal.actorId),
+        null,
+        'channel',
+        '全员大群',
+        'public',
+        undefined,
+      );
       this.appendChange(workspaceId, 1, null, null, 'workspace_created', 'workspace', workspaceId, { name: normalizedName }, timestamp);
       this.enqueueDelivery(workspaceId, 'workspace.created', 'workspace', workspaceId, { workspaceId }, workspaceId, timestamp);
       this.appendAudit(workspaceId, principal.actorId, membershipId, 'workspace.create', 'workspace', workspaceId, { name: normalizedName }, timestamp);
@@ -660,24 +763,19 @@ export class WorkspaceService {
     input: {
       name: string;
       description?: string | null;
-      repository?: { cloneUrl: string; defaultBranch: string };
     },
     idempotencyKey: string,
   ): ProjectView {
     const normalizedName = input.name.trim();
     const normalizedDescription = this.normalizeProjectDescription(input.description);
-    const repository = input.repository ? normalizeGitCloneUrl(input.repository.cloneUrl) : null;
-    const defaultBranch = input.repository ? normalizeDefaultBranch(input.repository.defaultBranch) : null;
     invariant(normalizedName.length > 0 && normalizedName.length <= 120, 'INVALID_PROJECT_NAME', 'Project name is required.');
     const normalizedInput = {
       name: normalizedName,
       description: normalizedDescription,
-      repository: repository ? { ...repository, defaultBranch } : null,
     };
     return this.idempotent(workspaceId, principal.actorId, 'CreateProject', idempotencyKey, normalizedInput, () => {
       const creator = this.requireMembership(workspaceId, principal.actorId);
       const projectId = newId();
-      const repositoryId = repository ? newId() : null;
       const projectMembershipId = newId();
       const timestamp = nowMs();
       this.workspaceDatabase.raw
@@ -688,31 +786,13 @@ export class WorkspaceService {
            ) VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?)`,
         )
         .run(projectId, workspaceId, normalizedName, normalizedDescription, creator.id, timestamp, timestamp);
-      if (repository && repositoryId && defaultBranch) {
-        this.workspaceDatabase.raw
-          .prepare(
-            `INSERT INTO project_repositories (
-               id, workspace_id, project_id, clone_url, repository_identity,
-               default_branch, status, revision, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
-          )
-          .run(
-            repositoryId,
-            workspaceId,
-            projectId,
-            repository.cloneUrl,
-            repository.repositoryIdentity,
-            defaultBranch,
-            timestamp,
-            timestamp,
-          );
-      }
       this.workspaceDatabase.raw
         .prepare(
           `INSERT INTO project_memberships (
              id, workspace_id, project_id, workspace_membership_id, project_role,
+             sponsored_by_project_membership_id,
              status, revision, joined_at, updated_at
-           ) VALUES (?, ?, ?, ?, 'manager', 'active', 1, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, 'owner', NULL, 'active', 1, ?, ?)`,
         )
         .run(projectMembershipId, workspaceId, projectId, creator.id, timestamp, timestamp);
       const workspaceVersion = this.bumpWorkspaceContext(workspaceId, timestamp);
@@ -724,7 +804,7 @@ export class WorkspaceService {
         'project_created',
         'project',
         projectId,
-        { projectId, name: normalizedName, repositoryId },
+        { projectId, name: normalizedName },
         timestamp,
         { projectId, projectVersion: 1 },
       );
@@ -739,9 +819,31 @@ export class WorkspaceService {
       );
       this.appendAudit(workspaceId, principal.actorId, creator.id, 'project.create', 'project', projectId, {
         name: normalizedName,
-        repositoryId,
         projectMembershipId,
       }, timestamp);
+      this.insertConversation(
+        principal,
+        workspaceId,
+        projectId,
+        creator,
+        {
+          id: projectMembershipId,
+          workspace_id: workspaceId,
+          project_id: projectId,
+          workspace_membership_id: creator.id,
+          project_role: 'owner',
+          sponsored_by_project_membership_id: null,
+          status: 'active',
+          revision: 1,
+          joined_at: timestamp,
+          updated_at: timestamp,
+          removed_at: null,
+        },
+        'channel',
+        '主群',
+        'public',
+        undefined,
+      );
       return this.getProject(principal, projectId);
     });
   }
@@ -765,7 +867,8 @@ export class WorkspaceService {
     const pageLimit = this.pageLimit(limit);
     const rows = this.workspaceDatabase.raw
       .prepare(
-        `SELECT p.*, pm.id AS project_membership_id, pm.project_role
+        `SELECT p.*, pm.id AS project_membership_id, pm.project_role,
+                pm.sponsored_by_project_membership_id
          FROM projects p
          LEFT JOIN project_memberships pm
            ON pm.workspace_id = p.workspace_id
@@ -786,7 +889,11 @@ export class WorkspaceService {
         pageCursor?.createdAt ?? 0,
         pageCursor?.id ?? '',
         pageLimit + 1,
-      ) as unknown as Array<ProjectRow & { project_membership_id: string | null; project_role: ProjectRole | null }>;
+      ) as unknown as Array<ProjectRow & {
+        project_membership_id: string | null;
+        project_role: ProjectRole | null;
+        sponsored_by_project_membership_id: string | null;
+      }>;
     const hasMore = rows.length > pageLimit;
     const items = rows.slice(0, pageLimit).map((row) => this.mapProject(row, row.project_membership_id ? {
       id: row.project_membership_id,
@@ -794,6 +901,7 @@ export class WorkspaceService {
       project_id: row.id,
       workspace_membership_id: workspaceMembership.id,
       project_role: row.project_role!,
+      sponsored_by_project_membership_id: row.sponsored_by_project_membership_id,
       status: 'active',
       revision: 1,
       joined_at: row.created_at,
@@ -853,441 +961,7 @@ export class WorkspaceService {
       );
       return this.getProject(principal, projectId);
     });
-  }
-
-  putProjectRepository(
-    principal: HumanPrincipal,
-    projectId: string,
-    input: {
-      cloneUrl: string;
-      defaultBranch: string;
-      expectedProjectRevision: number;
-      expectedRepositoryRevision?: number;
-    },
-    idempotencyKey: string,
-  ): ProjectView {
-    const existing = this.requireProject(projectId);
-    const repository = normalizeGitCloneUrl(input.cloneUrl);
-    const defaultBranch = normalizeDefaultBranch(input.defaultBranch);
-    return this.idempotent(existing.workspace_id, principal.actorId, 'PutProjectRepository', idempotencyKey, {
-      projectId,
-      cloneUrl: repository.cloneUrl,
-      defaultBranch,
-      expectedProjectRevision: input.expectedProjectRevision,
-      expectedRepositoryRevision: input.expectedRepositoryRevision ?? null,
-    }, () => {
-      const authority = this.requireProjectManagerOrWorkspaceOwner(principal.actorId, projectId);
-      const project = this.requireProject(projectId);
-      invariant(project.revision === input.expectedProjectRevision, 'STALE_REVISION', 'Project revision changed.', 409);
-      const current = this.findActiveProjectRepository(projectId);
-      const timestamp = nowMs();
-      let repositoryId: string;
-      let changeType: string;
-      if (current) {
-        invariant(
-          current.repository_identity === repository.repositoryIdentity,
-          'PROJECT_REPOSITORY_IDENTITY_IMMUTABLE',
-          'Repository identity cannot be changed in place. Detach it before attaching another Repository.',
-          409,
-        );
-        invariant(
-          current.revision === input.expectedRepositoryRevision,
-          'STALE_REVISION',
-          'Project Repository revision changed.',
-          409,
-        );
-        this.workspaceDatabase.raw.prepare(
-          `UPDATE project_repositories
-           SET default_branch = ?, revision = revision + 1, updated_at = ?
-           WHERE id = ? AND status = 'active'`,
-        ).run(defaultBranch, timestamp, current.id);
-        repositoryId = current.id;
-        changeType = 'project_repository_updated';
-      } else {
-        repositoryId = newId();
-        this.workspaceDatabase.raw.prepare(
-          `INSERT INTO project_repositories (
-             id, workspace_id, project_id, clone_url, repository_identity,
-             default_branch, status, revision, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
-        ).run(
-          repositoryId, project.workspace_id, projectId, repository.cloneUrl,
-          repository.repositoryIdentity, defaultBranch, timestamp, timestamp,
-        );
-        changeType = 'project_repository_attached';
-      }
-      const updatedProject = this.workspaceDatabase.raw.prepare(
-        `UPDATE projects SET revision = revision + 1, context_version = context_version + 1, updated_at = ?
-         WHERE id = ? AND revision = ? RETURNING revision, context_version`,
-      ).get(timestamp, projectId, input.expectedProjectRevision) as { revision: number; context_version: number } | undefined;
-      invariant(updatedProject, 'STALE_REVISION', 'Project revision changed.', 409);
-      this.appendChange(
-        project.workspace_id, null, null, null, changeType, 'project_repository', repositoryId,
-        { projectId, repositoryId, defaultBranch }, timestamp,
-        { projectId, projectVersion: updatedProject.context_version },
-      );
-      this.appendAudit(
-        project.workspace_id, principal.actorId, authority.workspaceMembership.id,
-        changeType === 'project_repository_attached' ? 'project.repository.attach' : 'project.repository.update',
-        'project_repository', repositoryId,
-        { projectId, defaultBranch }, timestamp,
-      );
-      return this.getProject(principal, projectId);
-    });
-  }
-
-  deleteProjectRepository(
-    principal: HumanPrincipal,
-    projectId: string,
-    input: { expectedProjectRevision: number; expectedRepositoryRevision: number },
-    idempotencyKey: string,
-  ): ProjectView {
-    const existing = this.requireProject(projectId);
-    return this.idempotent(existing.workspace_id, principal.actorId, 'DeleteProjectRepository', idempotencyKey, {
-      projectId,
-      ...input,
-    }, () => {
-      const authority = this.requireProjectManagerOrWorkspaceOwner(principal.actorId, projectId);
-      const project = this.requireProject(projectId);
-      invariant(project.revision === input.expectedProjectRevision, 'STALE_REVISION', 'Project revision changed.', 409);
-      const repository = this.requireProjectRepository(projectId);
-      invariant(repository.revision === input.expectedRepositoryRevision, 'STALE_REVISION', 'Project Repository revision changed.', 409);
-      const active = this.workspaceDatabase.raw.prepare(
-        `SELECT 1
-         FROM attempts a
-         JOIN runs r ON r.workspace_id = a.workspace_id AND r.id = a.run_id
-         JOIN run_context_snapshots rcs ON rcs.workspace_id = r.workspace_id AND rcs.run_id = r.id
-         WHERE r.project_id = ? AND rcs.repository_id = ? AND a.status = 'running'
-         LIMIT 1`,
-      ).get(projectId, repository.id);
-      invariant(!active, 'PROJECT_REPOSITORY_IN_USE', 'Repository cannot be detached while an Attempt is active.', 409);
-      const timestamp = nowMs();
-      this.workspaceDatabase.raw.prepare(
-        `UPDATE project_repositories
-         SET status = 'detached', detached_at = ?, revision = revision + 1, updated_at = ?
-         WHERE id = ? AND status = 'active'`,
-      ).run(timestamp, timestamp, repository.id);
-      this.workspaceDatabase.raw.prepare(
-        'DELETE FROM computer_project_working_copies WHERE workspace_id = ? AND project_id = ? AND repository_id = ?',
-      ).run(project.workspace_id, projectId, repository.id);
-      const updatedProject = this.workspaceDatabase.raw.prepare(
-        `UPDATE projects SET revision = revision + 1, context_version = context_version + 1, updated_at = ?
-         WHERE id = ? AND revision = ? RETURNING revision, context_version`,
-      ).get(timestamp, projectId, input.expectedProjectRevision) as { revision: number; context_version: number } | undefined;
-      invariant(updatedProject, 'STALE_REVISION', 'Project revision changed.', 409);
-      this.appendChange(
-        project.workspace_id, null, null, null, 'project_repository_detached', 'project_repository', repository.id,
-        { projectId, repositoryId: repository.id }, timestamp,
-        { projectId, projectVersion: updatedProject.context_version },
-      );
-      this.appendAudit(
-        project.workspace_id, principal.actorId, authority.workspaceMembership.id,
-        'project.repository.detach', 'project_repository', repository.id, { projectId }, timestamp,
-      );
-      return this.getProject(principal, projectId);
-    });
-  }
-
-  listProjectResourceLinks(principal: HumanPrincipal, projectId: string): ProjectResourceLinkView[] {
-    const access = this.requireProjectAccess(principal.actorId, projectId);
-    return (this.workspaceDatabase.raw.prepare(
-      'SELECT * FROM project_resource_links WHERE workspace_id = ? AND project_id = ? ORDER BY created_at, id',
-    ).all(access.project.workspace_id, projectId) as unknown as Array<Record<string, unknown>>).map((row) => this.mapProjectResourceLink(row));
-  }
-
-  createProjectResourceLink(
-    principal: HumanPrincipal,
-    projectId: string,
-    input: { title: string; url: string; description?: string | null },
-    idempotencyKey: string,
-  ): ProjectResourceLinkView {
-    const project = this.requireProject(projectId);
-    const normalized = this.normalizeProjectResourceLink(input);
-    return this.idempotent(project.workspace_id, principal.actorId, 'CreateProjectResourceLink', idempotencyKey, normalized, () => {
-      const access = this.requireProjectAccess(principal.actorId, projectId);
-      const id = newId();
-      const timestamp = nowMs();
-      this.workspaceDatabase.raw.prepare(
-        `INSERT INTO project_resource_links (
-           id, workspace_id, project_id, title, url, description, revision,
-           created_by_membership_id, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-      ).run(
-        id, project.workspace_id, projectId, normalized.title, normalized.url,
-        normalized.description, access.workspaceMembership.id, timestamp, timestamp,
-      );
-      const projectVersion = this.bumpProjectContext(projectId, timestamp);
-      this.appendChange(project.workspace_id, null, null, null, 'project_resource_link_created', 'project_resource_link', id,
-        { projectId, title: normalized.title, url: normalized.url }, timestamp,
-        { projectId, projectVersion });
-      this.appendAudit(project.workspace_id, principal.actorId, access.workspaceMembership.id,
-        'project.resource_link.create', 'project_resource_link', id, { projectId }, timestamp);
-      return this.mapProjectResourceLink(this.requireProjectResourceLink(id));
-    });
-  }
-
-  updateProjectResourceLink(
-    principal: HumanPrincipal,
-    projectId: string,
-    linkId: string,
-    input: { title: string; url: string; description?: string | null; expectedRevision: number },
-    idempotencyKey: string,
-  ): ProjectResourceLinkView {
-    const project = this.requireProject(projectId);
-    const normalized = this.normalizeProjectResourceLink(input);
-    return this.idempotent(project.workspace_id, principal.actorId, 'UpdateProjectResourceLink', idempotencyKey, {
-      projectId, linkId, ...normalized, expectedRevision: input.expectedRevision,
-    }, () => {
-      const access = this.requireProjectAccess(principal.actorId, projectId);
-      const link = this.requireProjectResourceLink(linkId);
-      invariant(link.project_id === projectId, 'PROJECT_RESOURCE_LINK_NOT_FOUND', 'Resource Link does not exist.', 404);
-      invariant(
-        link.created_by_membership_id === access.workspaceMembership.id || access.projectMembership.project_role === 'manager',
-        'PROJECT_RESOURCE_LINK_FORBIDDEN',
-        'Only the creator or a Project Manager may update this Resource Link.',
-        403,
-      );
-      const timestamp = nowMs();
-      const updated = this.workspaceDatabase.raw.prepare(
-        `UPDATE project_resource_links SET title = ?, url = ?, description = ?,
-           revision = revision + 1, updated_at = ?
-         WHERE id = ? AND project_id = ? AND revision = ? RETURNING *`,
-      ).get(normalized.title, normalized.url, normalized.description, timestamp, linkId, projectId, input.expectedRevision) as
-        | Record<string, unknown>
-        | undefined;
-      invariant(updated, 'STALE_REVISION', 'Resource Link revision changed.', 409);
-      const projectVersion = this.bumpProjectContext(projectId, timestamp);
-      this.appendChange(project.workspace_id, null, null, null, 'project_resource_link_updated', 'project_resource_link', linkId,
-        { projectId, revision: Number(updated.revision) }, timestamp, { projectId, projectVersion });
-      this.appendAudit(project.workspace_id, principal.actorId, access.workspaceMembership.id,
-        'project.resource_link.update', 'project_resource_link', linkId, { projectId }, timestamp);
-      return this.mapProjectResourceLink(updated);
-    });
-  }
-
-  deleteProjectResourceLink(
-    principal: HumanPrincipal,
-    projectId: string,
-    linkId: string,
-    expectedRevision: number,
-    idempotencyKey: string,
-  ): { id: string; deletedAt: number } {
-    const project = this.requireProject(projectId);
-    return this.idempotent(project.workspace_id, principal.actorId, 'DeleteProjectResourceLink', idempotencyKey, {
-      projectId, linkId, expectedRevision,
-    }, () => {
-      const access = this.requireProjectAccess(principal.actorId, projectId);
-      const link = this.requireProjectResourceLink(linkId);
-      invariant(link.project_id === projectId, 'PROJECT_RESOURCE_LINK_NOT_FOUND', 'Resource Link does not exist.', 404);
-      invariant(
-        link.created_by_membership_id === access.workspaceMembership.id || access.projectMembership.project_role === 'manager',
-        'PROJECT_RESOURCE_LINK_FORBIDDEN',
-        'Only the creator or a Project Manager may delete this Resource Link.',
-        403,
-      );
-      const timestamp = nowMs();
-      const deleted = this.workspaceDatabase.raw.prepare(
-        'DELETE FROM project_resource_links WHERE id = ? AND project_id = ? AND revision = ?',
-      ).run(linkId, projectId, expectedRevision);
-      invariant(deleted.changes === 1, 'STALE_REVISION', 'Resource Link revision changed.', 409);
-      const projectVersion = this.bumpProjectContext(projectId, timestamp);
-      this.appendChange(project.workspace_id, null, null, null, 'project_resource_link_deleted', 'project_resource_link', linkId,
-        { projectId }, timestamp, { projectId, projectVersion });
-      this.appendAudit(project.workspace_id, principal.actorId, access.workspaceMembership.id,
-        'project.resource_link.delete', 'project_resource_link', linkId, { projectId }, timestamp);
-      return { id: linkId, deletedAt: timestamp };
-    });
-  }
-
-  createProjectFromComputer(
-    principal: ComputerPrincipal,
-    input: {
-      workspaceId: string;
-      name: string;
-      description?: string | null;
-      repository: { cloneUrl: string; repositoryIdentity: string; defaultBranch: string };
-      workingCopy: Omit<ProjectWorkingCopyReport, 'repositoryId'>;
-    },
-    idempotencyKey: string,
-  ): ProjectView {
-    const normalizedRepository = normalizeGitCloneUrl(input.repository.cloneUrl);
-    invariant(normalizedRepository.repositoryIdentity === input.repository.repositoryIdentity,
-      'PROJECT_REPOSITORY_MISMATCH', 'Reported Repository identity does not match its clone URL.');
-    const humanPrincipal: HumanPrincipal = { kind: 'human', actorId: principal.ownerHumanId };
-    const created = this.createProject(humanPrincipal, input.workspaceId, {
-      name: input.name,
-      ...(input.description === undefined ? {} : { description: input.description }),
-      repository: {
-        cloneUrl: normalizedRepository.cloneUrl,
-        defaultBranch: input.repository.defaultBranch,
-      },
-    }, idempotencyKey);
-    invariant(created.repository, 'PROJECT_REPOSITORY_NOT_FOUND', 'Created Project Repository is unavailable.');
-    this.reportProjectWorkingCopy(principal, created.id, {
-      ...input.workingCopy,
-      repositoryId: created.repository.id,
-      repositoryIdentity: normalizedRepository.repositoryIdentity,
-    }, `${idempotencyKey}:working-copy`);
-    return this.getProject(humanPrincipal, created.id);
-  }
-
-  getComputerProjectRepository(principal: ComputerPrincipal, projectId: string): {
-    projectId: string;
-    workspaceId: string;
-    repository: ProjectRepositoryView;
-  } {
-    const project = this.requireProject(projectId);
-    this.requireProjectAccess(principal.ownerHumanId, projectId);
-    this.requireOwnedComputer(principal);
-    return {
-      projectId,
-      workspaceId: project.workspace_id,
-      repository: this.mapProjectRepository(this.requireProjectRepository(project.id)),
-    };
-  }
-
-  listProjectWorkingCopies(principal: HumanPrincipal, projectId: string): ProjectWorkingCopyView[] {
-    const access = this.requireProjectAccess(principal.actorId, projectId);
-    return (this.workspaceDatabase.raw
-      .prepare(
-        `SELECT wc.computer_id, computer.name AS computer_name, computer.status AS computer_status,
-                computer.last_seen_at, wc.availability, wc.branch, wc.head_commit, wc.dirty, wc.checked_at
-         FROM computer_project_working_copies wc
-         JOIN computers computer ON computer.id = wc.computer_id
-         WHERE wc.workspace_id = ? AND wc.project_id = ? AND computer.owner_human_id = ?
-         ORDER BY computer.created_at, computer.id`,
-      )
-      .all(access.project.workspace_id, projectId, principal.actorId) as Array<{
-        computer_id: string;
-        computer_name: string;
-        computer_status: 'active' | 'disabled';
-        last_seen_at: number | null;
-        availability: ProjectWorkingCopyView['availability'];
-        branch: string | null;
-        head_commit: string | null;
-        dirty: number | null;
-        checked_at: number;
-      }>).map((row) => this.mapProjectWorkingCopy(row));
-  }
-
-  reportProjectWorkingCopy(
-    principal: ComputerPrincipal,
-    projectId: string,
-    report: ProjectWorkingCopyReport,
-    idempotencyKey: string,
-  ): ProjectWorkingCopyView {
-    const project = this.requireProject(projectId);
-    this.requireProjectAccess(principal.ownerHumanId, projectId);
-    this.requireOwnedComputer(principal);
-    const repository = this.requireProjectRepository(projectId);
-    invariant(report.repositoryId === repository.id,
-      'PROJECT_REPOSITORY_MISMATCH', 'Working Copy Repository does not match this Project.', 409);
-    const availability = report.repositoryIdentity === repository.repository_identity
-      ? report.availability
-      : 'mismatch';
-    const ready = availability === 'ready';
-    invariant(!ready || (
-      report.branch !== null
-      && report.branch.trim().length > 0
-      && report.branch.length <= 255
-      && report.headCommit !== null
-      && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(report.headCommit)
-      && report.dirty !== null
-    ), 'INVALID_WORKING_COPY_REPORT', 'Ready Working Copy reports require branch, HEAD commit, and dirty state.');
-    const normalizedReport = {
-      repositoryId: repository.id,
-      repositoryIdentity: report.repositoryIdentity,
-      availability,
-      branch: ready ? report.branch!.trim() : null,
-      headCommit: ready ? report.headCommit : null,
-      dirty: ready ? report.dirty : null,
-    } satisfies ProjectWorkingCopyReport;
-    return this.idempotent(project.workspace_id, principal.ownerHumanId, 'ReportProjectWorkingCopy', idempotencyKey,
-      { computerId: principal.computerId, projectId, ...normalizedReport }, () => {
-        const prior = this.workspaceDatabase.raw
-          .prepare('SELECT * FROM computer_project_working_copies WHERE computer_id = ? AND project_id = ?')
-          .get(principal.computerId, projectId) as Record<string, unknown> | undefined;
-        const timestamp = nowMs();
-        this.workspaceDatabase.raw
-          .prepare(
-            `INSERT INTO computer_project_working_copies (
-               computer_id, workspace_id, project_id, repository_id, availability,
-               branch, head_commit, dirty, checked_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(computer_id, project_id) DO UPDATE SET
-               repository_id = excluded.repository_id,
-               availability = excluded.availability,
-               branch = excluded.branch,
-               head_commit = excluded.head_commit,
-               dirty = excluded.dirty,
-               checked_at = excluded.checked_at,
-               updated_at = excluded.updated_at`,
-          )
-          .run(
-            principal.computerId,
-            project.workspace_id,
-            projectId,
-            repository.id,
-            normalizedReport.availability,
-            normalizedReport.branch,
-            normalizedReport.headCommit,
-            normalizedReport.dirty === null ? null : Number(normalizedReport.dirty),
-            timestamp,
-            timestamp,
-          );
-        const semanticChanged = !prior
-          || prior.availability !== normalizedReport.availability
-          || prior.branch !== normalizedReport.branch
-          || prior.head_commit !== normalizedReport.headCommit
-          || (prior.dirty === null ? null : Boolean(prior.dirty)) !== normalizedReport.dirty;
-        if (semanticChanged) {
-          this.appendChange(
-            project.workspace_id,
-            null,
-            null,
-            null,
-            prior ? 'project_working_copy_updated' : 'project_working_copy_connected',
-            'project_working_copy',
-            `${principal.computerId}:${projectId}`,
-            { projectId, computerId: principal.computerId, availability: normalizedReport.availability },
-            timestamp,
-            { projectId, projectVersion: project.context_version },
-          );
-        }
-        return this.requireProjectWorkingCopyView(principal.computerId, projectId);
-      });
-  }
-
-  removeProjectWorkingCopy(
-    principal: ComputerPrincipal,
-    projectId: string,
-    idempotencyKey: string,
-  ): { projectId: string; computerId: string; removedAt: number } {
-    const project = this.requireProject(projectId);
-    this.requireProjectAccess(principal.ownerHumanId, projectId);
-    this.requireOwnedComputer(principal);
-    return this.idempotent(project.workspace_id, principal.ownerHumanId, 'RemoveProjectWorkingCopy', idempotencyKey,
-      { computerId: principal.computerId, projectId }, () => {
-        const timestamp = nowMs();
-        const removed = this.workspaceDatabase.raw
-          .prepare('DELETE FROM computer_project_working_copies WHERE computer_id = ? AND project_id = ?')
-          .run(principal.computerId, projectId);
-        invariant(removed.changes === 1, 'PROJECT_WORKING_COPY_NOT_FOUND', 'Working Copy connection does not exist.', 404);
-        this.appendChange(
-          project.workspace_id,
-          null,
-          null,
-          null,
-          'project_working_copy_disconnected',
-          'project_working_copy',
-          `${principal.computerId}:${projectId}`,
-          { projectId, computerId: principal.computerId },
-          timestamp,
-          { projectId, projectVersion: project.context_version },
-        );
-        return { projectId, computerId: principal.computerId, removedAt: timestamp };
-      });
-  }
+ }
 
   listProjectMembers(principal: HumanPrincipal, projectId: string, cursor?: string, limit = 100): Page<ProjectMemberView> {
     const access = this.requireProjectAccess(principal.actorId, projectId);
@@ -1297,7 +971,7 @@ export class WorkspaceService {
       .prepare(
         `SELECT pm.id AS project_membership_id, pm.workspace_membership_id,
                 wm.actor_id, a.actor_type, COALESCE(h.display_name, ag.name) AS display_name,
-                pm.project_role, pm.revision, pm.joined_at
+                pm.project_role, pm.sponsored_by_project_membership_id, pm.revision, pm.joined_at
          FROM project_memberships pm
          JOIN workspace_memberships wm
            ON wm.workspace_id = pm.workspace_id
@@ -1325,6 +999,7 @@ export class WorkspaceService {
         actor_type: 'human' | 'agent';
         display_name: string;
         project_role: ProjectRole;
+        sponsored_by_project_membership_id: string | null;
         revision: number;
         joined_at: number;
       }>;
@@ -1344,8 +1019,25 @@ export class WorkspaceService {
     return this.idempotent(project.workspace_id, principal.actorId, 'AddProjectMember', idempotencyKey, input, () => {
       const authority = this.requireProjectManagerOrWorkspaceOwner(principal.actorId, projectId);
       const target = this.requireActiveWorkspaceMember(project.workspace_id, input.workspaceMembershipId);
+      invariant(input.role !== 'owner', 'PROJECT_OWNER_TRANSFER_REQUIRED', 'Use an ownership transfer to appoint a new Project Owner.', 409);
+      let sponsoredByProjectMembershipId: string | null = null;
       if (target.actorType === 'agent') {
         invariant(input.role === 'member', 'AGENT_PROJECT_ROLE_INVALID', 'An Agent can only be a Project member.');
+        const agent = this.requireAgentIdentityRow(project.workspace_id, target.actorId);
+        invariant(
+          agent.owner_membership_id === authority.workspaceMembership.id,
+          'AGENT_OWNER_REQUIRED',
+          'A Project administrator may only add an Agent they own.',
+          403,
+        );
+        sponsoredByProjectMembershipId = authority.projectMembership.id;
+      } else if (input.role === 'manager') {
+        invariant(
+          authority.projectMembership.project_role === 'owner',
+          'PROJECT_OWNER_REQUIRED',
+          'Only the Project Owner may appoint a Manager.',
+          403,
+        );
       }
       invariant(
         !this.findProjectMembership(project.workspace_id, projectId, input.workspaceMembershipId),
@@ -1359,10 +1051,20 @@ export class WorkspaceService {
         .prepare(
           `INSERT INTO project_memberships (
              id, workspace_id, project_id, workspace_membership_id, project_role,
+             sponsored_by_project_membership_id,
              status, revision, joined_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
         )
-        .run(projectMembershipId, project.workspace_id, projectId, input.workspaceMembershipId, input.role, timestamp, timestamp);
+        .run(
+          projectMembershipId,
+          project.workspace_id,
+          projectId,
+          input.workspaceMembershipId,
+          input.role,
+          sponsoredByProjectMembershipId,
+          timestamp,
+          timestamp,
+        );
       const projectVersion = this.bumpProjectContext(projectId, timestamp);
       this.appendChange(
         project.workspace_id,
@@ -1372,7 +1074,12 @@ export class WorkspaceService {
         'project_member_added',
         'project_membership',
         projectMembershipId,
-        { projectMembershipId, workspaceMembershipId: input.workspaceMembershipId, role: input.role },
+        {
+          projectMembershipId,
+          workspaceMembershipId: input.workspaceMembershipId,
+          role: input.role,
+          sponsoredByProjectMembershipId,
+        },
         timestamp,
         { projectId, projectVersion },
       );
@@ -1383,7 +1090,7 @@ export class WorkspaceService {
         'project.member.add',
         'project_membership',
         projectMembershipId,
-        { projectId, workspaceMembershipId: input.workspaceMembershipId, role: input.role },
+        { projectId, workspaceMembershipId: input.workspaceMembershipId, role: input.role, sponsoredByProjectMembershipId },
         timestamp,
       );
       return this.getProjectMember(project.workspace_id, projectId, projectMembershipId);
@@ -1399,13 +1106,79 @@ export class WorkspaceService {
   ): ProjectMemberView {
     const project = this.requireProject(projectId);
     return this.idempotent(project.workspace_id, principal.actorId, 'UpdateProjectMember', idempotencyKey, input, () => {
-      const authority = this.requireProjectManagerOrWorkspaceOwner(principal.actorId, projectId);
+      const authority = this.requireProjectOwner(principal.actorId, projectId);
       const target = this.requireProjectMembership(project.workspace_id, projectId, projectMembershipId);
       const workspaceMember = this.requireActiveWorkspaceMember(project.workspace_id, target.workspace_membership_id);
       if (workspaceMember.actorType === 'agent') {
         invariant(input.role === 'member', 'AGENT_PROJECT_ROLE_INVALID', 'An Agent can only be a Project member.');
       }
+      invariant(target.project_role !== input.role, 'PROJECT_ROLE_UNCHANGED', 'Project Membership already has that role.', 409);
       const timestamp = nowMs();
+      if (input.role === 'owner') {
+        invariant(workspaceMember.actorType === 'human', 'PROJECT_OWNER_MUST_BE_HUMAN', 'Project Owner must be Human.');
+        invariant(target.project_role !== 'owner', 'PROJECT_ROLE_UNCHANGED', 'Project Membership is already the Owner.', 409);
+        const promoted = this.workspaceDatabase.raw.prepare(
+          `UPDATE project_memberships
+           SET project_role = 'owner', revision = revision + 1, updated_at = ?
+           WHERE workspace_id = ? AND project_id = ? AND id = ? AND status = 'active' AND revision = ?
+           RETURNING revision`,
+        ).get(timestamp, project.workspace_id, projectId, projectMembershipId, input.expectedRevision) as
+          | { revision: number }
+          | undefined;
+        invariant(promoted, 'STALE_REVISION', 'Project Membership revision changed.', 409);
+        const demoted = this.workspaceDatabase.raw.prepare(
+          `UPDATE project_memberships
+           SET project_role = 'manager', revision = revision + 1, updated_at = ?
+           WHERE workspace_id = ? AND project_id = ? AND id = ? AND status = 'active' AND project_role = 'owner'
+           RETURNING revision`,
+        ).get(timestamp, project.workspace_id, projectId, authority.projectMembership.id) as
+          | { revision: number }
+          | undefined;
+        invariant(demoted, 'PROJECT_OWNER_CONFLICT', 'Project ownership changed concurrently.', 409);
+        const projectVersion = this.bumpProjectContext(projectId, timestamp);
+        this.appendChange(
+          project.workspace_id,
+          null,
+          null,
+          null,
+          'project_owner_transferred',
+          'project_membership',
+          projectMembershipId,
+          {
+            previousOwnerProjectMembershipId: authority.projectMembership.id,
+            ownerProjectMembershipId: projectMembershipId,
+            revision: promoted.revision,
+          },
+          timestamp,
+          { projectId, projectVersion },
+        );
+        this.appendAudit(
+          project.workspace_id,
+          principal.actorId,
+          authority.workspaceMembership.id,
+          'project.owner.transfer',
+          'project_membership',
+          projectMembershipId,
+          {
+            projectId,
+            previousOwnerProjectMembershipId: authority.projectMembership.id,
+            revision: promoted.revision,
+          },
+          timestamp,
+        );
+        return this.getProjectMember(project.workspace_id, projectId, projectMembershipId);
+      }
+      invariant(target.project_role !== 'owner', 'PROJECT_OWNER_TRANSFER_REQUIRED', 'Transfer ownership before changing the Owner role.', 409);
+      if (target.project_role === 'manager' && input.role === 'member') {
+        this.removeSponsoredProjectAgents(
+          project,
+          target.id,
+          principal.actorId,
+          authority.workspaceMembership.id,
+          timestamp,
+          'project.manager-demoted.agent-remove',
+        );
+      }
       const updated = this.workspaceDatabase.raw
         .prepare(
           `UPDATE project_memberships
@@ -1499,81 +1272,596 @@ export class WorkspaceService {
     });
   }
 
-  createInvitation(
+  createWorkItem(
     principal: HumanPrincipal,
-    workspaceId: string,
-    input: { verifiedEmail: string; membershipRole: MembershipRole },
+    projectId: string,
+    input: {
+      description: string;
+      assigneeProjectMembershipId?: string | null;
+      assigneeProjectMembershipIds?: string[];
+    },
     idempotencyKey: string,
-  ): WorkspaceInvitationView {
-    const verifiedEmail = this.normalizeEmail(input.verifiedEmail);
-    return this.idempotent(workspaceId, principal.actorId, 'CreateInvitation', idempotencyKey, {
-      ...input,
-      verifiedEmail,
-    }, () => {
-      const inviter = this.requireWorkspaceOwner(workspaceId, principal.actorId);
-      const active = this.workspaceDatabase.raw
-        .prepare(
-          `SELECT 1
-           FROM humans h
-           JOIN workspace_memberships m ON m.actor_id = h.actor_id
-           WHERE h.verified_email = ? AND m.workspace_id = ? AND m.status = 'active'`,
-        )
-        .get(verifiedEmail, workspaceId);
-      invariant(!active, 'MEMBERSHIP_ALREADY_ACTIVE', 'The invited Human is already an active Workspace member.', 409);
-      const invitationId = newId();
-      const timestamp = nowMs();
-      this.workspaceDatabase.raw
-        .prepare(
-          `INSERT INTO workspace_invitations (
-             id, workspace_id, verified_email, membership_role,
-             status, revision, invited_by_membership_id, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, 'pending', 1, ?, ?, ?)`,
-        )
-        .run(
-          invitationId,
-          workspaceId,
-          verifiedEmail,
-          input.membershipRole,
-          inviter.id,
+  ): WorkItemView {
+    const project = this.requireProject(projectId);
+    const description = input.description.trim();
+    invariant(description.length > 0 && description.length <= 10_000, 'INVALID_WORK_ITEM_DESCRIPTION', 'WorkItem description is required.');
+    const assigneeProjectMembershipIds = this.normalizeWorkItemAssigneeIds(input);
+    const normalizedInput = {
+      description,
+      assigneeProjectMembershipIds,
+    };
+    const result = this.idempotent(
+      project.workspace_id,
+      principal.actorId,
+      'CreateWorkItem',
+      idempotencyKey,
+      normalizedInput,
+      () => {
+        const access = this.requireProjectAccess(principal.actorId, projectId);
+        const assignees = normalizedInput.assigneeProjectMembershipIds.map((id) =>
+          this.getProjectMember(project.workspace_id, projectId, id));
+        const assignee = assignees[0] ?? null;
+        const timestamp = nowMs();
+        const workItemId = newId();
+        const taskNumber = this.nextProjectTaskNumber(project.workspace_id, projectId);
+        this.workspaceDatabase.raw.prepare(
+          `INSERT INTO work_items (
+             id, workspace_id, project_id, description, task_number,
+             created_by_membership_id, created_by_project_membership_id,
+             lifecycle_status, assignee_membership_id, assignee_project_membership_id,
+             assignment_revision, revision, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, 1, ?, ?)`,
+        ).run(
+          workItemId,
+          project.workspace_id,
+          projectId,
+          description,
+          taskNumber,
+          access.workspaceMembership.id,
+          access.projectMembership.id,
+          assignee?.workspaceMembershipId ?? null,
+          assignee?.projectMembershipId ?? null,
+          assignee ? 1 : 0,
           timestamp,
           timestamp,
         );
+        this.replaceWorkItemAssignees(project.workspace_id, projectId, workItemId, assignees, timestamp);
+        const projectVersion = this.bumpProjectContext(projectId, timestamp);
+        this.appendChange(
+          project.workspace_id,
+          null,
+          null,
+          null,
+          'work_item_created',
+          'work_item',
+          workItemId,
+          {
+            projectId,
+            assigneeProjectMembershipId: assignee?.projectMembershipId ?? null,
+            assigneeProjectMembershipIds: assignees.map((member) => member.projectMembershipId),
+          },
+          timestamp,
+          { projectId, projectVersion },
+        );
+        this.appendAudit(
+          project.workspace_id,
+          principal.actorId,
+          access.workspaceMembership.id,
+          'work_item.create',
+          'work_item',
+          workItemId,
+          {
+            projectId,
+            assigneeProjectMembershipId: assignee?.projectMembershipId ?? null,
+            assigneeProjectMembershipIds: assignees.map((member) => member.projectMembershipId),
+          },
+          timestamp,
+        );
+        let wakeSequence: number | null = null;
+        for (const member of assignees) {
+          if (member.actorType !== 'agent') continue;
+          wakeSequence = this.enqueueWorkItemAttention(
+            project.workspace_id, member.actorId, workItemId, null, 'work_item_assignment', timestamp,
+          );
+        }
+        return { workItemId, wakeSequence };
+      },
+    );
+    if (result.wakeSequence !== null) this.agentInboxWakeEmitter.emit('changed');
+    return this.getWorkItem(principal, result.workItemId);
+  }
+
+  updateWorkItemDetails(
+    principal: HumanPrincipal,
+    workItemId: string,
+    input: { description: string; expectedRevision: number },
+    idempotencyKey: string,
+  ): WorkItemView {
+    const existing = this.requireWorkItem(workItemId);
+    const description = input.description.trim();
+    invariant(description.length > 0 && description.length <= 10_000, 'INVALID_WORK_ITEM_DESCRIPTION', 'WorkItem description is required.');
+    return this.idempotent(existing.workspace_id, principal.actorId, 'UpdateWorkItemDetails', idempotencyKey,
+      { description, expectedRevision: input.expectedRevision }, () => {
+        const workItem = this.requireWorkItem(workItemId);
+        const authority = this.requireHumanWorkItemAuthority(principal.actorId, workItem);
+        invariant(workItem.lifecycle_status === 'open' && workItem.assignee_membership_id === null,
+          'WORK_ITEM_DETAILS_NOT_EDITABLE', 'Only an unassigned open WorkItem can be edited.', 409);
+        invariant(workItem.revision === input.expectedRevision,
+          'WORK_ITEM_REVISION_CONFLICT', 'WorkItem changed concurrently.', 409);
+        const timestamp = nowMs();
+        const updated = this.workspaceDatabase.raw.prepare(
+          `UPDATE work_items SET description = ?, revision = revision + 1, updated_at = ?
+           WHERE workspace_id = ? AND id = ? AND lifecycle_status = 'open'
+             AND assignee_membership_id IS NULL AND assignee_project_membership_id IS NULL
+             AND revision = ? RETURNING revision`,
+        ).get(description, timestamp, workItem.workspace_id, workItem.id, input.expectedRevision) as { revision: number } | undefined;
+        invariant(updated, 'WORK_ITEM_REVISION_CONFLICT', 'WorkItem changed concurrently.', 409);
+        this.recordWorkItemChange(workItem, 'work_item_details_updated', {
+          description,
+          revision: updated.revision,
+        }, timestamp);
+        this.appendAudit(workItem.workspace_id, principal.actorId, authority.id,
+          'work_item.details.update', 'work_item', workItem.id,
+          { description, revision: updated.revision }, timestamp);
+        return this.mapWorkItem(this.requireWorkItem(workItem.id));
+      });
+  }
+
+  createWorkItemFromMessage(
+    principal: HumanPrincipal,
+    messageId: string,
+    input: {
+      description?: string;
+      assigneeProjectMembershipId?: string | null;
+      assigneeProjectMembershipIds?: string[];
+    },
+    idempotencyKey: string,
+  ): WorkItemView {
+    const sourceMessage = this.requireMessage(messageId);
+    const sourceAccess = this.requireConversationAccess(principal.actorId, sourceMessage.conversation_id);
+    invariant(sourceAccess.conversation.lifecycle_status === 'active',
+      'CONVERSATION_ARCHIVED', 'An archived Conversation cannot create a new task.', 409);
+    const projectId = sourceAccess.conversation.project_id;
+    invariant(projectId !== null && sourceMessage.project_id === projectId,
+      'WORK_ITEM_SOURCE_MUST_BE_PROJECT_CONVERSATION',
+      'A task source must be a Project Conversation message.', 409);
+    const project = this.requireProject(projectId);
+    const description = (input.description ?? sourceMessage.body).trim();
+    invariant(description.length > 0 && description.length <= 10_000, 'INVALID_WORK_ITEM_DESCRIPTION', 'WorkItem description is required.');
+    const assigneeProjectMembershipIds = this.normalizeWorkItemAssigneeIds(input);
+    const normalizedInput = {
+      messageId,
+      description,
+      assigneeProjectMembershipIds,
+    };
+    const result = this.idempotent(
+      project.workspace_id,
+      principal.actorId,
+      'CreateWorkItemFromMessage',
+      idempotencyKey,
+      normalizedInput,
+      () => {
+        const currentSourceMessage = this.requireMessage(messageId);
+        const currentSourceAccess = this.requireConversationAccess(principal.actorId, currentSourceMessage.conversation_id);
+        invariant(currentSourceAccess.conversation.lifecycle_status === 'active',
+          'CONVERSATION_ARCHIVED', 'An archived Conversation cannot create a new task.', 409);
+        invariant(currentSourceAccess.conversation.project_id === projectId
+          && currentSourceMessage.project_id === projectId,
+        'WORK_ITEM_SOURCE_MUST_BE_PROJECT_CONVERSATION',
+        'A task source must be a Project Conversation message.', 409);
+        const access = this.requireProjectAccess(principal.actorId, projectId);
+        const assignees = normalizedInput.assigneeProjectMembershipIds.map((id) =>
+          this.getProjectMember(project.workspace_id, projectId, id));
+        const assignee = assignees[0] ?? null;
+        const timestamp = nowMs();
+        const workItemId = newId();
+        const taskNumber = this.nextProjectTaskNumber(project.workspace_id, projectId);
+        this.workspaceDatabase.raw.prepare(
+          `INSERT INTO work_items (
+             id, workspace_id, project_id, description, task_number,
+             source_conversation_id, source_message_id, source_thread_id,
+             created_by_membership_id, created_by_project_membership_id,
+             lifecycle_status, assignee_membership_id, assignee_project_membership_id,
+             assignment_revision, revision, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, 1, ?, ?)`,
+        ).run(
+          workItemId,
+          project.workspace_id,
+          projectId,
+          description,
+          taskNumber,
+          currentSourceAccess.conversation.id,
+          currentSourceMessage.id,
+          currentSourceMessage.thread_id,
+          access.workspaceMembership.id,
+          access.projectMembership.id,
+          assignee?.workspaceMembershipId ?? null,
+          assignee?.projectMembershipId ?? null,
+          assignee ? 1 : 0,
+          timestamp,
+          timestamp,
+        );
+        this.replaceWorkItemAssignees(project.workspace_id, projectId, workItemId, assignees, timestamp);
+        // Creating a WorkItem records source provenance only. It must not add
+        // the newly created task as a message mention: only WorkItems that the
+        // author explicitly selected while composing the source message belong
+        // in message_work_item_references_v2.
+        const projectVersion = this.bumpProjectContext(projectId, timestamp);
+        const sourcePayload = {
+          projectId,
+          sourceConversationId: currentSourceAccess.conversation.id,
+          sourceMessageId: currentSourceMessage.id,
+          sourceThreadId: currentSourceMessage.thread_id,
+          assigneeProjectMembershipId: assignee?.projectMembershipId ?? null,
+          assigneeProjectMembershipIds: assignees.map((member) => member.projectMembershipId),
+        };
+        this.appendChange(
+          project.workspace_id,
+          null,
+          null,
+          null,
+          'work_item_created',
+          'work_item',
+          workItemId,
+          sourcePayload,
+          timestamp,
+          { projectId, projectVersion },
+        );
+        this.appendAudit(
+          project.workspace_id,
+          principal.actorId,
+          access.workspaceMembership.id,
+          'work_item.create',
+          'work_item',
+          workItemId,
+          sourcePayload,
+          timestamp,
+        );
+        let wakeSequence: number | null = null;
+        for (const member of assignees) {
+          if (member.actorType !== 'agent') continue;
+          wakeSequence = this.enqueueWorkItemAttention(
+            project.workspace_id, member.actorId, workItemId, null, 'work_item_assignment', timestamp,
+          );
+        }
+        return { workItemId, wakeSequence };
+      },
+    );
+    if (result.wakeSequence !== null) this.agentInboxWakeEmitter.emit('changed');
+    return this.getWorkItem(principal, result.workItemId);
+  }
+
+  listProjectWorkItems(principal: HumanPrincipal, projectId: string): WorkItemView[] {
+    const access = this.requireProjectAccess(principal.actorId, projectId);
+    const rows = this.workspaceDatabase.raw.prepare(
+      `SELECT * FROM work_items
+       WHERE workspace_id = ? AND project_id = ?
+       ORDER BY updated_at DESC, id DESC`,
+    ).all(access.project.workspace_id, projectId) as unknown as WorkItemRow[];
+    return rows.map((row) => this.mapWorkItem(row));
+  }
+
+  getWorkItem(principal: HumanPrincipal, workItemId: string): WorkItemView {
+    const workItem = this.requireWorkItem(workItemId);
+    this.requireProjectAccess(principal.actorId, workItem.project_id);
+    return this.mapWorkItem(workItem);
+  }
+
+  listWorkItemComments(principal: HumanPrincipal, workItemId: string): WorkItemCommentView[] {
+    const workItem = this.requireWorkItem(workItemId);
+    this.requireProjectAccess(principal.actorId, workItem.project_id);
+    const rows = this.workspaceDatabase.raw.prepare(
+      `SELECT * FROM work_item_comments
+       WHERE workspace_id = ? AND work_item_id = ?
+       ORDER BY comment_position, id`,
+    ).all(workItem.workspace_id, workItemId) as unknown as WorkItemCommentRow[];
+    return rows.map((row) => this.mapWorkItemComment(row));
+  }
+
+  postWorkItemComment(
+    principal: HumanPrincipal,
+    workItemId: string,
+    input: {
+      body: string;
+      mentionedActorIds?: string[];
+      workItemIds?: string[];
+      artifactSelections?: Array<{ artifactId: string; artifactVersionId: string }>;
+    },
+    idempotencyKey: string,
+  ): WorkItemCommentView {
+    const workItem = this.requireWorkItem(workItemId);
+    const body = input.body.trim();
+    invariant(body.length > 0 && body.length <= 10_000,
+      'INVALID_WORK_ITEM_COMMENT', 'WorkItem comment body is required.');
+    const mentionedActorIds = [...new Set(input.mentionedActorIds ?? [])];
+    const result = this.idempotent(
+      workItem.workspace_id,
+      principal.actorId,
+      'PostWorkItemComment',
+      idempotencyKey,
+      { workItemId, body, mentionedActorIds, workItemIds: input.workItemIds ?? [], artifactSelections: input.artifactSelections ?? [] },
+      () => {
+        const current = this.requireWorkItem(workItemId);
+        const access = this.requireProjectAccess(principal.actorId, current.project_id);
+        const referencedWorkItemIds = this.normalizeWorkItemCommentReferences(current, input.workItemIds);
+        return this.insertWorkItemComment(
+          current,
+          access.workspaceMembership,
+          access.projectMembership,
+          body,
+          mentionedActorIds,
+          referencedWorkItemIds,
+          input.artifactSelections ?? [],
+          principal.actorId,
+        );
+      },
+    );
+    if (result.wakeCount > 0) this.agentInboxWakeEmitter.emit('changed');
+    return this.mapWorkItemComment(this.requireWorkItemComment(result.commentId));
+  }
+
+  assignWorkItem(
+    principal: HumanPrincipal,
+    workItemId: string,
+    input: {
+      assigneeProjectMembershipId: string | null;
+      assigneeProjectMembershipIds?: string[];
+      expectedRevision: number;
+      expectedAssignmentRevision: number;
+    },
+    idempotencyKey: string,
+  ): WorkItemView {
+    const existing = this.requireWorkItem(workItemId);
+    const assigneeProjectMembershipIds = this.normalizeWorkItemAssigneeIds(input);
+    const normalizedInput = { ...input, assigneeProjectMembershipIds };
+    const result = this.idempotent(existing.workspace_id, principal.actorId, 'AssignWorkItem', idempotencyKey, normalizedInput, () => {
+      const current = this.requireWorkItem(workItemId);
+      const authority = this.requireWorkItemManager(principal.actorId, current);
+      invariant(current.lifecycle_status === 'open' || current.lifecycle_status === 'blocked',
+        'WORK_ITEM_TERMINAL', 'A terminal WorkItem cannot be reassigned.', 409);
+      const currentAssigneeIds = this.getWorkItemAssigneeIds(current);
+      invariant(currentAssigneeIds.join(',') !== assigneeProjectMembershipIds.join(','),
+        'WORK_ITEM_ASSIGNMENT_UNCHANGED', 'WorkItem is already assigned to that member.', 409);
+      const assignees = assigneeProjectMembershipIds.map((id) =>
+        this.getProjectMember(current.workspace_id, current.project_id, id));
+      const assignee = assignees[0] ?? null;
+      const timestamp = nowMs();
+      const updated = this.workspaceDatabase.raw.prepare(
+        `UPDATE work_items
+         SET assignee_membership_id = ?, assignee_project_membership_id = ?, current_submission_id = NULL,
+             assignment_revision = assignment_revision + 1, revision = revision + 1, updated_at = ?
+         WHERE id = ? AND lifecycle_status IN ('open', 'blocked')
+           AND revision = ? AND assignment_revision = ?
+         RETURNING revision, assignment_revision`,
+      ).get(
+        assignee?.workspaceMembershipId ?? null,
+        assignee?.projectMembershipId ?? null,
+        timestamp,
+        workItemId,
+        input.expectedRevision,
+        input.expectedAssignmentRevision,
+      ) as { revision: number; assignment_revision: number } | undefined;
+      invariant(updated, 'WORK_ITEM_REVISION_CONFLICT', 'WorkItem assignment changed concurrently.', 409);
+      this.replaceWorkItemAssignees(current.workspace_id, current.project_id, workItemId, assignees, timestamp);
+
+      this.handleWorkItemAttentionAsHandled(current.workspace_id, current.id);
+      let wakeSequence: number | null = null;
+      for (const member of assignees) {
+        if (member.actorType !== 'agent') continue;
+        wakeSequence = this.enqueueWorkItemAttention(
+          current.workspace_id, member.actorId, current.id, null, 'work_item_assignment', timestamp,
+        );
+      }
+      this.recordWorkItemChange(current, 'work_item_assigned', {
+        assigneeProjectMembershipId: assignee?.projectMembershipId ?? null,
+        assigneeProjectMembershipIds: assignees.map((member) => member.projectMembershipId),
+        revision: updated.revision,
+        assignmentRevision: updated.assignment_revision,
+      }, timestamp);
+      this.appendAudit(current.workspace_id, principal.actorId, authority.id, 'work_item.assign', 'work_item', workItemId, {
+        assigneeProjectMembershipId: assignee?.projectMembershipId ?? null,
+        assigneeProjectMembershipIds: assignees.map((member) => member.projectMembershipId),
+        revision: updated.revision,
+        assignmentRevision: updated.assignment_revision,
+      }, timestamp);
+      return { wakeSequence };
+    });
+    if (result.wakeSequence !== null) this.agentInboxWakeEmitter.emit('changed');
+    return this.getWorkItem(principal, workItemId);
+  }
+
+  blockWorkItem(
+    principal: HumanPrincipal,
+    workItemId: string,
+    input: { reason: string; expectedRevision: number },
+    idempotencyKey: string,
+  ): WorkItemView {
+    const existing = this.requireWorkItem(workItemId);
+    const reason = input.reason.trim();
+    invariant(reason.length > 0 && reason.length <= 2000, 'WORK_ITEM_BLOCK_REASON_REQUIRED', 'Blocking requires a reason.');
+    return this.idempotent(existing.workspace_id, principal.actorId, 'BlockWorkItem', idempotencyKey, input, () => {
+      const current = this.requireWorkItem(workItemId);
+      const authority = this.requireHumanWorkItemAuthority(principal.actorId, current);
+      invariant(current.lifecycle_status === 'open', 'WORK_ITEM_NOT_OPEN', 'Only an open WorkItem can be blocked.', 409);
+      const timestamp = nowMs();
+      const updated = this.workspaceDatabase.raw.prepare(
+        `UPDATE work_items
+         SET lifecycle_status = 'blocked', blocker_reason = ?, revision = revision + 1, updated_at = ?
+         WHERE id = ? AND lifecycle_status = 'open' AND revision = ? RETURNING revision`,
+      ).get(reason, timestamp, workItemId, input.expectedRevision) as { revision: number } | undefined;
+      invariant(updated, 'WORK_ITEM_REVISION_CONFLICT', 'WorkItem changed concurrently.', 409);
+      this.handleWorkItemAttentionAsHandled(current.workspace_id, workItemId);
+      this.recordWorkItemChange(current, 'work_item_blocked', { reason, revision: updated.revision }, timestamp);
+      this.appendAudit(current.workspace_id, principal.actorId, authority.id, 'work_item.block', 'work_item', workItemId,
+        { reason, revision: updated.revision }, timestamp);
+      return this.mapWorkItem(this.requireWorkItem(workItemId));
+    });
+  }
+
+  unblockWorkItem(
+    principal: HumanPrincipal,
+    workItemId: string,
+    expectedRevision: number,
+    idempotencyKey: string,
+  ): WorkItemView {
+    const existing = this.requireWorkItem(workItemId);
+    return this.idempotent(existing.workspace_id, principal.actorId, 'UnblockWorkItem', idempotencyKey,
+      { expectedRevision }, () => {
+        const current = this.requireWorkItem(workItemId);
+        const authority = this.requireWorkItemManager(principal.actorId, current);
+        invariant(current.lifecycle_status === 'blocked', 'WORK_ITEM_NOT_BLOCKED', 'Only a blocked WorkItem can be unblocked.', 409);
+        const timestamp = nowMs();
+        const updated = this.workspaceDatabase.raw.prepare(
+          `UPDATE work_items
+           SET lifecycle_status = 'open', blocker_reason = NULL, revision = revision + 1, updated_at = ?
+           WHERE id = ? AND lifecycle_status = 'blocked' AND revision = ? RETURNING revision`,
+        ).get(timestamp, workItemId, expectedRevision) as { revision: number } | undefined;
+        invariant(updated, 'WORK_ITEM_REVISION_CONFLICT', 'WorkItem changed concurrently.', 409);
+        this.recordWorkItemChange(current, 'work_item_unblocked', { revision: updated.revision }, timestamp);
+        this.appendAudit(current.workspace_id, principal.actorId, authority.id, 'work_item.unblock', 'work_item', workItemId,
+          { revision: updated.revision }, timestamp);
+        return this.mapWorkItem(this.requireWorkItem(workItemId));
+      });
+  }
+
+  completeWorkItem(
+    principal: HumanPrincipal,
+    workItemId: string,
+    expectedRevision: number,
+    idempotencyKey: string,
+  ): WorkItemView {
+    const existing = this.requireWorkItem(workItemId);
+    return this.idempotent(existing.workspace_id, principal.actorId, 'CompleteWorkItem', idempotencyKey,
+      { expectedRevision }, () => {
+        const current = this.requireWorkItem(workItemId);
+        const authority = this.requireWorkItemManager(principal.actorId, current);
+        invariant(current.lifecycle_status === 'open', 'WORK_ITEM_NOT_OPEN', 'Only an open WorkItem can be completed.', 409);
+        const timestamp = nowMs();
+        const updated = this.workspaceDatabase.raw.prepare(
+          `UPDATE work_items
+           SET lifecycle_status = 'completed', assignee_membership_id = NULL,
+               assignee_project_membership_id = NULL, assignment_revision = assignment_revision + 1,
+               revision = revision + 1, updated_at = ?, completed_at = ?
+           WHERE id = ? AND lifecycle_status = 'open' AND revision = ? RETURNING revision, assignment_revision`,
+        ).get(timestamp, timestamp, workItemId, expectedRevision) as
+          | { revision: number; assignment_revision: number }
+          | undefined;
+        invariant(updated, 'WORK_ITEM_REVISION_CONFLICT', 'WorkItem changed concurrently.', 409);
+        // Keep the ordered assignee records after completion so the board and
+        // message card retain who delivered the WorkItem.  The legacy primary
+        // assignee columns are cleared by the terminal-state invariant, while
+        // work_item_assignees remains the historical assignment source.
+        this.handleWorkItemAttentionAsHandled(current.workspace_id, workItemId);
+        this.recordWorkItemChange(current, 'work_item_completed', updated, timestamp);
+        this.appendAudit(current.workspace_id, principal.actorId, authority.id, 'work_item.complete', 'work_item', workItemId,
+          updated, timestamp);
+        return this.mapWorkItem(this.requireWorkItem(workItemId));
+      });
+  }
+
+  cancelWorkItem(
+    principal: HumanPrincipal,
+    workItemId: string,
+    input: { reason?: string | null; expectedRevision: number },
+    idempotencyKey: string,
+  ): WorkItemView {
+    const existing = this.requireWorkItem(workItemId);
+    const reason = typeof input.reason === 'string' && input.reason.trim().length > 0
+      ? input.reason.trim()
+      : null;
+    invariant(reason === null || reason.length <= 2000, 'WORK_ITEM_CANCEL_REASON_TOO_LONG', 'Cancellation reason must be at most 2000 characters.');
+    return this.idempotent(existing.workspace_id, principal.actorId, 'CancelWorkItem', idempotencyKey, input, () => {
+      const current = this.requireWorkItem(workItemId);
+      const authority = this.requireWorkItemManager(principal.actorId, current);
+      invariant(current.lifecycle_status === 'open' || current.lifecycle_status === 'blocked',
+        'WORK_ITEM_TERMINAL', 'A terminal WorkItem cannot be cancelled.', 409);
+      const timestamp = nowMs();
+      const updated = this.workspaceDatabase.raw.prepare(
+        `UPDATE work_items
+         SET lifecycle_status = 'cancelled', blocker_reason = NULL, cancellation_reason = ?,
+             assignee_membership_id = NULL, assignee_project_membership_id = NULL,
+             assignment_revision = assignment_revision + 1,
+             revision = revision + 1, updated_at = ?, cancelled_at = ?
+         WHERE id = ? AND lifecycle_status IN ('open', 'blocked') AND revision = ?
+         RETURNING revision, assignment_revision`,
+      ).get(reason, timestamp, timestamp, workItemId, input.expectedRevision) as
+        | { revision: number; assignment_revision: number }
+        | undefined;
+      invariant(updated, 'WORK_ITEM_REVISION_CONFLICT', 'WorkItem changed concurrently.', 409);
+      // Keep the ordered assignee records after cancellation as well, so the
+      // card can show which Agent owned the cancelled WorkItem.
+      this.handleWorkItemAttentionAsHandled(current.workspace_id, workItemId);
+      this.recordWorkItemChange(current, 'work_item_cancelled', { reason, ...updated }, timestamp);
+      this.appendAudit(current.workspace_id, principal.actorId, authority.id, 'work_item.cancel', 'work_item', workItemId,
+        { reason, ...updated }, timestamp);
+      return this.mapWorkItem(this.requireWorkItem(workItemId));
+    });
+  }
+
+  createWorkspaceJoinLink(
+    principal: HumanPrincipal,
+    workspaceId: string,
+  ): WorkspaceJoinLinkCreatedView {
+    const creator = this.requireWorkspaceOwner(workspaceId, principal.actorId);
+    const token = issueToken();
+    const joinLinkId = newId();
+    const tokenCiphertext = this.workspaceJoinLinkTokenCipher.encrypt(token.raw, workspaceId, joinLinkId);
+    const timestamp = nowMs();
+    this.workspaceDatabase.transaction(() => {
+      this.workspaceDatabase.raw
+        .prepare(
+          `INSERT INTO workspace_join_links (
+             id, workspace_id, token_hash, token_ciphertext, status, revision,
+             created_by_membership_id, use_count, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, 'active', 1, ?, 0, ?, ?)`,
+        )
+        .run(joinLinkId, workspaceId, token.hash, tokenCiphertext, creator.id, timestamp, timestamp);
       this.appendChange(
         workspaceId,
         null,
         null,
         null,
-        'invitation_created',
-        'workspace_invitation',
-        invitationId,
-        { invitationId },
+        'workspace_join_link_created',
+        'workspace_join_link',
+        joinLinkId,
+        { joinLinkId },
         timestamp,
-        { recipientMembershipIds: this.listWorkspaceOwnerMembershipIds(workspaceId) },
       );
       this.enqueueDelivery(
         workspaceId,
-        'workspace.invitation-created',
-        'workspace_invitation',
-        invitationId,
-        { invitationId },
-        invitationId,
+        'workspace.join-link-created',
+        'workspace_join_link',
+        joinLinkId,
+        { joinLinkId },
+        joinLinkId,
         timestamp,
       );
-      this.appendAudit(workspaceId, principal.actorId, inviter.id, 'workspace.invitation.create', 'workspace_invitation', invitationId, {
-        verifiedEmail,
-        membershipRole: input.membershipRole,
-      }, timestamp);
-      return this.mapInvitation(this.requireInvitation(invitationId));
+      this.appendAudit(
+        workspaceId,
+        principal.actorId,
+        creator.id,
+        'workspace.join-link.create',
+        'workspace_join_link',
+        joinLinkId,
+        {},
+        timestamp,
+      );
     });
+    return { ...this.mapWorkspaceJoinLink(this.requireWorkspaceJoinLink(joinLinkId)), token: token.raw };
   }
 
-  listInvitations(principal: HumanPrincipal, workspaceId: string, cursor?: string, limit = 100): Page<WorkspaceInvitationView> {
-    this.requireWorkspaceOwner(workspaceId, principal.actorId);
+  listWorkspaceJoinLinks(
+    principal: HumanPrincipal,
+    workspaceId: string,
+    cursor?: string,
+    limit = 100,
+  ): Page<WorkspaceJoinLinkView> {
+    this.requireMembership(workspaceId, principal.actorId);
     const pageCursor = this.requirePageCursor(cursor);
     const pageLimit = this.pageLimit(limit);
     const rows = this.workspaceDatabase.raw
       .prepare(
-        `SELECT * FROM workspace_invitations
+        `SELECT * FROM workspace_join_links
          WHERE workspace_id = ?
            AND (? IS NULL OR created_at > ? OR (created_at = ? AND id > ?))
          ORDER BY created_at, id LIMIT ?`,
@@ -1585,130 +1873,153 @@ export class WorkspaceService {
         pageCursor?.createdAt ?? 0,
         pageCursor?.id ?? '',
         pageLimit + 1,
-      ) as unknown as InvitationRow[];
+      ) as unknown as WorkspaceJoinLinkRow[];
     const hasMore = rows.length > pageLimit;
-    const items = rows.slice(0, pageLimit).map((row) => this.mapInvitation(row));
+    const items = rows.slice(0, pageLimit).map((row) => this.mapWorkspaceJoinLink(row));
     const last = items.at(-1);
     return { items, nextCursor: hasMore && last ? encodePageCursor(last.createdAt, last.id) : null };
   }
 
-  acceptInvitation(
-    principal: HumanPrincipal,
-    invitationId: string,
-    expectedRevision: number,
-    idempotencyKey: string,
-  ): WorkspaceMemberView {
-    const human = this.workspaceDatabase.raw
-      .prepare("SELECT verified_email FROM humans WHERE actor_id = ? AND status = 'active'")
-      .get(principal.actorId) as { verified_email: string } | undefined;
-    invariant(human, 'HUMAN_NOT_FOUND', 'Human identity is not active.', 403);
-    const invitation = this.workspaceDatabase.raw
-      .prepare("SELECT * FROM workspace_invitations WHERE id = ? AND verified_email = ?")
-      .get(invitationId, human.verified_email) as InvitationRow | undefined;
-    invariant(invitation, 'INVITATION_NOT_FOUND', 'Invitation does not exist or is not addressed to this Human.', 404);
-    return this.idempotent(invitation.workspace_id, principal.actorId, 'AcceptInvitation', idempotencyKey, { expectedRevision }, () => {
-      const current = this.requireInvitation(invitationId);
-      invariant(current.verified_email === human.verified_email, 'INVITATION_NOT_FOUND', 'Invitation does not exist or is not addressed to this Human.', 404);
-      invariant(current.status === 'pending', 'INVITATION_NOT_PENDING', 'Invitation is no longer pending.', 409);
-      const active = this.workspaceDatabase.raw
-        .prepare("SELECT 1 FROM workspace_memberships WHERE workspace_id = ? AND actor_id = ? AND status = 'active'")
-        .get(current.workspace_id, principal.actorId);
-      invariant(!active, 'MEMBERSHIP_ALREADY_ACTIVE', 'Human already has an active Membership in this Workspace.', 409);
-      const membershipId = newId();
-      const timestamp = nowMs();
-      this.workspaceDatabase.raw
-        .prepare(
-          `INSERT INTO workspace_memberships (
-             id, workspace_id, actor_id, membership_role,
-             status, revision, joined_at, updated_at
-           ) VALUES (?, ?, ?, ?, 'active', 1, ?, ?)`,
-        )
-        .run(
-          membershipId,
-          current.workspace_id,
-          principal.actorId,
-          current.membership_role,
-          timestamp,
-          timestamp,
-        );
-      const accepted = this.workspaceDatabase.raw
-        .prepare(
-          `UPDATE workspace_invitations
-           SET status = 'accepted', revision = revision + 1, accepted_by_human_id = ?,
-               accepted_membership_id = ?, updated_at = ?, terminal_at = ?
-           WHERE id = ? AND status = 'pending' AND revision = ?`,
-        )
-        .run(principal.actorId, membershipId, timestamp, timestamp, invitationId, expectedRevision);
-      invariant(accepted.changes === 1, 'STALE_REVISION', 'Invitation revision or status changed.', 409);
-      const contextVersion = this.bumpWorkspaceContext(current.workspace_id, timestamp);
-      this.appendChange(
-        current.workspace_id,
-        contextVersion,
-        null,
-        null,
-        'workspace_member_joined',
-        'workspace_membership',
-        membershipId,
-        { membershipId },
-        timestamp,
-      );
-      this.enqueueDelivery(
-        current.workspace_id,
-        'workspace.member-joined',
-        'workspace_membership',
-        membershipId,
-        { membershipId },
-        membershipId,
-        timestamp,
-      );
-      this.appendAudit(current.workspace_id, principal.actorId, membershipId, 'workspace.invitation.accept', 'workspace_invitation', invitationId, {
-        membershipId,
-      }, timestamp);
-      return this.getWorkspaceMember(current.workspace_id, membershipId);
-    });
+  previewWorkspaceJoinLink(principal: HumanPrincipal, token: string): WorkspaceJoinLinkPreviewView {
+    const link = this.requireWorkspaceJoinLinkByToken(token);
+    const workspace = this.workspaceDatabase.raw
+      .prepare('SELECT name FROM workspaces WHERE id = ?')
+      .get(link.workspace_id) as { name: string } | undefined;
+    invariant(workspace, 'WORKSPACE_NOT_FOUND', 'Workspace does not exist.', 404);
+    const alreadyMember = Boolean(this.workspaceDatabase.raw
+      .prepare("SELECT 1 FROM workspace_memberships WHERE workspace_id = ? AND actor_id = ? AND status = 'active'")
+      .get(link.workspace_id, principal.actorId));
+    return {
+      workspaceId: link.workspace_id,
+      workspaceName: workspace.name,
+      status: link.status,
+      alreadyMember,
+    };
   }
 
-  revokeInvitation(
+  acceptWorkspaceJoinLink(
     principal: HumanPrincipal,
-    invitationId: string,
+    token: string,
+    idempotencyKey: string,
+  ): WorkspaceMemberView {
+    const link = this.requireWorkspaceJoinLinkByToken(token);
+    return this.idempotent(
+      link.workspace_id,
+      principal.actorId,
+      'AcceptWorkspaceJoinLink',
+      idempotencyKey,
+      { joinLinkId: link.id },
+      () => {
+        const current = this.requireWorkspaceJoinLink(link.id);
+        invariant(current.status === 'active', 'WORKSPACE_JOIN_LINK_REVOKED', 'This Workspace join link has been revoked.', 410);
+        const active = this.workspaceDatabase.raw
+          .prepare("SELECT id FROM workspace_memberships WHERE workspace_id = ? AND actor_id = ? AND status = 'active'")
+          .get(current.workspace_id, principal.actorId) as { id: string } | undefined;
+        if (active) return this.getWorkspaceMember(current.workspace_id, active.id);
+
+        const membershipId = newId();
+        const timestamp = nowMs();
+        this.workspaceDatabase.raw
+          .prepare(
+            `INSERT INTO workspace_memberships (
+               id, workspace_id, actor_id, membership_role,
+               status, revision, joined_at, updated_at
+             ) VALUES (?, ?, ?, 'member', 'active', 1, ?, ?)`,
+          )
+          .run(membershipId, current.workspace_id, principal.actorId, timestamp, timestamp);
+        this.workspaceDatabase.raw
+          .prepare(
+            `UPDATE workspace_join_links
+             SET use_count = use_count + 1, last_used_at = ?, updated_at = ?
+             WHERE id = ? AND status = 'active'`,
+          )
+          .run(timestamp, timestamp, current.id);
+        const contextVersion = this.bumpWorkspaceContext(current.workspace_id, timestamp);
+        this.appendChange(
+          current.workspace_id,
+          contextVersion,
+          null,
+          null,
+          'workspace_member_joined',
+          'workspace_membership',
+          membershipId,
+          { membershipId },
+          timestamp,
+        );
+        this.enqueueDelivery(
+          current.workspace_id,
+          'workspace.member-joined',
+          'workspace_membership',
+          membershipId,
+          { membershipId },
+          membershipId,
+          timestamp,
+        );
+        this.appendAudit(
+          current.workspace_id,
+          principal.actorId,
+          membershipId,
+          'workspace.join-link.accept',
+          'workspace_join_link',
+          current.id,
+          { membershipId },
+          timestamp,
+        );
+        return this.getWorkspaceMember(current.workspace_id, membershipId);
+      },
+    );
+  }
+
+  revokeWorkspaceJoinLink(
+    principal: HumanPrincipal,
+    joinLinkId: string,
     expectedRevision: number,
     idempotencyKey: string,
-  ): WorkspaceInvitationView {
-    const invitation = this.requireInvitation(invitationId);
-    return this.idempotent(invitation.workspace_id, principal.actorId, 'RevokeInvitation', idempotencyKey, { expectedRevision }, () => {
-      const membership = this.requireWorkspaceOwner(invitation.workspace_id, principal.actorId);
+  ): WorkspaceJoinLinkView {
+    const link = this.requireWorkspaceJoinLink(joinLinkId);
+    return this.idempotent(link.workspace_id, principal.actorId, 'RevokeWorkspaceJoinLink', idempotencyKey, { expectedRevision }, () => {
+      const membership = this.requireWorkspaceOwner(link.workspace_id, principal.actorId);
       const timestamp = nowMs();
       const updated = this.workspaceDatabase.raw
         .prepare(
-          `UPDATE workspace_invitations
-           SET status = 'revoked', revision = revision + 1, updated_at = ?, terminal_at = ?
-           WHERE id = ? AND status = 'pending' AND revision = ?`,
+          `UPDATE workspace_join_links
+           SET status = 'revoked', token_ciphertext = NULL,
+               revision = revision + 1, updated_at = ?, revoked_at = ?
+           WHERE id = ? AND status = 'active' AND revision = ?`,
         )
-        .run(timestamp, timestamp, invitationId, expectedRevision);
-      invariant(updated.changes === 1, 'STALE_REVISION', 'Invitation revision or status changed.', 409);
+        .run(timestamp, timestamp, joinLinkId, expectedRevision);
+      invariant(updated.changes === 1, 'STALE_REVISION', 'Workspace join link revision or status changed.', 409);
       this.appendChange(
-        invitation.workspace_id,
+        link.workspace_id,
         null,
         null,
         null,
-        'invitation_revoked',
-        'workspace_invitation',
-        invitationId,
-        { invitationId },
+        'workspace_join_link_revoked',
+        'workspace_join_link',
+        joinLinkId,
+        { joinLinkId },
         timestamp,
-        { recipientMembershipIds: this.listWorkspaceOwnerMembershipIds(invitation.workspace_id) },
       );
       this.enqueueDelivery(
-        invitation.workspace_id,
-        'workspace.invitation-revoked',
-        'workspace_invitation',
-        invitationId,
-        { invitationId },
-        `revoked:${invitationId}:${expectedRevision}`,
+        link.workspace_id,
+        'workspace.join-link-revoked',
+        'workspace_join_link',
+        joinLinkId,
+        { joinLinkId },
+        `revoked:${joinLinkId}:${expectedRevision}`,
         timestamp,
       );
-      this.appendAudit(invitation.workspace_id, principal.actorId, membership.id, 'workspace.invitation.revoke', 'workspace_invitation', invitationId, {}, timestamp);
-      return this.mapInvitation(this.requireInvitation(invitationId));
+      this.appendAudit(
+        link.workspace_id,
+        principal.actorId,
+        membership.id,
+        'workspace.join-link.revoke',
+        'workspace_join_link',
+        joinLinkId,
+        {},
+        timestamp,
+      );
+      return this.mapWorkspaceJoinLink(this.requireWorkspaceJoinLink(joinLinkId));
     });
   }
 
@@ -1892,9 +2203,11 @@ export class WorkspaceService {
     const membership = this.requireMembership(workspaceId, principal.actorId);
     const agent = this.requireAgentIdentityRow(workspaceId, agentId);
     invariant(
-      agent.membership_status === 'active'
-      || membership.membership_role === 'owner'
-      || membership.id === agent.owner_membership_id,
+      membership.membership_role === 'owner'
+      || (agent.membership_status === 'active' && (
+        membership.id === agent.owner_membership_id
+        || this.hasSharedProjectParticipation(workspaceId, membership.id, agent.membership_id)
+      )),
       'AGENT_NOT_FOUND',
       'Agent does not exist.',
       404,
@@ -1956,10 +2269,25 @@ export class WorkspaceService {
              ORDER BY latest.joined_at DESC, latest.id DESC LIMIT 1
            )
          JOIN workspace_memberships owner
-           ON owner.workspace_id = a.workspace_id AND owner.id = a.owner_membership_id AND owner.status = 'active'
+           ON owner.workspace_id = a.workspace_id AND owner.id = a.owner_membership_id
          JOIN humans h ON h.actor_id = owner.actor_id
          WHERE a.workspace_id = ? AND a.deleted_at IS NULL
            AND (m.status = 'active' OR a.owner_membership_id = ? OR ? = 'owner')
+           AND (
+             a.owner_membership_id = ? OR ? = 'owner'
+             OR EXISTS (
+               SELECT 1
+               FROM project_memberships observer_project
+               JOIN project_memberships agent_project
+                 ON agent_project.workspace_id = observer_project.workspace_id
+                AND agent_project.project_id = observer_project.project_id
+                AND agent_project.status = 'active'
+               WHERE observer_project.workspace_id = a.workspace_id
+                 AND observer_project.workspace_membership_id = ?
+                 AND observer_project.status = 'active'
+                 AND agent_project.workspace_membership_id = m.id
+             )
+           )
            AND (? IS NULL OR a.created_at > ? OR (a.created_at = ? AND a.actor_id > ?))
          ORDER BY a.created_at, a.actor_id LIMIT ?`,
       )
@@ -1967,6 +2295,9 @@ export class WorkspaceService {
         workspaceId,
         observer.id,
         observer.membership_role,
+        observer.id,
+        observer.membership_role,
+        observer.id,
         pageCursor?.createdAt ?? null,
         pageCursor?.createdAt ?? 0,
         pageCursor?.createdAt ?? 0,
@@ -2264,13 +2595,13 @@ export class WorkspaceService {
           this.workspaceDatabase.raw.prepare(
             'UPDATE private_context_grants SET revoked_at = ? WHERE workspace_id = ? AND run_id = ? AND revoked_at IS NULL',
           ).run(timestamp, workspaceId, run.id);
-          this.markRunInboxHandled(workspaceId, run.id, timestamp);
         }
         const disabled = this.workspaceDatabase.raw.prepare(
           `UPDATE agent_runtime_bindings SET status = 'disabled', updated_at = ?
            WHERE id = ? AND status = 'active'`,
         ).run(timestamp, binding.id);
         invariant(disabled.changes === 1, 'RUNTIME_BINDING_REVISION_CONFLICT', 'Runtime Binding changed.', 409);
+        this.fenceAgentInboxBinding(workspaceId, agentId, timestamp);
         const bindingRevision = binding.binding_revision + 1;
         this.workspaceDatabase.raw.prepare(
           `INSERT INTO agent_runtime_bindings (
@@ -2333,7 +2664,14 @@ export class WorkspaceService {
       idempotencyKey,
       { expectedRevision },
       () => {
-        const caller = this.requireWorkspaceOwner(workspaceId, principal.actorId);
+        const caller = this.requireMembership(workspaceId, principal.actorId);
+        const agentIdentity = this.requireAgentIdentityRow(workspaceId, agentId);
+        invariant(
+          caller.membership_role === 'owner' || agentIdentity.owner_membership_id === caller.id,
+          'AGENT_TERMINATION_AUTHORITY_REQUIRED',
+          'Only the Workspace Owner or the Agent Owner may terminate this Agent Membership.',
+          403,
+        );
         const timestamp = nowMs();
         const current = this.workspaceDatabase.raw
         .prepare(
@@ -2350,6 +2688,7 @@ export class WorkspaceService {
           membership_revision: number;
         } | undefined;
         invariant(current, 'AGENT_LIFECYCLE_CONFLICT', 'Agent lifecycle or revision changed.', 409);
+        this.interruptActiveAgentActivityTurns(workspaceId, agentId, timestamp);
 
       const pendingRequests = this.workspaceDatabase.raw
         .prepare(
@@ -2398,7 +2737,6 @@ export class WorkspaceService {
         this.workspaceDatabase.raw
           .prepare('UPDATE private_context_grants SET revoked_at = ? WHERE workspace_id = ? AND run_id = ? AND revoked_at IS NULL')
           .run(timestamp, workspaceId, run.id);
-        this.markRunInboxHandled(workspaceId, run.id, timestamp);
       }
 
       this.workspaceDatabase.raw
@@ -2514,6 +2852,7 @@ export class WorkspaceService {
       );
       invariant(current.revision === expectedRevision, 'STALE_REVISION', 'Agent revision changed.', 409);
       const timestamp = nowMs();
+      this.interruptActiveAgentActivityTurns(workspaceId, agentId, timestamp);
       const deleted = this.workspaceDatabase.raw
         .prepare(
           `UPDATE agents
@@ -2871,36 +3210,650 @@ export class WorkspaceService {
       .filter((request) => request.status === 'accepted' || request.intake?.disposition === 'ready');
   }
 
-  getComputerAgentInbox(computerId: string, agentId: string): AgentInboxSummaryView {
-    this.requireComputerAgentBinding(computerId, agentId);
-    const highest = this.workspaceDatabase.raw.prepare(
-      'SELECT COALESCE(MAX(sequence), 0) AS sequence FROM agent_inbox_items WHERE agent_id = ?',
-    ).get(agentId) as { sequence: number };
+  recordComputerAgentActivity(
+    computerId: string,
+    agentId: string,
+    input: AgentActivityEventInput,
+  ): AgentActivityEventView {
+    const binding = this.requireComputerAgentBinding(computerId, agentId);
+    const title = input.title.trim();
+    invariant(title.length > 0 && title.length <= 500, 'INVALID_AGENT_ACTIVITY', 'Agent activity title is invalid.');
+    invariant(input.sequence > 0, 'INVALID_AGENT_ACTIVITY', 'Agent activity sequence must be positive.');
+    if (input.eventType === 'turn_started') {
+      invariant(input.sequence === 1 && input.status === 'in_progress', 'INVALID_AGENT_ACTIVITY',
+        'An Agent activity turn must start at sequence 1 in progress.');
+    } else if (input.eventType === 'turn_completed') {
+      invariant(input.status === 'completed', 'INVALID_AGENT_ACTIVITY', 'A completed turn requires completed status.');
+    } else if (input.eventType === 'turn_failed') {
+      invariant(input.status === 'failed', 'INVALID_AGENT_ACTIVITY', 'A failed turn requires failed status.');
+    }
+
+    return this.workspaceDatabase.transaction(() => {
+      const existing = this.agentActivityEventRow(input.eventId);
+      if (existing) {
+        invariant(
+          existing.workspace_id === binding.workspace_id
+          && existing.agent_id === agentId
+          && existing.turn_id === input.turnId
+          && existing.sequence === input.sequence
+          && existing.event_type === input.eventType
+          && existing.title === title
+          && existing.status === input.status,
+          'AGENT_ACTIVITY_CONFLICT',
+          'Agent activity event ID was reused with different content.',
+          409,
+        );
+        return this.mapAgentActivityEvent(existing);
+      }
+
+      const timestamp = nowMs();
+      if (input.eventType === 'turn_started') {
+        this.interruptActiveAgentActivityTurns(binding.workspace_id, agentId, timestamp);
+        this.createAgentActivityTurn(binding, computerId, agentId, input.turnId, timestamp);
+      } else {
+        let turn = this.workspaceDatabase.raw.prepare(
+          `SELECT status, computer_id, runtime_binding_revision
+           FROM agent_activity_turns WHERE workspace_id = ? AND id = ? AND agent_id = ?`,
+        ).get(binding.workspace_id, input.turnId, agentId) as {
+          status: 'active' | 'completed' | 'failed';
+          computer_id: string;
+          runtime_binding_revision: number;
+        } | undefined;
+        if (!turn) {
+          invariant(input.sequence > 1, 'INVALID_AGENT_ACTIVITY',
+            'A recovered Agent activity turn must continue after sequence 1.');
+          this.interruptActiveAgentActivityTurns(binding.workspace_id, agentId, timestamp);
+          this.createAgentActivityTurn(binding, computerId, agentId, input.turnId, timestamp);
+          this.workspaceDatabase.raw.prepare(
+            `INSERT INTO agent_activity_events (
+               id, workspace_id, turn_id, agent_id, sequence, event_type, title, status, created_at
+             ) VALUES (?, ?, ?, ?, ?, 'turn_started', '动态连接已恢复，继续处理', 'in_progress', ?)`,
+          ).run(
+            newId(),
+            binding.workspace_id,
+            input.turnId,
+            agentId,
+            input.sequence - 1,
+            timestamp,
+          );
+          turn = {
+            status: 'active',
+            computer_id: computerId,
+            runtime_binding_revision: binding.binding_revision,
+          };
+        }
+        invariant(
+          turn.computer_id === computerId && turn.runtime_binding_revision === binding.binding_revision,
+          'AGENT_ACTIVITY_BINDING_MISMATCH',
+          'Agent activity turn belongs to another Runtime Binding.',
+          403,
+        );
+        invariant(turn.status === 'active', 'AGENT_ACTIVITY_TURN_FINISHED', 'Agent activity turn is already finished.', 409);
+        const last = this.workspaceDatabase.raw.prepare(
+          'SELECT COALESCE(MAX(sequence), 0) AS sequence FROM agent_activity_events WHERE workspace_id = ? AND turn_id = ?',
+        ).get(binding.workspace_id, input.turnId) as { sequence: number };
+        invariant(last.sequence + 1 === input.sequence, 'AGENT_ACTIVITY_SEQUENCE_CONFLICT',
+          'Agent activity events must be recorded in order.', 409);
+      }
+
+      this.workspaceDatabase.raw.prepare(
+        `INSERT INTO agent_activity_events (
+           id, workspace_id, turn_id, agent_id, sequence, event_type, title, status, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        input.eventId,
+        binding.workspace_id,
+        input.turnId,
+        agentId,
+        input.sequence,
+        input.eventType,
+        title,
+        input.status,
+        timestamp,
+      );
+      if (input.eventType === 'turn_completed' || input.eventType === 'turn_failed') {
+        const turnStatus = input.eventType === 'turn_completed' ? 'completed' : 'failed';
+        const updated = this.workspaceDatabase.raw.prepare(
+          `UPDATE agent_activity_turns
+           SET status = ?, updated_at = ?, finished_at = ?
+           WHERE workspace_id = ? AND id = ? AND status = 'active'`,
+        ).run(turnStatus, timestamp, timestamp, binding.workspace_id, input.turnId);
+        invariant(updated.changes === 1, 'AGENT_ACTIVITY_TURN_FINISHED', 'Agent activity turn is already finished.', 409);
+      } else {
+        this.workspaceDatabase.raw.prepare(
+          'UPDATE agent_activity_turns SET updated_at = ? WHERE workspace_id = ? AND id = ?',
+        ).run(timestamp, binding.workspace_id, input.turnId);
+      }
+      return this.mapAgentActivityEvent(this.agentActivityEventRow(input.eventId)!);
+    });
+  }
+
+  listAgentActivity(
+    principal: HumanPrincipal,
+    workspaceId: string,
+    agentId?: string,
+    limit = 100,
+  ): AgentActivityEventView[] {
+    this.requireMembership(workspaceId, principal.actorId);
+    if (agentId) this.requireAgentIdentityRow(workspaceId, agentId);
+    const pageLimit = Math.min(Math.max(limit, 1), 200);
     const rows = this.workspaceDatabase.raw.prepare(
-      `SELECT conversation_id, thread_id, COUNT(*) AS pending_count,
-              MIN(sequence) AS first_sequence, MAX(sequence) AS last_sequence
-       FROM agent_inbox_items
-       WHERE agent_id = ? AND state = 'pending'
-       GROUP BY conversation_id, thread_id
+      `SELECT event.*, agent.name AS agent_name,
+              turn.status AS turn_status, turn.started_at AS turn_started_at,
+              turn.updated_at AS turn_updated_at, turn.finished_at AS turn_finished_at
+       FROM agent_activity_events event
+       JOIN agent_activity_turns turn
+         ON turn.workspace_id = event.workspace_id AND turn.id = event.turn_id
+       JOIN agents agent
+         ON agent.workspace_id = event.workspace_id AND agent.actor_id = event.agent_id
+       WHERE event.workspace_id = ? AND agent.deleted_at IS NULL
+         AND (? IS NULL OR event.agent_id = ?)
+       ORDER BY event.position DESC LIMIT ?`,
+    ).all(workspaceId, agentId ?? null, agentId ?? null, pageLimit) as unknown as AgentActivityEventRow[];
+    return rows.map((row) => this.mapAgentActivityEvent(row));
+  }
+
+  private interruptActiveAgentActivityTurns(workspaceId: string, agentId: string, timestamp: number): void {
+    const interrupted = this.workspaceDatabase.raw.prepare(
+      `SELECT id FROM agent_activity_turns
+       WHERE workspace_id = ? AND agent_id = ? AND status = 'active'`,
+    ).all(workspaceId, agentId) as Array<{ id: string }>;
+    for (const turn of interrupted) {
+      const last = this.workspaceDatabase.raw.prepare(
+        'SELECT COALESCE(MAX(sequence), 0) AS sequence FROM agent_activity_events WHERE workspace_id = ? AND turn_id = ?',
+      ).get(workspaceId, turn.id) as { sequence: number };
+      this.workspaceDatabase.raw.prepare(
+        `INSERT INTO agent_activity_events (
+           id, workspace_id, turn_id, agent_id, sequence, event_type, title, status, created_at
+         ) VALUES (?, ?, ?, ?, ?, 'turn_failed', 'Agent 动态连接中断', 'failed', ?)`,
+      ).run(newId(), workspaceId, turn.id, agentId, last.sequence + 1, timestamp);
+      this.workspaceDatabase.raw.prepare(
+        `UPDATE agent_activity_turns
+         SET status = 'failed', updated_at = ?, finished_at = ?
+         WHERE workspace_id = ? AND id = ? AND status = 'active'`,
+      ).run(timestamp, timestamp, workspaceId, turn.id);
+    }
+  }
+
+  private createAgentActivityTurn(
+    binding: { workspace_id: string; binding_revision: number },
+    computerId: string,
+    agentId: string,
+    turnId: string,
+    timestamp: number,
+  ): void {
+    this.workspaceDatabase.raw.prepare(
+      `INSERT INTO agent_activity_turns (
+         id, workspace_id, agent_id, computer_id, runtime_binding_revision,
+         status, started_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+    ).run(
+      turnId,
+      binding.workspace_id,
+      agentId,
+      computerId,
+      binding.binding_revision,
+      timestamp,
+      timestamp,
+    );
+  }
+
+  listComputerAgentWorkItems(computerId: string, agentId: string, projectId?: string): WorkItemView[] {
+    const binding = this.requireComputerAgentBinding(computerId, agentId);
+    const membership = this.requireMembership(binding.workspace_id, agentId);
+    const rows = this.workspaceDatabase.raw.prepare(
+      `SELECT item.*
+       FROM work_items item
+       JOIN project_memberships project_membership
+         ON project_membership.workspace_id = item.workspace_id
+        AND project_membership.project_id = item.project_id
+        AND project_membership.workspace_membership_id = ?
+        AND project_membership.status = 'active'
+       WHERE item.workspace_id = ?
+         AND (? IS NULL OR item.project_id = ?)
+       ORDER BY item.updated_at DESC, item.id DESC`,
+    ).all(membership.id, binding.workspace_id, projectId ?? null, projectId ?? null) as unknown as WorkItemRow[];
+    return rows.map((row) => this.mapWorkItem(row));
+  }
+
+  getComputerAgentWorkItem(
+    computerId: string,
+    agentId: string,
+    workItemId: string,
+  ): WorkItemView {
+    const binding = this.requireComputerAgentBinding(computerId, agentId);
+    const workItem = this.requireWorkItem(workItemId);
+    invariant(workItem.workspace_id === binding.workspace_id,
+      'WORK_ITEM_NOT_FOUND', 'WorkItem does not exist or is not accessible.', 404);
+    this.requireProjectAccess(agentId, workItem.project_id);
+    return this.mapWorkItem(workItem);
+  }
+
+  listComputerAgentWorkItemComments(
+    computerId: string,
+    agentId: string,
+    workItemId: string,
+  ): WorkItemCommentView[] {
+    const binding = this.requireComputerAgentBinding(computerId, agentId);
+    const workItem = this.requireWorkItem(workItemId);
+    invariant(workItem.workspace_id === binding.workspace_id,
+      'WORK_ITEM_NOT_FOUND', 'WorkItem does not exist or is not accessible.', 404);
+    this.requireProjectAccess(agentId, workItem.project_id);
+    const rows = this.workspaceDatabase.raw.prepare(
+      `SELECT * FROM work_item_comments
+       WHERE workspace_id = ? AND work_item_id = ? ORDER BY comment_position, id`,
+    ).all(binding.workspace_id, workItemId) as unknown as WorkItemCommentRow[];
+    return rows.map((row) => this.mapWorkItemComment(row));
+  }
+
+  postComputerAgentWorkItemComment(
+    computerId: string,
+    agentId: string,
+    workItemId: string,
+    input: {
+      body: string;
+      mentionedActorIds?: string[];
+      workItemIds?: string[];
+      artifactSelections?: Array<{ artifactId: string; artifactVersionId: string }>;
+    },
+    idempotencyKey: string,
+  ): WorkItemCommentView {
+    const binding = this.requireComputerAgentBinding(computerId, agentId);
+    const body = input.body.trim();
+    invariant(body.length > 0 && body.length <= 10_000,
+      'INVALID_WORK_ITEM_COMMENT', 'WorkItem comment body is required.');
+    const mentionedActorIds = [...new Set(input.mentionedActorIds ?? [])];
+    const result = this.idempotent(
+      binding.workspace_id,
+      agentId,
+      'PostAgentWorkItemComment',
+      idempotencyKey,
+      { workItemId, body, mentionedActorIds, workItemIds: input.workItemIds ?? [], artifactSelections: input.artifactSelections ?? [] },
+      () => {
+        const workItem = this.requireWorkItem(workItemId);
+        invariant(workItem.workspace_id === binding.workspace_id,
+          'WORK_ITEM_NOT_FOUND', 'WorkItem does not exist or is not accessible.', 404);
+        const membership = this.requireMembership(binding.workspace_id, agentId);
+        const projectMembership = this.findProjectMembership(
+          binding.workspace_id,
+          workItem.project_id,
+          membership.id,
+        );
+        invariant(projectMembership && this.getWorkItemAssigneeIds(workItem).includes(projectMembership.id),
+          'WORK_ITEM_NOT_FOUND', 'WorkItem does not exist or is not accessible.', 404);
+        const referencedWorkItemIds = this.normalizeWorkItemCommentReferences(workItem, input.workItemIds);
+        return this.insertWorkItemComment(
+          workItem,
+          membership,
+          projectMembership,
+          body,
+          mentionedActorIds,
+          referencedWorkItemIds,
+          input.artifactSelections ?? [],
+          agentId,
+        );
+      },
+    );
+    if (result.wakeCount > 0) this.agentInboxWakeEmitter.emit('changed');
+    this.handleWorkItemAttentionAsHandled(binding.workspace_id, workItemId, agentId);
+    return this.mapWorkItemComment(this.requireWorkItemComment(result.commentId));
+  }
+
+  blockComputerAgentWorkItem(
+    computerId: string,
+    agentId: string,
+    workItemId: string,
+    input: { reason: string; expectedRevision: number; expectedAssignmentRevision: number },
+    idempotencyKey: string,
+  ): WorkItemView {
+    const binding = this.requireComputerAgentBinding(computerId, agentId);
+    const reason = input.reason.trim();
+    invariant(reason.length > 0 && reason.length <= 2000,
+      'WORK_ITEM_BLOCK_REASON_REQUIRED', 'Blocking requires a reason.');
+    return this.idempotent(binding.workspace_id, agentId, 'BlockAssignedWorkItem', idempotencyKey,
+      { workItemId, ...input, reason }, () => {
+        const workItem = this.requireAssignedAgentWorkItem(binding.workspace_id, agentId, workItemId);
+        invariant(workItem.lifecycle_status === 'open', 'WORK_ITEM_NOT_OPEN', 'Only an open WorkItem can be blocked.', 409);
+        const timestamp = nowMs();
+        const updated = this.workspaceDatabase.raw.prepare(
+          `UPDATE work_items
+           SET lifecycle_status = 'blocked', blocker_reason = ?, revision = revision + 1, updated_at = ?
+           WHERE workspace_id = ? AND id = ? AND lifecycle_status = 'open'
+             AND revision = ? AND assignment_revision = ?
+           RETURNING revision`,
+        ).get(
+          reason,
+          timestamp,
+          binding.workspace_id,
+          workItemId,
+          input.expectedRevision,
+          input.expectedAssignmentRevision,
+        ) as { revision: number } | undefined;
+        invariant(updated, 'WORK_ITEM_REVISION_CONFLICT', 'WorkItem or assignment changed concurrently.', 409);
+        this.handleWorkItemAttentionAsHandled(binding.workspace_id, workItemId);
+        this.recordWorkItemChange(workItem, 'work_item_blocked', { reason, revision: updated.revision }, timestamp);
+        this.appendAudit(binding.workspace_id, agentId, this.requireMembership(binding.workspace_id, agentId).id,
+          'work_item.block', 'work_item', workItemId,
+          { reason, revision: updated.revision, runtimeBindingRevision: binding.binding_revision }, timestamp);
+        return this.mapWorkItem(this.requireWorkItem(workItemId));
+      });
+  }
+
+  submitComputerAgentWorkItemResult(
+    computerId: string,
+    agentId: string,
+    workItemId: string,
+    input: {
+      commentId?: string | null;
+      artifactVersionIds?: string[];
+      expectedRevision: number;
+      expectedAssignmentRevision: number;
+    },
+    idempotencyKey: string,
+  ): WorkItemView {
+    const binding = this.requireComputerAgentBinding(computerId, agentId);
+    return this.idempotent(binding.workspace_id, agentId, 'SubmitAssignedWorkItemResult', idempotencyKey,
+      { workItemId, ...input }, () => {
+        const workItem = this.requireAssignedAgentWorkItem(binding.workspace_id, agentId, workItemId);
+        invariant(workItem.lifecycle_status === 'open', 'WORK_ITEM_NOT_OPEN', 'Results can only be submitted for an open WorkItem.', 409);
+        invariant(workItem.revision === input.expectedRevision
+          && workItem.assignment_revision === input.expectedAssignmentRevision,
+        'WORK_ITEM_REVISION_CONFLICT', 'WorkItem or assignment changed concurrently.', 409);
+        const commentId = input.commentId ?? null;
+        if (commentId) {
+          const comment = this.requireWorkItemComment(commentId);
+          invariant(
+            comment.workspace_id === binding.workspace_id
+            && comment.work_item_id === workItem.id
+            && comment.author_actor_id === agentId
+            && this.getWorkItemAssigneeIds(workItem).includes(comment.author_project_membership_id),
+            'WORK_ITEM_SUBMISSION_COMMENT_INVALID',
+            'Result comment must be authored by the current assignee on this WorkItem.',
+            409,
+          );
+        }
+        const artifactVersionIds = [...new Set(input.artifactVersionIds ?? [])];
+        invariant(commentId !== null || artifactVersionIds.length > 0,
+          'WORK_ITEM_SUBMISSION_EMPTY', 'A Result Submission requires a comment or at least one Artifact version.', 400);
+        invariant(artifactVersionIds.length <= 100,
+          'WORK_ITEM_SUBMISSION_TOO_MANY_ARTIFACTS', 'A Result Submission may reference at most 100 Artifact versions.', 400);
+        const submissionId = newId();
+        const timestamp = nowMs();
+        this.workspaceDatabase.raw.prepare(
+          `INSERT INTO work_item_submissions (
+             id, workspace_id, project_id, work_item_id, comment_id,
+             submitted_by_membership_id, submitted_by_project_membership_id,
+             assignment_revision, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          submissionId,
+          binding.workspace_id,
+          workItem.project_id,
+          workItemId,
+          commentId,
+          this.requireMembership(binding.workspace_id, agentId).id,
+          this.findProjectMembership(binding.workspace_id, workItem.project_id,
+            this.requireMembership(binding.workspace_id, agentId).id)!.id,
+          workItem.assignment_revision,
+          timestamp,
+        );
+        this.insertWorkItemSubmissionArtifactReferences(
+          workItem,
+          submissionId,
+          artifactVersionIds,
+          timestamp,
+        );
+        const updated = this.workspaceDatabase.raw.prepare(
+          `UPDATE work_items
+           SET current_submission_id = ?, revision = revision + 1, updated_at = ?
+           WHERE workspace_id = ? AND id = ? AND lifecycle_status = 'open'
+             AND revision = ? AND assignment_revision = ?
+           RETURNING revision`,
+        ).get(
+          submissionId,
+          timestamp,
+          binding.workspace_id,
+          workItemId,
+          input.expectedRevision,
+          input.expectedAssignmentRevision,
+        ) as { revision: number } | undefined;
+        invariant(updated, 'WORK_ITEM_REVISION_CONFLICT', 'WorkItem or assignment changed concurrently.', 409);
+        this.handleWorkItemAttentionAsHandled(binding.workspace_id, workItemId);
+        this.recordWorkItemChange(workItem, 'work_item_result_submitted', {
+          submissionId,
+          commentId,
+          artifactVersionIds,
+          revision: updated.revision,
+          assignmentRevision: workItem.assignment_revision,
+        }, timestamp);
+        this.appendAudit(binding.workspace_id, agentId, this.requireMembership(binding.workspace_id, agentId).id,
+          'work_item.result.submit', 'work_item', workItemId,
+          {
+            submissionId,
+            commentId,
+            artifactVersionIds,
+            revision: updated.revision,
+            assignmentRevision: workItem.assignment_revision,
+            runtimeBindingRevision: binding.binding_revision,
+          }, timestamp);
+        return this.mapWorkItem(this.requireWorkItem(workItemId));
+      });
+  }
+
+  submitHumanWorkItemResult(
+    principal: HumanPrincipal,
+    workItemId: string,
+    input: { artifactVersionIds: string[]; expectedRevision: number },
+    idempotencyKey: string,
+  ): WorkItemView {
+    const existing = this.requireWorkItem(workItemId);
+    return this.idempotent(existing.workspace_id, principal.actorId, 'SubmitHumanWorkItemResult', idempotencyKey,
+      { workItemId, ...input }, () => {
+        const workItem = this.requireWorkItem(workItemId);
+        const membership = this.requireHumanWorkItemAuthority(principal.actorId, workItem);
+        const projectMembership = this.findProjectMembership(workItem.workspace_id, workItem.project_id, membership.id);
+        invariant(projectMembership, 'WORK_ITEM_AUTHORITY_REQUIRED', 'A Project membership is required to submit a result.', 403);
+        invariant(workItem.lifecycle_status === 'open', 'WORK_ITEM_NOT_OPEN', 'Results can only be submitted for an open WorkItem.', 409);
+        invariant(workItem.revision === input.expectedRevision,
+          'WORK_ITEM_REVISION_CONFLICT', 'WorkItem changed concurrently.', 409);
+        const artifactVersionIds = [...new Set(input.artifactVersionIds)];
+        invariant(artifactVersionIds.length > 0,
+          'WORK_ITEM_SUBMISSION_EMPTY', 'A Result Submission requires at least one Artifact version.', 400);
+        invariant(artifactVersionIds.length <= 100,
+          'WORK_ITEM_SUBMISSION_TOO_MANY_ARTIFACTS', 'A Result Submission may reference at most 100 Artifact versions.', 400);
+        const submissionId = newId();
+        const timestamp = nowMs();
+        this.workspaceDatabase.raw.prepare(
+          `INSERT INTO work_item_submissions (
+             id, workspace_id, project_id, work_item_id, comment_id,
+             submitted_by_membership_id, submitted_by_project_membership_id,
+             assignment_revision, created_at
+           ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+        ).run(
+          submissionId,
+          workItem.workspace_id,
+          workItem.project_id,
+          workItem.id,
+          membership.id,
+          projectMembership.id,
+          workItem.assignment_revision,
+          timestamp,
+        );
+        this.insertWorkItemSubmissionArtifactReferences(workItem, submissionId, artifactVersionIds, timestamp);
+        const updated = this.workspaceDatabase.raw.prepare(
+          `UPDATE work_items
+           SET current_submission_id = ?, revision = revision + 1, updated_at = ?
+           WHERE workspace_id = ? AND id = ? AND lifecycle_status = 'open' AND revision = ?
+           RETURNING revision`,
+        ).get(submissionId, timestamp, workItem.workspace_id, workItem.id, input.expectedRevision) as { revision: number } | undefined;
+        invariant(updated, 'WORK_ITEM_REVISION_CONFLICT', 'WorkItem changed concurrently.', 409);
+        this.recordWorkItemChange(workItem, 'work_item_result_submitted', {
+          submissionId,
+          commentId: null,
+          artifactVersionIds,
+          revision: updated.revision,
+          assignmentRevision: workItem.assignment_revision,
+        }, timestamp);
+        this.appendAudit(workItem.workspace_id, principal.actorId, membership.id,
+          'work_item.result.submit', 'work_item', workItem.id,
+          {
+            submissionId,
+            commentId: null,
+            artifactVersionIds,
+            revision: updated.revision,
+            assignmentRevision: workItem.assignment_revision,
+          }, timestamp);
+        return this.mapWorkItem(this.requireWorkItem(workItem.id));
+      });
+  }
+
+  /**
+   * A WorkItem created from a Conversation message is a handoff, not a second
+   * independent wake for the same Agent.  Resolve the one active WorkItem that
+   * owns the source message so its assignment and the source Mention can share
+   * the WorkItem Session.
+   */
+  private linkedWorkItemSessionForMention(
+    workspaceId: string,
+    agentId: string,
+    messageId: string | null,
+  ): string | null {
+    if (!messageId) return null;
+    const row = this.workspaceDatabase.raw.prepare(
+      `SELECT item.id
+       FROM work_items item
+       WHERE item.workspace_id = ? AND item.source_message_id = ?
+         AND item.lifecycle_status IN ('open', 'blocked')
+         AND (
+           EXISTS (
+             SELECT 1
+             FROM work_item_assignees assignee
+             JOIN project_memberships project_membership
+               ON project_membership.workspace_id = assignee.workspace_id
+              AND project_membership.project_id = assignee.project_id
+              AND project_membership.id = assignee.project_membership_id
+             JOIN workspace_memberships membership
+               ON membership.workspace_id = project_membership.workspace_id
+              AND membership.id = project_membership.workspace_membership_id
+             WHERE assignee.workspace_id = item.workspace_id
+               AND assignee.work_item_id = item.id
+               AND membership.actor_id = ?
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM project_memberships project_membership
+             JOIN workspace_memberships membership
+               ON membership.workspace_id = project_membership.workspace_id
+              AND membership.id = project_membership.workspace_membership_id
+             WHERE project_membership.workspace_id = item.workspace_id
+               AND project_membership.project_id = item.project_id
+               AND project_membership.id = item.assignee_project_membership_id
+               AND membership.actor_id = ?
+           )
+         )
+       ORDER BY item.created_at, item.id
+       LIMIT 1`,
+    ).get(workspaceId, messageId, agentId, agentId) as { id: string } | undefined;
+    return row?.id ?? null;
+  }
+
+  getComputerAgentInbox(computerId: string, agentId: string): AgentInboxSummaryView {
+    const binding = this.requireComputerAgentBinding(computerId, agentId);
+    const highest = this.workspaceDatabase.raw.prepare(
+      'SELECT COALESCE(MAX(sequence), 0) AS sequence FROM agent_inbox_items WHERE workspace_id = ? AND agent_id = ?',
+    ).get(binding.workspace_id, agentId) as { sequence: number };
+    const rows = this.workspaceDatabase.raw.prepare(
+      `SELECT item.conversation_id, item.thread_id, item.work_item_id, COUNT(*) AS pending_count,
+              MIN(item.sequence) AS first_sequence, MAX(item.sequence) AS last_sequence,
+              MAX(CASE WHEN item.state = 'claimed' OR wake.inbox_item_id IS NOT NULL THEN 1 ELSE 0 END)
+                AS requires_action
+       FROM agent_inbox_items item
+       LEFT JOIN agent_inbox_wakes wake
+         ON wake.workspace_id = item.workspace_id AND wake.inbox_item_id = item.id
+       WHERE item.workspace_id = ? AND item.agent_id = ? AND item.state IN ('pending', 'claimed')
+       GROUP BY conversation_id, thread_id, work_item_id
        ORDER BY first_sequence`,
-    ).all(agentId) as unknown as Array<{
-      conversation_id: string;
+    ).all(binding.workspace_id, agentId) as unknown as Array<{
+      conversation_id: string | null;
       thread_id: string | null;
+      work_item_id: string | null;
       pending_count: number;
       first_sequence: number;
       last_sequence: number;
+      requires_action: 0 | 1;
     }>;
+    const triggerRows = this.workspaceDatabase.raw.prepare(
+      `SELECT id, sequence, attention_kind, agent_request_id, message_id,
+              conversation_id, thread_id, work_item_id, state
+       FROM agent_inbox_items
+       WHERE workspace_id = ? AND agent_id = ?
+         AND state IN ('pending', 'claimed')
+         AND attention_kind <> 'discussion_change'
+       ORDER BY sequence, id`,
+    ).all(binding.workspace_id, agentId) as unknown as Array<{
+      id: string;
+      sequence: number;
+      attention_kind: AgentInboxItemRow['attention_kind'];
+      agent_request_id: string | null;
+      message_id: string | null;
+      conversation_id: string | null;
+      thread_id: string | null;
+      work_item_id: string | null;
+      state: 'pending' | 'claimed';
+    }>;
+    const sessionTriggers: AgentInboxSessionTriggerView[] = [];
+    for (const row of triggerRows) {
+      const linkedWorkItemId = row.agent_request_id
+        ? this.linkedWorkItemSessionForMention(binding.workspace_id, agentId, row.message_id)
+        : null;
+      const session: { kind: AgentSessionKind; key: string } | null = linkedWorkItemId
+        ? { kind: 'work_item', key: linkedWorkItemId }
+        : row.agent_request_id
+          ? { kind: 'mention', key: row.agent_request_id }
+        : row.work_item_id
+          ? { kind: 'work_item', key: row.work_item_id }
+          : null;
+      if (!session) continue;
+      sessionTriggers.push({
+        session,
+        inboxItemId: row.id,
+        sequence: row.sequence,
+        target: row.conversation_id
+          ? this.inboxTarget(row.conversation_id, row.thread_id)
+          : row.work_item_id ? `work-item:${row.work_item_id}` : null,
+        agentRequestId: row.agent_request_id,
+        messageId: row.message_id,
+        conversationId: row.conversation_id,
+        threadId: row.thread_id,
+        workItemId: row.work_item_id,
+        requiresAction: row.state === 'pending' || row.state === 'claimed',
+      });
+    }
     return {
       agentId,
       highestSequence: highest.sequence,
-      targets: rows.map((row) => ({
-        conversationId: row.conversation_id,
-        threadId: row.thread_id,
-        target: this.inboxTarget(row.conversation_id, row.thread_id),
+      targets: rows.map((row) => row.work_item_id !== null ? {
+        kind: 'work_item' as const,
+        conversationId: null,
+        threadId: null,
+        workItemId: row.work_item_id,
+        target: `work-item:${row.work_item_id}`,
         pendingCount: row.pending_count,
         firstSequence: row.first_sequence,
         lastSequence: row.last_sequence,
-      })),
+        requiresAction: true as const,
+      } : {
+        kind: 'discussion' as const,
+        conversationId: row.conversation_id!,
+        threadId: row.thread_id,
+        workItemId: null,
+        target: this.inboxTarget(row.conversation_id!, row.thread_id),
+        pendingCount: row.pending_count,
+        firstSequence: row.first_sequence,
+        lastSequence: row.last_sequence,
+        requiresAction: row.requires_action === 1,
+      }),
+      sessionTriggers,
     };
   }
 
@@ -2909,18 +3862,18 @@ export class WorkspaceService {
     after: Record<string, number>,
   ): AgentInboxWakeBatchView {
     const rows = this.workspaceDatabase.raw.prepare(
-      `SELECT binding.agent_id, COALESCE(MAX(item.sequence), 0) AS highest_sequence
+      `SELECT binding.agent_id, COALESCE(MAX(wake.sequence), 0) AS wake_sequence
        FROM agent_runtime_bindings binding
-       LEFT JOIN agent_inbox_items item
-         ON item.workspace_id = binding.workspace_id AND item.agent_id = binding.agent_id
+       LEFT JOIN agent_inbox_wakes wake
+         ON wake.workspace_id = binding.workspace_id AND wake.agent_id = binding.agent_id
        WHERE binding.computer_id = ? AND binding.status = 'active'
        GROUP BY binding.agent_id
        ORDER BY binding.agent_id`,
-    ).all(computerId) as unknown as Array<{ agent_id: string; highest_sequence: number }>;
-    const cursor = Object.fromEntries(rows.map((row) => [row.agent_id, row.highest_sequence]));
+    ).all(computerId) as unknown as Array<{ agent_id: string; wake_sequence: number }>;
+    const cursor = Object.fromEntries(rows.map((row) => [row.agent_id, row.wake_sequence]));
     return {
-      events: rows.flatMap((row) => row.highest_sequence > (after[row.agent_id] ?? 0)
-        ? [{ type: 'agent.inbox_changed' as const, agentId: row.agent_id, highestSequence: row.highest_sequence }]
+      events: rows.flatMap((row) => row.wake_sequence > (after[row.agent_id] ?? 0)
+        ? [{ type: 'agent.inbox_changed' as const, agentId: row.agent_id, wakeSequence: row.wake_sequence }]
         : []),
       cursor,
     };
@@ -2951,154 +3904,175 @@ export class WorkspaceService {
   claimComputerAgentInbox(
     computerId: string,
     agentId: string,
-    input: { attemptId: string; conversationId: string; threadId: string | null; receipt: string },
+    input: { target: string; receipt: string; agentRequestId?: string; initialDiscussionFrontier?: number },
   ): AgentInboxClaimView {
     invariant(input.receipt.trim().length > 0, 'INVALID_INBOX_RECEIPT', 'Inbox receipt is required.');
-    this.authorizeComputerForAttempt(computerId, input.attemptId);
-    const attempt = this.requireAttempt(input.attemptId);
-    const run = this.requireRun(attempt.run_id);
-    invariant(run.status === 'active' && attempt.status === 'running',
-      'ATTEMPT_FENCED', 'Run or Attempt is no longer active.', 409);
-    invariant(run.agent_id === agentId, 'AGENT_INBOX_SCOPE_MISMATCH', 'Attempt belongs to another Agent.', 403);
-    const primary = this.requireAgentRequest(run.agent_request_id);
-    invariant(
-      primary.result_conversation_id === input.conversationId
-      && primary.result_thread_id === input.threadId,
-      'AGENT_INBOX_SCOPE_MISMATCH',
-      'Inbox target does not match the active Run discussion scope.',
-      409,
-    );
-    const target = this.inboxTarget(input.conversationId, input.threadId);
+    invariant(input.initialDiscussionFrontier === undefined
+      || (Number.isSafeInteger(input.initialDiscussionFrontier) && input.initialDiscussionFrontier >= 0),
+    'INVALID_DISCUSSION_FRONTIER', 'Initial Discussion frontier must be a non-negative integer.', 400);
+    const binding = this.requireComputerAgentBinding(computerId, agentId);
+    const scope = this.parseInboxTarget(binding.workspace_id, input.target);
+    const membership = this.requireMembership(binding.workspace_id, agentId);
+    invariant(this.hasConversationAccess(binding.workspace_id, scope.conversationId, membership.id),
+      'CONVERSATION_NOT_FOUND', 'Conversation is not accessible to this Agent.', 404);
     return this.workspaceDatabase.transaction(() => {
+      const requestedAgentRequestId = input.agentRequestId?.trim() || null;
       let receiptRow = this.workspaceDatabase.raw.prepare(
         `SELECT * FROM agent_inbox_claim_receipts
          WHERE workspace_id = ? AND agent_id = ? AND receipt = ?`,
-      ).get(run.workspace_id, agentId, input.receipt) as AgentInboxClaimReceiptRow | undefined;
-      if (receiptRow) {
-        invariant(
-          receiptRow.run_id === run.id
-          && receiptRow.attempt_id === input.attemptId
-          && receiptRow.binding_revision === run.binding_revision
-          && receiptRow.conversation_id === input.conversationId
-          && receiptRow.thread_id === input.threadId,
-          'INBOX_RECEIPT_SCOPE_MISMATCH',
-          'Inbox receipt belongs to another Run or Discussion Scope.',
-          409,
-        );
+      ).get(binding.workspace_id, agentId, input.receipt) as AgentInboxClaimReceiptRow | undefined;
+      if (!receiptRow && requestedAgentRequestId) {
+        receiptRow = this.workspaceDatabase.raw.prepare(
+          `SELECT * FROM agent_inbox_claim_receipts
+           WHERE workspace_id = ? AND agent_id = ? AND agent_request_id = ? AND handled_at IS NULL
+           ORDER BY created_at DESC LIMIT 1`,
+        ).get(binding.workspace_id, agentId, requestedAgentRequestId) as AgentInboxClaimReceiptRow | undefined;
       }
+      if (receiptRow) {
+        invariant(receiptRow.binding_revision === binding.binding_revision
+          && receiptRow.target === input.target
+          && (!requestedAgentRequestId || receiptRow.agent_request_id === requestedAgentRequestId),
+        'INBOX_RECEIPT_SCOPE_MISMATCH', 'Inbox receipt belongs to another Agent session or target.', 409);
+      }
+      const receiptToken = receiptRow?.receipt ?? input.receipt;
       const replayRows = this.workspaceDatabase.raw.prepare(
         `SELECT * FROM agent_inbox_items
-         WHERE workspace_id = ? AND agent_id = ? AND claimed_run_id = ? AND claim_receipt = ?
-         ORDER BY sequence`,
-      ).all(run.workspace_id, agentId, run.id, input.receipt) as unknown as AgentInboxItemRow[];
-      const rows = this.workspaceDatabase.raw.prepare(
+         WHERE workspace_id = ? AND agent_id = ? AND claim_receipt = ? ORDER BY sequence`,
+      ).all(binding.workspace_id, agentId, receiptToken) as unknown as AgentInboxItemRow[];
+      const trigger = requestedAgentRequestId ? this.workspaceDatabase.raw.prepare(
         `SELECT * FROM agent_inbox_items
-         WHERE workspace_id = ? AND agent_id = ? AND conversation_id = ?
-           AND thread_id IS ? AND state = 'pending'
-         ORDER BY sequence`,
-      ).all(run.workspace_id, agentId, input.conversationId, input.threadId) as unknown as AgentInboxItemRow[];
-      invariant(receiptRow || rows.length > 0, 'AGENT_INBOX_EMPTY', 'Discussion Scope has no pending Inbox messages.', 409);
-      const frontier = this.discussionFrontier(run.workspace_id, input.conversationId, input.threadId);
+         WHERE workspace_id = ? AND agent_id = ? AND agent_request_id = ?
+           AND conversation_id = ? AND thread_id IS ?`,
+      ).get(binding.workspace_id, agentId, requestedAgentRequestId, scope.conversationId, scope.threadId) as AgentInboxItemRow | undefined : undefined;
+      const legacyRows = !requestedAgentRequestId && !receiptRow
+        ? this.workspaceDatabase.raw.prepare(
+          `SELECT * FROM agent_inbox_items
+           WHERE workspace_id = ? AND agent_id = ? AND conversation_id = ? AND thread_id IS ? AND state = 'pending'
+           ORDER BY sequence`,
+        ).all(binding.workspace_id, agentId, scope.conversationId, scope.threadId) as unknown as AgentInboxItemRow[]
+        : [];
+      const legacyTrigger = legacyRows.find((row) => row.agent_request_id !== null);
+      const effectiveAgentRequestId = requestedAgentRequestId ?? receiptRow?.agent_request_id ?? legacyTrigger?.agent_request_id;
+      const conversation = this.workspaceDatabase.raw.prepare(
+        'SELECT conversation_kind FROM conversations WHERE workspace_id = ? AND id = ?',
+      ).get(binding.workspace_id, scope.conversationId) as { conversation_kind: ConversationKind } | undefined;
+      invariant(conversation, 'CONVERSATION_NOT_FOUND', 'Conversation does not exist.', 404);
+      const dynamicDm = conversation.conversation_kind === 'dm' && requestedAgentRequestId !== null;
+      invariant(receiptRow || trigger || legacyRows.length > 0,
+        'AGENT_INBOX_EMPTY', 'Inbox target has no pending event for this Agent Request.', 409);
+      invariant(receiptRow || (requestedAgentRequestId ? trigger?.state === 'pending' : legacyRows.length > 0),
+        'AGENT_INBOX_EMPTY', 'Inbox target has no pending event for this Agent Request.', 409);
+      const sourceMessage = trigger
+        ? this.requireMessage(trigger.message_id!)
+        : effectiveAgentRequestId
+          ? this.requireMessage(this.requireAgentRequest(effectiveAgentRequestId).source_message_id)
+          : this.requireMessage(legacyRows[0]!.message_id!);
+      invariant(sourceMessage.conversation_id === scope.conversationId && sourceMessage.thread_id === scope.threadId,
+        'INBOX_RECEIPT_SCOPE_MISMATCH', 'Agent Request does not belong to the requested Discussion scope.', 409);
+      // When the caller supplies the Session frontier, never allow it to move
+      // behind the source trigger that is already present in the JSONL snapshot.
+      const sessionInitialFrontier = input.initialDiscussionFrontier === undefined
+        ? 0
+        : Math.max(input.initialDiscussionFrontier, sourceMessage.scope_position);
+      const acceptedBefore = dynamicDm
+        ? Number((this.workspaceDatabase.raw.prepare(
+          `SELECT COUNT(*) AS count
+           FROM agent_inbox_items item
+           JOIN agent_inbox_claim_receipts receipt
+             ON receipt.workspace_id = item.workspace_id AND receipt.receipt = item.claim_receipt
+           WHERE item.workspace_id = ? AND item.agent_id = ?
+             AND item.attention_kind = 'direct_message' AND receipt.agent_request_id = ?`,
+        ).get(binding.workspace_id, agentId, requestedAgentRequestId) as { count: number }).count)
+        : 0;
+      const remaining = dynamicDm ? Math.max(0, 10 - acceptedBefore) : 0;
+      let rows: AgentInboxItemRow[];
+      let deltaFrom = receiptRow?.through_position ?? sessionInitialFrontier;
+      if (legacyRows.length > 0 && !requestedAgentRequestId && !receiptRow) {
+        rows = legacyRows;
+      } else if (dynamicDm && remaining > 0) {
+        rows = this.workspaceDatabase.raw.prepare(
+          `SELECT * FROM agent_inbox_items
+           WHERE workspace_id = ? AND agent_id = ? AND conversation_id = ? AND thread_id IS ?
+             AND state = 'pending' AND attention_kind = 'direct_message'
+           ORDER BY sequence LIMIT ?`,
+        ).all(binding.workspace_id, agentId, scope.conversationId, scope.threadId, remaining) as unknown as AgentInboxItemRow[];
+      } else if (receiptRow && requestedAgentRequestId && !dynamicDm) {
+        rows = this.workspaceDatabase.raw.prepare(
+          `SELECT * FROM agent_inbox_items
+           WHERE workspace_id = ? AND agent_id = ? AND conversation_id = ? AND thread_id IS ?
+             AND state = 'pending' AND attention_kind = 'discussion_change' AND sequence > ?
+           ORDER BY sequence`,
+        ).all(binding.workspace_id, agentId, scope.conversationId, scope.threadId, receiptRow.through_position) as unknown as AgentInboxItemRow[];
+      } else if (!receiptRow && trigger) {
+        rows = this.workspaceDatabase.raw.prepare(
+          `SELECT * FROM agent_inbox_items
+           WHERE workspace_id = ? AND agent_id = ? AND conversation_id = ? AND thread_id IS ? AND state = 'pending'
+             AND (id = ? OR (attention_kind = 'discussion_change' AND sequence <= ?)) ORDER BY sequence`,
+        ).all(binding.workspace_id, agentId, scope.conversationId, scope.threadId, trigger.id, trigger.sequence) as unknown as AgentInboxItemRow[];
+      } else {
+        rows = [];
+      }
+      if (receiptRow && rows.length === 0) {
+        rows = replayRows;
+        deltaFrom = receiptRow.from_position;
+      }
+      invariant(rows.length > 0, 'AGENT_INBOX_EMPTY', 'Inbox target has no pending event for this Agent Request.', 409);
       const timestamp = nowMs();
       if (!receiptRow) {
         const prior = this.workspaceDatabase.raw.prepare(
           `SELECT COALESCE(MAX(receipt.through_position), 0) AS position
            FROM agent_inbox_claim_receipts receipt
-           JOIN runs prior_run
-             ON prior_run.workspace_id = receipt.workspace_id AND prior_run.id = receipt.run_id
-           WHERE receipt.workspace_id = ? AND receipt.agent_id = ?
-             AND receipt.binding_revision = ?
-             AND receipt.conversation_id = ? AND receipt.thread_id IS ?
-             AND prior_run.status = 'terminal'
-             AND prior_run.outcome IN ('publish', 'no_output', 'discard')`,
-        ).get(
-          run.workspace_id,
-          agentId,
-          run.binding_revision,
-          input.conversationId,
-          input.threadId,
-        ) as { position: number };
+           WHERE receipt.workspace_id = ? AND receipt.agent_id = ? AND receipt.binding_revision = ?
+             AND receipt.target = ? AND receipt.handled_at IS NOT NULL`,
+        ).get(binding.workspace_id, agentId, binding.binding_revision, input.target) as { position: number };
+        deltaFrom = Math.max(prior.position, sessionInitialFrontier);
+        const throughPosition = Math.max(sourceMessage.scope_position,
+          ...rows.map((row) => row.message_id ? this.requireMessage(row.message_id).scope_position : 0));
         const receiptId = newId();
         this.workspaceDatabase.raw.prepare(
           `INSERT INTO agent_inbox_claim_receipts (
-             id, workspace_id, agent_id, receipt, run_id, attempt_id, binding_revision,
+             id, workspace_id, agent_id, agent_request_id, receipt, binding_revision, target_kind, target,
              conversation_id, thread_id, from_position, through_position, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(
-          receiptId,
-          run.workspace_id,
-          agentId,
-          input.receipt,
-          run.id,
-          input.attemptId,
-          run.binding_revision,
-          input.conversationId,
-          input.threadId,
-          prior.position,
-          frontier,
-          timestamp,
-          timestamp,
-        );
-        receiptRow = this.workspaceDatabase.raw.prepare(
-          'SELECT * FROM agent_inbox_claim_receipts WHERE id = ?',
-        ).get(receiptId) as unknown as AgentInboxClaimReceiptRow;
-      } else if (frontier > receiptRow.through_position) {
-        this.workspaceDatabase.raw.prepare(
-          `UPDATE agent_inbox_claim_receipts
-           SET through_position = ?, updated_at = ? WHERE id = ?`,
-        ).run(frontier, timestamp, receiptRow.id);
-        receiptRow = { ...receiptRow, through_position: frontier, updated_at: timestamp };
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(receiptId, binding.workspace_id, agentId, effectiveAgentRequestId!, input.receipt,
+          binding.binding_revision, scope.kind, input.target, scope.conversationId, scope.threadId,
+          Math.max(prior.position, sessionInitialFrontier), throughPosition, timestamp, timestamp);
+        receiptRow = this.workspaceDatabase.raw.prepare('SELECT * FROM agent_inbox_claim_receipts WHERE id = ?')
+          .get(receiptId) as unknown as AgentInboxClaimReceiptRow;
       }
-      let requestOrder = Number((this.workspaceDatabase.raw.prepare(
-        'SELECT COALESCE(MAX(request_order), -1) AS value FROM run_agent_requests WHERE workspace_id = ? AND run_id = ?',
-      ).get(run.workspace_id, run.id) as { value: number }).value) + 1;
-      for (const item of rows) {
-        const request = this.requireAgentRequest(item.agent_request_id);
-        invariant(request.target_agent_id === agentId, 'AGENT_INBOX_SCOPE_MISMATCH', 'Inbox item targets another Agent.', 409);
-        if (request.status === 'pending') {
-          const accepted = this.workspaceDatabase.raw.prepare(
-            `UPDATE agent_requests
-             SET status = 'accepted', version = version + 1, updated_at = ?, terminal_at = ?
-             WHERE workspace_id = ? AND id = ? AND status = 'pending'`,
-          ).run(timestamp, timestamp, run.workspace_id, request.id);
-          invariant(accepted.changes === 1, 'AGENT_REQUEST_VERSION_CONFLICT', 'Inbox Agent Request changed.', 409);
-        } else {
-          invariant(
-            request.status === 'accepted'
-            && Boolean(this.workspaceDatabase.raw.prepare(
-              'SELECT 1 FROM run_agent_requests WHERE workspace_id = ? AND run_id = ? AND agent_request_id = ?',
-            ).get(run.workspace_id, run.id, request.id)),
-            'AGENT_REQUEST_NOT_CLAIMABLE',
-            'Inbox Agent Request is not claimable by this Run.',
-            409,
-          );
-        }
+      const replaying = receiptRow.handled_at !== null || (receiptRow && rows === replayRows);
+      const rowsToClaim = replaying ? [] : rows;
+      this.claimInboxItems(binding.workspace_id, agentId, receiptToken, rowsToClaim, timestamp);
+      if (rowsToClaim.length > 0) {
+        const throughPosition = Math.max(receiptRow.through_position,
+          ...rowsToClaim.map((row) => row.message_id ? this.requireMessage(row.message_id).scope_position : 0));
         this.workspaceDatabase.raw.prepare(
-          `INSERT OR IGNORE INTO run_agent_requests (
-             workspace_id, run_id, agent_request_id, request_order, claimed_at
-           ) VALUES (?, ?, ?, ?, ?)`,
-        ).run(run.workspace_id, run.id, request.id, requestOrder, timestamp);
-        requestOrder += 1;
-        this.workspaceDatabase.raw.prepare(
-          `UPDATE agent_inbox_items
-           SET state = 'claimed', claimed_run_id = ?, claim_receipt = ?, claimed_at = ?
-           WHERE workspace_id = ? AND id = ? AND state = 'pending'`,
-        ).run(run.id, input.receipt, timestamp, run.workspace_id, item.id);
+          `UPDATE agent_inbox_claim_receipts SET through_position = MAX(through_position, ?), updated_at = ?
+           WHERE id = ? AND handled_at IS NULL`,
+        ).run(throughPosition, timestamp, receiptRow.id);
+        receiptRow = this.workspaceDatabase.raw.prepare('SELECT * FROM agent_inbox_claim_receipts WHERE id = ?')
+          .get(receiptRow.id) as unknown as AgentInboxClaimReceiptRow;
       }
-      const claimed = this.workspaceDatabase.raw.prepare(
-        `SELECT * FROM agent_inbox_items
-         WHERE workspace_id = ? AND agent_id = ? AND claimed_run_id = ? AND claim_receipt = ?
-         ORDER BY sequence`,
-      ).all(run.workspace_id, agentId, run.id, input.receipt) as unknown as AgentInboxItemRow[];
-      return this.hydrateInboxClaim(
-        agentId,
-        run.id,
-        input.attemptId,
-        input.receipt,
-        target,
-        claimed.length > 0 ? claimed : replayRows,
-        receiptRow!,
-      );
+      const acceptedAfter = dynamicDm
+        ? Number((this.workspaceDatabase.raw.prepare(
+          `SELECT COUNT(*) AS count FROM agent_inbox_items item
+           JOIN agent_inbox_claim_receipts receipt
+             ON receipt.workspace_id = item.workspace_id AND receipt.receipt = item.claim_receipt
+           WHERE item.workspace_id = ? AND item.agent_id = ?
+             AND item.attention_kind = 'direct_message' AND receipt.agent_request_id = ?`,
+        ).get(binding.workspace_id, agentId, requestedAgentRequestId) as { count: number }).count)
+        : 1;
+      const sessionWindow: AgentSessionWindowView = {
+        mode: dynamicDm ? 'dm' : 'isolated',
+        acceptedMessages: dynamicDm ? Math.min(acceptedAfter, 10) : 1,
+        maxMessages: 10,
+        status: receiptRow.handled_at !== null
+          ? 'completed'
+          : dynamicDm && acceptedAfter >= 10 ? 'frozen' : 'accepting',
+      };
+      return this.hydrateInboxClaim(agentId, receiptToken, input.target,
+        rowsToClaim.length > 0 ? rowsToClaim : replayRows, receiptRow!,
+        rowsToClaim.length > 0 ? deltaFrom : undefined, sessionWindow);
     });
   }
 
@@ -3106,7 +4080,6 @@ export class WorkspaceService {
     computerId: string,
     agentId: string,
     input: {
-      attemptId: string;
       conversationId: string;
       threadId: string | null;
       before?: number;
@@ -3114,90 +4087,264 @@ export class WorkspaceService {
       limit?: number;
     },
   ): MessageView[] {
-    const context = this.requireComputerAgentAttemptScope(computerId, agentId, input);
+    const binding = this.requireComputerAgentBinding(computerId, agentId);
+    const membership = this.requireMembership(binding.workspace_id, agentId);
+    invariant(this.hasConversationAccess(binding.workspace_id, input.conversationId, membership.id),
+      'CONVERSATION_NOT_FOUND', 'Conversation is not accessible to this Agent.', 404);
     invariant(input.before === undefined || input.after === undefined,
       'INVALID_MESSAGE_RANGE', 'Message history cannot use before and after together.', 400);
     const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
-    const membership = this.requireMembership(context.workspace_id, agentId);
     const rows = input.before !== undefined
       ? this.workspaceDatabase.raw.prepare(
         `SELECT * FROM messages
          WHERE workspace_id = ? AND conversation_id = ? AND thread_id IS ? AND scope_position < ?
          ORDER BY scope_position DESC LIMIT ?`,
-      ).all(context.workspace_id, input.conversationId, input.threadId, input.before, limit).reverse()
+      ).all(binding.workspace_id, input.conversationId, input.threadId, input.before, limit).reverse()
       : this.workspaceDatabase.raw.prepare(
         `SELECT * FROM messages
          WHERE workspace_id = ? AND conversation_id = ? AND thread_id IS ?
            AND scope_position > ?
          ORDER BY scope_position LIMIT ?`,
-      ).all(context.workspace_id, input.conversationId, input.threadId, input.after ?? 0, limit);
+      ).all(binding.workspace_id, input.conversationId, input.threadId, input.after ?? 0, limit);
     return (rows as unknown as MessageRow[]).map((row) => this.hydrateMessage(row, membership));
   }
 
   resolveComputerAgentMessage(
     computerId: string,
     agentId: string,
-    input: { attemptId: string; conversationId: string; threadId: string | null; messageId: string },
+    input: { conversationId: string; threadId: string | null; messageId: string },
   ): MessageView {
-    const context = this.requireComputerAgentAttemptScope(computerId, agentId, input);
+    const binding = this.requireComputerAgentBinding(computerId, agentId);
+    const membership = this.requireMembership(binding.workspace_id, agentId);
+    invariant(this.hasConversationAccess(binding.workspace_id, input.conversationId, membership.id),
+      'CONVERSATION_NOT_FOUND', 'Conversation is not accessible to this Agent.', 404);
     const message = this.requireMessage(input.messageId);
     invariant(
-      message.workspace_id === context.workspace_id
+      message.workspace_id === binding.workspace_id
       && message.conversation_id === input.conversationId
       && message.thread_id === input.threadId,
       'MESSAGE_NOT_IN_DISCUSSION_SCOPE',
       'Message does not belong to the active Discussion Scope.',
       404,
     );
-    return this.hydrateMessage(message, this.requireMembership(context.workspace_id, agentId));
+    return this.hydrateMessage(message, membership);
   }
 
   sendComputerAgentMessage(
     computerId: string,
     agentId: string,
     input: {
-      attemptId: string;
       conversationId: string;
       threadId: string | null;
       receipt: string;
+      draftId: string;
+      expectedDiscussionFrontier: number;
       body: string;
+      artifactVersionIds?: string[];
+      mentionedActorIds?: string[];
+      workItemIds?: string[];
+      mode: 'check' | 'override';
     },
     idempotencyKey: string,
-  ): MessageView {
-    const context = this.requireComputerAgentAttemptScope(computerId, agentId, input);
+  ): AgentMessagePublicationResultView {
+    const binding = this.requireComputerAgentBinding(computerId, agentId);
     invariant(input.receipt.trim().length > 0, 'INBOX_RECEIPT_REQUIRED', 'Inbox receipt is required.', 400);
-    const claim = this.workspaceDatabase.raw.prepare(
-      `SELECT 1 FROM agent_inbox_items
-       WHERE workspace_id = ? AND agent_id = ? AND claimed_run_id = ? AND claim_receipt = ?
-         AND conversation_id = ? AND thread_id IS ? AND state = 'claimed'
-       LIMIT 1`,
-    ).get(
-      context.workspace_id,
-      agentId,
-      context.run_id,
-      input.receipt,
-      input.conversationId,
-      input.threadId,
-    );
-    invariant(claim, 'INBOX_RECEIPT_NOT_CLAIMED', 'Inbox receipt does not authorize this Discussion Scope.', 409);
+    const target = this.inboxTarget(input.conversationId, input.threadId);
     return this.idempotent(
-      context.workspace_id,
+      binding.workspace_id,
       agentId,
       'SendAgentInboxMessage',
       idempotencyKey,
       input,
-      () => this.publishAgentMessage(this.requireExecutionContext(input.attemptId), input.body, [], nowMs()),
+      () => {
+        const claim = this.requireActiveInboxReceipt(binding, agentId, input.receipt, target);
+        invariant(claim.target_kind === 'discussion', 'INBOX_RECEIPT_SCOPE_MISMATCH',
+          'Message publication requires a Discussion receipt.', 409);
+        invariant(input.expectedDiscussionFrontier === claim.through_position,
+          'INBOX_RECEIPT_FRONTIER_MISMATCH',
+          'Expected Discussion frontier must match the claimed receipt checkpoint.', 409);
+        const currentDiscussionFrontier = this.discussionFrontier(
+          binding.workspace_id,
+          input.conversationId,
+          input.threadId,
+        );
+        invariant(input.expectedDiscussionFrontier <= currentDiscussionFrontier,
+          'INVALID_DISCUSSION_FRONTIER', 'Expected Discussion frontier is ahead of Workspace state.', 409);
+        if (input.mode === 'override') {
+          this.requirePriorFreshnessHold(
+            binding.workspace_id,
+            agentId,
+            binding.binding_revision,
+            target,
+            input.draftId,
+          );
+          this.extendInboxReceiptThroughFrontier(claim, currentDiscussionFrontier, nowMs());
+        } else if (currentDiscussionFrontier !== input.expectedDiscussionFrontier
+          && !this.isFrozenDmInboxWindow(binding.workspace_id, agentId, claim)) {
+          const heldAt = nowMs();
+          const attention = this.extendInboxReceiptThroughFrontier(claim, currentDiscussionFrontier, heldAt);
+          const membership = this.requireMembership(binding.workspace_id, agentId);
+          this.appendAudit(
+            binding.workspace_id,
+            agentId,
+            membership.id,
+            'message.freshness_hold',
+            'held_draft',
+            input.draftId,
+            {
+              draftId: input.draftId,
+              target,
+              expectedDiscussionFrontier: input.expectedDiscussionFrontier,
+              currentDiscussionFrontier,
+              runtimeBindingRevision: binding.binding_revision,
+            },
+            heldAt,
+          );
+          return {
+            status: 'held',
+            draftId: input.draftId,
+            expectedDiscussionFrontier: input.expectedDiscussionFrontier,
+            currentDiscussionFrontier,
+            attention: this.mapInboxAttentions(attention),
+            discussionDelta: this.discussionDelta(
+              binding.workspace_id,
+              agentId,
+              input.conversationId,
+              input.threadId,
+              input.expectedDiscussionFrontier,
+              currentDiscussionFrontier,
+            ),
+          };
+        }
+        const publishedAt = nowMs();
+        const message = this.publishPersistentAgentMessage(
+          binding.workspace_id,
+          agentId,
+          input.conversationId,
+          input.threadId,
+          input.body,
+          input.artifactVersionIds ?? [],
+          input.mentionedActorIds ?? [],
+          input.workItemIds ?? [],
+          binding.binding_revision,
+          publishedAt,
+        );
+        this.completeInboxReceipt(binding.workspace_id, agentId, input.receipt, publishedAt);
+        if (input.mode === 'override') {
+          const membership = this.requireMembership(binding.workspace_id, agentId);
+          this.appendAudit(
+            binding.workspace_id,
+            agentId,
+            membership.id,
+            'message.freshness_override',
+            'message',
+            message.id,
+            {
+              draftId: input.draftId,
+              target,
+              expectedDiscussionFrontier: input.expectedDiscussionFrontier,
+              currentDiscussionFrontier,
+              runtimeBindingRevision: binding.binding_revision,
+            },
+            publishedAt,
+          );
+        }
+        return { status: 'published', message };
+      },
     );
+  }
+
+  completeComputerAgentInbox(
+    computerId: string,
+    agentId: string,
+    input: {
+      receipt: string;
+      target: string;
+      expectedDiscussionFrontier?: number;
+      draftId?: string;
+    },
+    idempotencyKey: string,
+  ): AgentInboxCompletionResultView {
+    const binding = this.requireComputerAgentBinding(computerId, agentId);
+    return this.idempotent(binding.workspace_id, agentId, 'CompleteAgentInbox', idempotencyKey, input, () => {
+      const claim = this.requireActiveInboxReceipt(binding, agentId, input.receipt, input.target);
+      {
+        invariant(input.expectedDiscussionFrontier !== undefined,
+          'DISCUSSION_FRONTIER_REQUIRED', 'Discussion completion requires the reviewed frontier.', 400);
+        invariant(input.expectedDiscussionFrontier === claim.through_position,
+          'INBOX_RECEIPT_FRONTIER_MISMATCH',
+          'Expected Discussion frontier must match the claimed receipt checkpoint.', 409);
+        const currentDiscussionFrontier = this.discussionFrontier(
+          binding.workspace_id,
+          claim.conversation_id!,
+          claim.thread_id,
+        );
+        invariant(input.expectedDiscussionFrontier <= currentDiscussionFrontier,
+          'INVALID_DISCUSSION_FRONTIER', 'Expected Discussion frontier is ahead of Workspace state.', 409);
+        if (currentDiscussionFrontier !== input.expectedDiscussionFrontier
+          && !this.isFrozenDmInboxWindow(binding.workspace_id, agentId, claim)) {
+          const reviewedAt = nowMs();
+          const attention = this.extendInboxReceiptThroughFrontier(claim, currentDiscussionFrontier, reviewedAt);
+          return {
+            status: 'review_required',
+            expectedDiscussionFrontier: input.expectedDiscussionFrontier,
+            currentDiscussionFrontier,
+            attention: this.mapInboxAttentions(attention),
+            discussionDelta: this.discussionDelta(
+              binding.workspace_id,
+              agentId,
+              claim.conversation_id!,
+              claim.thread_id,
+              input.expectedDiscussionFrontier,
+              currentDiscussionFrontier,
+            ),
+          };
+        }
+      }
+      const handledAt = nowMs();
+      this.completeInboxReceipt(binding.workspace_id, agentId, input.receipt, handledAt);
+      if (input.draftId) {
+        this.requirePriorFreshnessHold(
+          binding.workspace_id,
+          agentId,
+          binding.binding_revision,
+          input.target,
+          input.draftId,
+        );
+        const membership = this.requireMembership(binding.workspace_id, agentId);
+        this.appendAudit(
+          binding.workspace_id,
+          agentId,
+          membership.id,
+          'message.freshness_discard',
+          'held_draft',
+          input.draftId,
+          {
+            draftId: input.draftId,
+            target: input.target,
+            reviewedThroughPosition: input.expectedDiscussionFrontier,
+            runtimeBindingRevision: binding.binding_revision,
+          },
+          handledAt,
+        );
+      }
+      return { status: 'completed', receipt: input.receipt, handledAt };
+    });
   }
 
   private hydrateInboxClaim(
     agentId: string,
-    runId: string,
-    attemptId: string,
     receiptToken: string,
     target: string,
     rows: AgentInboxItemRow[],
     receipt: AgentInboxClaimReceiptRow,
+    fromPosition = receipt.from_position,
+    sessionWindow: AgentSessionWindowView = {
+      mode: 'isolated',
+      acceptedMessages: 1,
+      maxMessages: 10,
+      status: 'accepting',
+    },
   ): AgentInboxClaimView {
     const membership = this.requireMembership(receipt.workspace_id, agentId);
     const discussionRows = this.workspaceDatabase.raw.prepare(
@@ -3209,7 +4356,7 @@ export class WorkspaceService {
       receipt.workspace_id,
       receipt.conversation_id,
       receipt.thread_id,
-      receipt.from_position,
+      fromPosition,
       receipt.through_position,
     ) as unknown as MessageRow[];
     const rootMessage = receipt.thread_id === null
@@ -3222,21 +4369,15 @@ export class WorkspaceService {
       ).get(receipt.workspace_id, receipt.conversation_id, receipt.thread_id) as MessageRow | undefined;
     return {
       agentId,
-      runId,
-      attemptId,
       receipt: receiptToken,
       target,
-      attention: rows.map((row) => ({
-        inboxItemId: row.id,
-        sequence: row.sequence,
-        attentionKind: row.attention_kind,
-        agentRequestId: row.agent_request_id,
-        messageId: row.message_id,
-      })),
+      targetKind: 'discussion',
+      sessionWindow,
+      attention: this.mapInboxAttentions(rows),
       discussion: {
-        conversationId: receipt.conversation_id,
+        conversationId: receipt.conversation_id!,
         threadId: receipt.thread_id,
-        sincePositionExclusive: receipt.from_position,
+        sincePositionExclusive: fromPosition,
         throughPosition: receipt.through_position,
         rootMessage: rootMessage ? this.hydrateMessage(rootMessage, membership) : null,
         messages: discussionRows.map((row) => this.hydrateMessage(row, membership)),
@@ -3260,39 +4401,259 @@ export class WorkspaceService {
     return thread.reply_frontier;
   }
 
-  private requireComputerAgentBinding(computerId: string, agentId: string): void {
-    const row = this.workspaceDatabase.raw.prepare(
-      `SELECT 1 FROM agent_runtime_bindings
-       WHERE computer_id = ? AND agent_id = ? AND status = 'active'`,
-    ).get(computerId, agentId);
-    invariant(row, 'RUNTIME_BINDING_UNAVAILABLE', 'Computer does not hold this Agent Runtime Binding.', 403);
+  private extendInboxReceiptThroughFrontier(
+    receipt: AgentInboxClaimReceiptRow,
+    currentDiscussionFrontier: number,
+    timestamp: number,
+  ): AgentInboxItemRow[] {
+    invariant(receipt.conversation_id !== null,
+      'INBOX_RECEIPT_SCOPE_MISMATCH', 'Discussion freshness requires a Discussion receipt.', 409);
+    const pending = this.workspaceDatabase.raw.prepare(
+      `SELECT * FROM agent_inbox_items
+       WHERE workspace_id = ? AND agent_id = ?
+         AND conversation_id = ? AND thread_id IS ? AND state = 'pending'
+         AND attention_kind = 'discussion_change'
+       ORDER BY sequence`,
+    ).all(
+      receipt.workspace_id,
+      receipt.agent_id,
+      receipt.conversation_id,
+      receipt.thread_id,
+    ) as unknown as AgentInboxItemRow[];
+    this.claimInboxItems(receipt.workspace_id, receipt.agent_id, receipt.receipt, pending, timestamp);
+    this.workspaceDatabase.raw.prepare(
+      `UPDATE agent_inbox_claim_receipts
+       SET through_position = MAX(through_position, ?), updated_at = ?
+       WHERE id = ? AND handled_at IS NULL`,
+    ).run(currentDiscussionFrontier, timestamp, receipt.id);
+    return pending;
   }
 
-  private requireComputerAgentAttemptScope(
-    computerId: string,
+  private claimInboxItems(
+    workspaceId: string,
     agentId: string,
-    input: { attemptId: string; conversationId: string; threadId: string | null },
-  ): ExecutionContextRow {
-    this.requireComputerAgentBinding(computerId, agentId);
-    this.authorizeComputerForAttempt(computerId, input.attemptId);
-    const context = this.requireExecutionContext(input.attemptId);
-    invariant(context.agent_id === agentId, 'AGENT_INBOX_SCOPE_MISMATCH', 'Attempt belongs to another Agent.', 403);
-    invariant(
-      context.conversation_id === input.conversationId && context.result_thread_id === input.threadId,
-      'AGENT_INBOX_SCOPE_MISMATCH',
-      'Discussion Scope does not match the active Run.',
-      409,
-    );
-    const run = this.requireRun(context.run_id);
-    const attempt = this.requireAttempt(input.attemptId);
-    invariant(run.status === 'active' && attempt.status === 'running', 'ATTEMPT_FENCED', 'Run or Attempt is no longer active.', 409);
-    return context;
+    receipt: string,
+    rows: AgentInboxItemRow[],
+    timestamp: number,
+  ): void {
+    for (const item of rows) {
+      if (item.agent_request_id) {
+        const request = this.requireAgentRequest(item.agent_request_id);
+        invariant(request.target_agent_id === agentId,
+          'AGENT_INBOX_SCOPE_MISMATCH', 'Inbox item targets another Agent.', 409);
+        if (request.status === 'pending') {
+          this.workspaceDatabase.raw.prepare(
+            `UPDATE agent_requests
+             SET status = 'accepted', version = version + 1, updated_at = ?, terminal_at = ?
+             WHERE workspace_id = ? AND id = ? AND status = 'pending'`,
+          ).run(timestamp, timestamp, workspaceId, request.id);
+        }
+      }
+      this.workspaceDatabase.raw.prepare(
+        `UPDATE agent_inbox_items
+         SET state = 'claimed', claim_receipt = ?, claimed_at = ?
+         WHERE workspace_id = ? AND id = ? AND state = 'pending'`,
+      ).run(receipt, timestamp, workspaceId, item.id);
+    }
+  }
+
+  private mapInboxAttention(row: AgentInboxItemRow): AgentInboxAttentionView {
+    invariant(row.attention_kind !== 'discussion_change', 'INVALID_AGENT_INBOX_ATTENTION',
+      'A silent Discussion delivery is not an attention signal.', 409);
+    return {
+      inboxItemId: row.id,
+      sequence: row.sequence,
+      attentionKind: row.attention_kind,
+      agentRequestId: row.agent_request_id,
+      messageId: row.message_id,
+      workItemId: row.work_item_id,
+      workItemCommentId: row.work_item_comment_id,
+    };
+  }
+
+  private mapInboxAttentions(rows: AgentInboxItemRow[]): AgentInboxAttentionView[] {
+    return rows
+      .filter((row) => row.attention_kind !== 'discussion_change')
+      .map((row) => this.mapInboxAttention(row));
+  }
+
+  private discussionDelta(
+    workspaceId: string,
+    agentId: string,
+    conversationId: string,
+    threadId: string | null,
+    sincePositionExclusive: number,
+    throughPosition: number,
+  ): AgentInboxDiscussionDeltaView {
+    const membership = this.requireMembership(workspaceId, agentId);
+    const messages = this.workspaceDatabase.raw.prepare(
+      `SELECT * FROM messages
+       WHERE workspace_id = ? AND conversation_id = ? AND thread_id IS ?
+         AND scope_position > ? AND scope_position <= ?
+       ORDER BY scope_position, id`,
+    ).all(
+      workspaceId,
+      conversationId,
+      threadId,
+      sincePositionExclusive,
+      throughPosition,
+    ) as unknown as MessageRow[];
+    const rootMessage = threadId === null ? undefined : this.workspaceDatabase.raw.prepare(
+      `SELECT message.* FROM threads thread
+       JOIN messages message
+         ON message.workspace_id = thread.workspace_id AND message.id = thread.root_message_id
+       WHERE thread.workspace_id = ? AND thread.conversation_id = ? AND thread.id = ?`,
+    ).get(workspaceId, conversationId, threadId) as MessageRow | undefined;
+    return {
+      conversationId,
+      threadId,
+      sincePositionExclusive,
+      throughPosition,
+      rootMessage: rootMessage ? this.hydrateMessage(rootMessage, membership) : null,
+      messages: messages.map((row) => this.hydrateMessage(row, membership)),
+    };
+  }
+
+  private requirePriorFreshnessHold(
+    workspaceId: string,
+    agentId: string,
+    bindingRevision: number,
+    target: string,
+    draftId: string,
+  ): void {
+    const rows = this.workspaceDatabase.raw.prepare(
+      `SELECT details_json FROM audit_events
+       WHERE workspace_id = ? AND actor_id = ? AND action = 'message.freshness_hold'
+         AND target_type = 'held_draft' AND target_id = ?
+       ORDER BY seq DESC`,
+    ).all(workspaceId, agentId, draftId) as Array<{ details_json: string }>;
+    const held = rows.some((row) => {
+      const details = JSON.parse(row.details_json) as Record<string, unknown>;
+      return details.target === target && details.runtimeBindingRevision === bindingRevision;
+    });
+    invariant(held, 'FRESHNESS_OVERRIDE_NOT_ALLOWED',
+      'This Agent, target, and draft have not completed a freshness hold.', 409);
+  }
+
+  private agentActivityEventRow(eventId: string): AgentActivityEventRow | undefined {
+    return this.workspaceDatabase.raw.prepare(
+      `SELECT event.*, agent.name AS agent_name,
+              turn.status AS turn_status, turn.started_at AS turn_started_at,
+              turn.updated_at AS turn_updated_at, turn.finished_at AS turn_finished_at
+       FROM agent_activity_events event
+       JOIN agent_activity_turns turn
+         ON turn.workspace_id = event.workspace_id AND turn.id = event.turn_id
+       JOIN agents agent
+         ON agent.workspace_id = event.workspace_id AND agent.actor_id = event.agent_id
+       WHERE event.id = ?`,
+    ).get(eventId) as AgentActivityEventRow | undefined;
+  }
+
+  private mapAgentActivityEvent(row: AgentActivityEventRow): AgentActivityEventView {
+    return {
+      eventId: row.id,
+      turnId: row.turn_id,
+      workspaceId: row.workspace_id,
+      agentId: row.agent_id,
+      agentName: row.agent_name,
+      sequence: row.sequence,
+      eventType: row.event_type,
+      title: row.title,
+      status: row.status,
+      turnStatus: row.turn_status,
+      turnStartedAt: row.turn_started_at,
+      turnUpdatedAt: row.turn_updated_at,
+      turnFinishedAt: row.turn_finished_at,
+      createdAt: row.created_at,
+    };
+  }
+
+  private requireComputerAgentBinding(computerId: string, agentId: string): {
+    workspace_id: string;
+    binding_revision: number;
+  } {
+    const row = this.workspaceDatabase.raw.prepare(
+      `SELECT workspace_id, binding_revision FROM agent_runtime_bindings
+       WHERE computer_id = ? AND agent_id = ? AND status = 'active'`,
+    ).get(computerId, agentId) as { workspace_id: string; binding_revision: number } | undefined;
+    invariant(row, 'RUNTIME_BINDING_UNAVAILABLE', 'Computer does not hold this Agent Runtime Binding.', 403);
+    return row;
   }
 
   private inboxTarget(conversationId: string, threadId: string | null): string {
     return threadId === null
       ? `conversation:${conversationId}`
       : `conversation:${conversationId}:thread:${threadId}`;
+  }
+
+  private isFrozenDmInboxWindow(
+    workspaceId: string,
+    agentId: string,
+    receipt: AgentInboxClaimReceiptRow,
+  ): boolean {
+    if (!receipt.conversation_id || !receipt.agent_request_id) return false;
+    const conversation = this.workspaceDatabase.raw.prepare(
+      'SELECT conversation_kind FROM conversations WHERE workspace_id = ? AND id = ?',
+    ).get(workspaceId, receipt.conversation_id) as { conversation_kind: ConversationKind } | undefined;
+    if (conversation?.conversation_kind !== 'dm') return false;
+    const row = this.workspaceDatabase.raw.prepare(
+      `SELECT COUNT(*) AS count
+       FROM agent_inbox_items item
+       JOIN agent_inbox_claim_receipts claim
+         ON claim.workspace_id = item.workspace_id AND claim.receipt = item.claim_receipt
+       WHERE item.workspace_id = ? AND item.agent_id = ?
+         AND item.attention_kind = 'direct_message' AND claim.agent_request_id = ?`,
+    ).get(workspaceId, agentId, receipt.agent_request_id) as { count: number };
+    return row.count >= 10;
+  }
+
+  private parseInboxTarget(
+    _workspaceId: string,
+    target: string,
+  ): { kind: 'discussion'; conversationId: string; threadId: string | null } {
+    const match = /^conversation:([^:]+)(?::thread:([^:]+))?$/u.exec(target);
+    invariant(match?.[1], 'INVALID_INBOX_TARGET', 'Inbox target is invalid.', 400);
+    return { kind: 'discussion', conversationId: match[1], threadId: match[2] ?? null };
+  }
+
+  private requireActiveInboxReceipt(
+    binding: { workspace_id: string; binding_revision: number },
+    agentId: string,
+    receipt: string,
+    target: string,
+  ): AgentInboxClaimReceiptRow {
+    const row = this.workspaceDatabase.raw.prepare(
+      `SELECT * FROM agent_inbox_claim_receipts
+       WHERE workspace_id = ? AND agent_id = ? AND receipt = ?
+         AND binding_revision = ? AND target = ? AND handled_at IS NULL`,
+    ).get(binding.workspace_id, agentId, receipt, binding.binding_revision, target) as
+      | AgentInboxClaimReceiptRow
+      | undefined;
+    invariant(row, 'INBOX_RECEIPT_NOT_CLAIMED', 'Inbox receipt is unavailable or fenced.', 409);
+    return row;
+  }
+
+  private completeInboxReceipt(workspaceId: string, agentId: string, receipt: string, timestamp: number): void {
+    this.workspaceDatabase.raw.prepare(
+      `UPDATE agent_inbox_items SET state = 'handled', handled_at = ?
+       WHERE workspace_id = ? AND agent_id = ? AND claim_receipt = ? AND state = 'claimed'`,
+    ).run(timestamp, workspaceId, agentId, receipt);
+    this.workspaceDatabase.raw.prepare(
+      `UPDATE agent_inbox_claim_receipts SET handled_at = ?, updated_at = ?
+       WHERE workspace_id = ? AND agent_id = ? AND receipt = ? AND handled_at IS NULL`,
+    ).run(timestamp, timestamp, workspaceId, agentId, receipt);
+  }
+
+  private fenceAgentInboxBinding(workspaceId: string, agentId: string, timestamp: number): void {
+    this.workspaceDatabase.raw.prepare(
+      `UPDATE agent_inbox_items
+       SET state = 'pending', claim_receipt = NULL, claimed_at = NULL, handled_at = NULL
+       WHERE workspace_id = ? AND agent_id = ? AND state = 'claimed'`,
+    ).run(workspaceId, agentId);
+    this.workspaceDatabase.raw.prepare(
+      `UPDATE agent_inbox_claim_receipts SET handled_at = ?, updated_at = ?
+       WHERE workspace_id = ? AND agent_id = ? AND handled_at IS NULL`,
+    ).run(timestamp, timestamp, workspaceId, agentId);
   }
 
   bindAgentRuntime(
@@ -3349,23 +4710,53 @@ export class WorkspaceService {
   createConversation(
     principal: HumanPrincipal,
     workspaceId: string,
-    input: { kind: ConversationKind; title?: string; directWorkspaceMembershipIds?: string[] },
+    input:
+      | { kind: 'dm'; title?: string; directWorkspaceMembershipIds?: string[]; visibility?: 'private' }
+      | {
+          kind: 'channel';
+          title?: string;
+          visibility: ConversationVisibility;
+          participantWorkspaceMembershipIds?: string[];
+        },
     idempotencyKey: string,
   ): ConversationView {
     return this.idempotent(workspaceId, principal.actorId, 'CreateConversation', idempotencyKey, input, () => {
       const creator = this.requireMembership(workspaceId, principal.actorId);
-      const directWorkspaceMembershipIds = input.kind === 'dm'
-        ? [...new Set([creator.id, ...(input.directWorkspaceMembershipIds ?? [])])]
-        : input.directWorkspaceMembershipIds ?? [];
+      invariant(
+        input.kind === 'dm',
+        'WORKSPACE_CHANNEL_CREATION_DISABLED',
+        'A Workspace has exactly one system-created general group.',
+        409,
+      );
+      invariant(
+        input.visibility === undefined || input.visibility === 'private',
+        'DM_MUST_BE_PRIVATE',
+        'A DM must be private.',
+      );
+      const participantWorkspaceMembershipIds = [...new Set([creator.id, ...(input.directWorkspaceMembershipIds ?? [])])];
+      for (const workspaceMembershipId of participantWorkspaceMembershipIds) {
+        const participant = this.requireActiveWorkspaceMember(workspaceId, workspaceMembershipId);
+        if (participant.actorType === 'agent') {
+          const agent = this.requireAgentIdentityRow(workspaceId, participant.actorId);
+          invariant(
+            agent.owner_membership_id === creator.id
+            || this.hasSharedProjectParticipation(workspaceId, creator.id, participant.membershipId),
+            'AGENT_DIRECT_MESSAGE_APPROVAL_REQUIRED',
+            'A Human may start an Agent DM only after sharing a Project with that Agent or when they own it.',
+            403,
+          );
+        }
+      }
       return this.insertConversation(
         principal,
         workspaceId,
         null,
         creator,
         null,
-        input.kind,
+        'dm',
         input.title,
-        directWorkspaceMembershipIds,
+        'private',
+        participantWorkspaceMembershipIds,
       );
     });
   }
@@ -3373,12 +4764,34 @@ export class WorkspaceService {
   createProjectConversation(
     principal: HumanPrincipal,
     projectId: string,
-    input: { kind: 'channel'; title?: string },
+    input: {
+      kind: 'channel';
+      title?: string;
+      visibility?: ConversationVisibility;
+      participantProjectMembershipIds?: string[];
+    },
     idempotencyKey: string,
   ): ConversationView {
     const project = this.requireProject(projectId);
     return this.idempotent(project.workspace_id, principal.actorId, 'CreateProjectConversation', idempotencyKey, input, () => {
       const access = this.requireProjectAccess(principal.actorId, projectId);
+      invariant(
+        input.visibility === undefined || input.visibility === 'private',
+        'PROJECT_MAIN_GROUP_ALREADY_EXISTS',
+        'A Project has one system-created main group; additional groups use an explicit audience.',
+        409,
+      );
+      const participantProjectMembershipIds = [...new Set([
+        access.projectMembership.id,
+        ...(input.participantProjectMembershipIds ?? []),
+      ])];
+      for (const projectMembershipId of participantProjectMembershipIds) {
+        const participant = this.requireProjectMembership(project.workspace_id, projectId, projectMembershipId);
+        const workspaceMember = this.requireActiveWorkspaceMember(project.workspace_id, participant.workspace_membership_id);
+        if (workspaceMember.actorType === 'agent') {
+          this.requireAgentOwner(project.workspace_id, workspaceMember.actorId, principal.actorId);
+        }
+      }
       return this.insertConversation(
         principal,
         project.workspace_id,
@@ -3387,14 +4800,15 @@ export class WorkspaceService {
         access.projectMembership,
         input.kind,
         input.title,
-        [],
+        'private',
+        participantProjectMembershipIds,
       );
     });
   }
 
   getConversation(principal: HumanPrincipal, conversationId: string): ConversationView {
-    const access = this.requireConversationAccess(principal.actorId, conversationId);
-    return this.mapConversation(access.conversation);
+    const access = this.requireConversationViewAccess(principal.actorId, conversationId);
+    return this.mapConversation(access.conversation, access.accessMode);
   }
 
   archiveConversation(
@@ -3431,28 +4845,18 @@ export class WorkspaceService {
     const pageLimit = this.pageLimit(limit);
     const rows = this.workspaceDatabase.raw
       .prepare(
-        `SELECT c.*
+        `SELECT c.*,
+                'content' AS access_mode
          FROM conversations c
          WHERE c.workspace_id = ? AND c.project_id IS NULL AND c.lifecycle_status = ?
            AND (
-             c.conversation_kind = 'channel'
-             OR (c.conversation_kind = 'dm'
-               AND EXISTS (
-                 SELECT 1 FROM conversation_direct_memberships direct
-                 WHERE direct.workspace_id = c.workspace_id
-                   AND direct.conversation_id = c.id
-                   AND direct.membership_id = ?
-               )
-               AND 2 = (
-               SELECT COUNT(*)
-               FROM conversation_direct_memberships direct
-               JOIN workspace_memberships dm_m
-                 ON dm_m.workspace_id = direct.workspace_id
-                AND dm_m.id = direct.membership_id
-                AND dm_m.status = 'active'
-               WHERE direct.workspace_id = c.workspace_id
-                 AND direct.conversation_id = c.id
-             ))
+             c.scope_type = 'workspace_general'
+             OR EXISTS (
+               SELECT 1 FROM conversation_memberships audience
+               WHERE audience.workspace_id = c.workspace_id
+                 AND audience.conversation_id = c.id
+                 AND audience.workspace_membership_id = ?
+             )
            )
            AND (? IS NULL OR c.updated_at < ? OR (c.updated_at = ? AND c.id < ?))
          ORDER BY c.updated_at DESC, c.id DESC LIMIT ?`,
@@ -3468,7 +4872,10 @@ export class WorkspaceService {
         pageLimit + 1,
       ) as unknown as Array<ConversationAccess['conversation']>;
     const hasMore = rows.length > pageLimit;
-    const items = rows.slice(0, pageLimit).map((row) => this.mapConversation(row));
+    const items = rows.slice(0, pageLimit).map((row) => this.mapConversation(
+      row,
+      (row as ConversationAccess['conversation'] & { access_mode: ConversationAccessMode }).access_mode,
+    ));
     const last = items.at(-1);
     return { items, nextCursor: hasMore && last ? encodePageCursor(last.updatedAt, last.id) : null };
   }
@@ -3485,17 +4892,36 @@ export class WorkspaceService {
     const pageLimit = this.pageLimit(limit);
     const rows = this.workspaceDatabase.raw
       .prepare(
-        `SELECT c.*
+        `SELECT c.*,
+                CASE WHEN c.membership_mode = 'explicit' AND NOT EXISTS (
+                  SELECT 1 FROM conversation_memberships audience
+                  WHERE audience.workspace_id = c.workspace_id
+                    AND audience.conversation_id = c.id
+                    AND audience.project_membership_id = ?
+                ) THEN 'governance' ELSE 'content' END AS access_mode
          FROM conversations c
          WHERE c.workspace_id = ? AND c.project_id = ? AND c.conversation_kind = 'channel'
            AND c.lifecycle_status = ?
+           AND (
+             c.membership_mode = 'project_all'
+             OR EXISTS (
+               SELECT 1 FROM conversation_memberships audience
+               WHERE audience.workspace_id = c.workspace_id
+                 AND audience.conversation_id = c.id
+                 AND audience.project_membership_id = ?
+             )
+             OR ? IN ('owner', 'manager')
+           )
            AND (? IS NULL OR c.updated_at < ? OR (c.updated_at = ? AND c.id < ?))
          ORDER BY c.updated_at DESC, c.id DESC LIMIT ?`,
       )
       .all(
+        access.projectMembership.id,
         access.project.workspace_id,
         projectId,
         lifecycleStatus,
+        access.projectMembership.id,
+        access.projectMembership.project_role,
         pageCursor?.createdAt ?? null,
         pageCursor?.createdAt ?? 0,
         pageCursor?.createdAt ?? 0,
@@ -3503,7 +4929,10 @@ export class WorkspaceService {
         pageLimit + 1,
       ) as unknown as Array<ConversationAccess['conversation']>;
     const hasMore = rows.length > pageLimit;
-    const items = rows.slice(0, pageLimit).map((row) => this.mapConversation(row));
+    const items = rows.slice(0, pageLimit).map((row) => this.mapConversation(
+      row,
+      (row as ConversationAccess['conversation'] & { access_mode: ConversationAccessMode }).access_mode,
+    ));
     const last = items.at(-1);
     return { items, nextCursor: hasMore && last ? encodePageCursor(last.updatedAt, last.id) : null };
   }
@@ -3514,7 +4943,8 @@ export class WorkspaceService {
     input: {
       body: string;
       mentionedActorIds?: string[];
-      artifactSelections?: Array<{ artifactId: string; snapshotId: string | null }>;
+      artifactSelections?: Array<{ artifactId: string; artifactVersionId: string }>;
+      workItemIds?: string[];
     },
     idempotencyKey: string,
   ): MessageView {
@@ -3526,17 +4956,27 @@ export class WorkspaceService {
       this.addImplicitDirectAgentTarget(access, this.normalizeMentionTargets(input.mentionedActorIds)),
     );
     const artifactSelections = input.artifactSelections ?? [];
+    const workItemIds = this.normalizeMessageWorkItemIds(access, input.workItemIds);
     const result = this.idempotent(
       access.conversation.workspace_id,
       principal.actorId,
       'PostMessage',
       idempotencyKey,
-      { body: normalizedBody, mentionedActorIds: mentions.map((mention) => mention.actor_id), artifactSelections },
+      { body: normalizedBody, mentionedActorIds: mentions.map((mention) => mention.actor_id), artifactSelections, workItemIds },
       () => {
         const currentAccess = this.requireConversationAccess(principal.actorId, conversationId);
         this.requireConversationWritable(currentAccess.conversation);
         return {
-          messageId: this.publishHumanMessage(currentAccess, normalizedBody, null, mentions, artifactSelections, nowMs()),
+          messageId: this.publishHumanMessage(
+            currentAccess,
+            normalizedBody,
+            null,
+            null,
+            mentions,
+            artifactSelections,
+            workItemIds,
+            nowMs(),
+          ),
         };
       },
     );
@@ -3548,47 +4988,64 @@ export class WorkspaceService {
 
   replyToMessage(
     principal: HumanPrincipal,
-    rootMessageId: string,
+    messageId: string,
     input: {
       body: string;
       mentionedActorIds?: string[];
-      artifactSelections?: Array<{ artifactId: string; snapshotId: string | null }>;
+      artifactSelections?: Array<{ artifactId: string; artifactVersionId: string }>;
+      workItemIds?: string[];
     },
     idempotencyKey: string,
   ): MessageView {
     const normalizedBody = input.body.trim();
     invariant(normalizedBody.length > 0, 'INVALID_MESSAGE', 'Message body is required.');
-    const root = this.requireMessage(rootMessageId);
-    invariant(root.thread_id === null, 'THREAD_ROOT_REQUIRED', 'Replies must target a top-level Message.', 409);
-    const access = this.requireConversationAccess(principal.actorId, root.conversation_id);
-    const mentions = this.resolveMessageMentions(
+    const targetMessage = this.requireMessage(messageId);
+    const access = this.requireConversationAccess(principal.actorId, targetMessage.conversation_id);
+    const mentionTargets = this.addImplicitReplyAuthorTarget(
       access,
+      targetMessage.author_actor_id,
       this.addImplicitDirectAgentTarget(access, this.normalizeMentionTargets(input.mentionedActorIds)),
     );
+    const mentions = this.resolveMessageMentions(
+      access,
+      this.normalizeMentionTargets(mentionTargets),
+    );
     const artifactSelections = input.artifactSelections ?? [];
+    const workItemIds = this.normalizeMessageWorkItemIds(access, input.workItemIds);
     const result = this.idempotent(
       access.conversation.workspace_id,
       principal.actorId,
       'ReplyToMessage',
       idempotencyKey,
-      { rootMessageId, body: normalizedBody, mentionedActorIds: mentions.map((mention) => mention.actor_id), artifactSelections },
+      { replyToMessageId: messageId, body: normalizedBody, mentionedActorIds: mentions.map((mention) => mention.actor_id), artifactSelections, workItemIds },
       () => {
-        const currentRoot = this.requireMessage(rootMessageId);
-        invariant(currentRoot.thread_id === null, 'THREAD_ROOT_REQUIRED', 'Replies must target a top-level Message.', 409);
-        const currentAccess = this.requireConversationAccess(principal.actorId, currentRoot.conversation_id);
+        const currentTarget = this.requireMessage(messageId);
+        const currentAccess = this.requireConversationAccess(principal.actorId, currentTarget.conversation_id);
         this.requireConversationWritable(currentAccess.conversation);
         const timestamp = nowMs();
-        const priorThread = this.workspaceDatabase.raw
-          .prepare('SELECT id FROM threads WHERE workspace_id = ? AND conversation_id = ? AND root_message_id = ?')
-          .get(currentRoot.workspace_id, currentRoot.conversation_id, rootMessageId) as { id: string } | undefined;
-        const threadId = priorThread?.id ?? newId();
-        if (!priorThread) {
-          this.workspaceDatabase.raw
-            .prepare('INSERT INTO threads (id, workspace_id, conversation_id, root_message_id, created_at) VALUES (?, ?, ?, ?, ?)')
-            .run(threadId, currentRoot.workspace_id, currentRoot.conversation_id, rootMessageId, timestamp);
+        let threadId = currentTarget.thread_id;
+        if (threadId === null) {
+          const priorThread = this.workspaceDatabase.raw
+            .prepare('SELECT id FROM threads WHERE workspace_id = ? AND conversation_id = ? AND root_message_id = ?')
+            .get(currentTarget.workspace_id, currentTarget.conversation_id, messageId) as { id: string } | undefined;
+          threadId = priorThread?.id ?? newId();
+          if (!priorThread) {
+            this.workspaceDatabase.raw
+              .prepare('INSERT INTO threads (id, workspace_id, conversation_id, root_message_id, created_at) VALUES (?, ?, ?, ?, ?)')
+              .run(threadId, currentTarget.workspace_id, currentTarget.conversation_id, messageId, timestamp);
+          }
         }
         return {
-          messageId: this.publishHumanMessage(currentAccess, normalizedBody, threadId, mentions, artifactSelections, timestamp),
+          messageId: this.publishHumanMessage(
+            currentAccess,
+            normalizedBody,
+            threadId,
+            messageId,
+            mentions,
+            artifactSelections,
+            workItemIds,
+            timestamp,
+          ),
         };
       },
     );
@@ -3612,28 +5069,36 @@ export class WorkspaceService {
   }
 
   listConversationParticipants(principal: HumanPrincipal, conversationId: string): ConversationParticipantView[] {
-    const access = this.requireConversationAccess(principal.actorId, conversationId);
-    const rows = (access.conversation.conversation_kind === 'dm'
+    const access = this.requireConversationViewAccess(principal.actorId, conversationId);
+    const rows = (access.conversation.membership_mode === 'explicit'
       ? this.workspaceDatabase.raw.prepare(
-        `SELECT membership.id AS membership_id, NULL AS project_membership_id,
+        `SELECT audience.scope_membership_id,
+                membership.id AS membership_id, audience.project_membership_id,
                 membership.actor_id, actor.actor_type,
                 COALESCE(human.display_name, agent.name) AS display_name,
-                direct.joined_at
-         FROM conversation_direct_memberships direct
+                audience.joined_at
+         FROM conversation_memberships audience
          JOIN workspace_memberships membership
-           ON membership.workspace_id = direct.workspace_id
-          AND membership.id = direct.membership_id
+           ON membership.workspace_id = audience.workspace_id
+          AND membership.id = audience.workspace_membership_id
           AND membership.status = 'active'
+         LEFT JOIN project_memberships project_membership
+           ON project_membership.workspace_id = audience.workspace_id
+          AND project_membership.project_id = audience.project_id
+          AND project_membership.id = audience.project_membership_id
+          AND project_membership.status = 'active'
          JOIN actors actor ON actor.id = membership.actor_id
          LEFT JOIN humans human ON human.actor_id = membership.actor_id
          LEFT JOIN agents agent
            ON agent.workspace_id = membership.workspace_id AND agent.actor_id = membership.actor_id
-         WHERE direct.workspace_id = ? AND direct.conversation_id = ?
-         ORDER BY direct.joined_at, membership.id`,
+         WHERE audience.workspace_id = ? AND audience.conversation_id = ?
+           AND (audience.project_id IS NULL OR project_membership.id IS NOT NULL)
+         ORDER BY audience.joined_at, audience.scope_membership_id`,
       ).all(access.conversation.workspace_id, conversationId)
       : access.conversation.project_id === null
         ? this.workspaceDatabase.raw.prepare(
-          `SELECT membership.id AS membership_id, NULL AS project_membership_id,
+          `SELECT membership.id AS scope_membership_id,
+                  membership.id AS membership_id, NULL AS project_membership_id,
                   membership.actor_id, actor.actor_type,
                   COALESCE(human.display_name, agent.name) AS display_name,
                   membership.joined_at
@@ -3643,10 +5108,27 @@ export class WorkspaceService {
            LEFT JOIN agents agent
              ON agent.workspace_id = membership.workspace_id AND agent.actor_id = membership.actor_id
            WHERE membership.workspace_id = ? AND membership.status = 'active'
-           ORDER BY membership.joined_at, membership.id`,
-        ).all(access.conversation.workspace_id)
+             AND actor.actor_type = 'human'
+           UNION ALL
+           SELECT audience.scope_membership_id,
+                  membership.id AS membership_id, NULL AS project_membership_id,
+                  membership.actor_id, actor.actor_type,
+                  agent.name AS display_name,
+                  audience.joined_at
+           FROM conversation_memberships audience
+           JOIN workspace_memberships membership
+             ON membership.workspace_id = audience.workspace_id
+            AND membership.id = audience.workspace_membership_id
+            AND membership.status = 'active'
+           JOIN actors actor ON actor.id = membership.actor_id AND actor.actor_type = 'agent'
+           JOIN agents agent
+             ON agent.workspace_id = membership.workspace_id AND agent.actor_id = membership.actor_id
+           WHERE audience.workspace_id = ? AND audience.conversation_id = ?
+           ORDER BY 7, 1`,
+        ).all(access.conversation.workspace_id, access.conversation.workspace_id, conversationId)
         : this.workspaceDatabase.raw.prepare(
-          `SELECT membership.id AS membership_id,
+          `SELECT project_membership.id AS scope_membership_id,
+                  membership.id AS membership_id,
                   project_membership.id AS project_membership_id,
                   membership.actor_id, actor.actor_type,
                   COALESCE(human.display_name, agent.name) AS display_name,
@@ -3663,9 +5145,37 @@ export class WorkspaceService {
            WHERE project_membership.workspace_id = ?
              AND project_membership.project_id = ?
              AND project_membership.status = 'active'
-           ORDER BY project_membership.joined_at, project_membership.id`,
-        ).all(access.conversation.workspace_id, access.conversation.project_id)) as unknown as ConversationParticipantRow[];
+             AND actor.actor_type = 'human'
+           UNION ALL
+           SELECT audience.scope_membership_id,
+                  membership.id AS membership_id,
+                  project_membership.id AS project_membership_id,
+                  membership.actor_id, actor.actor_type,
+                  agent.name AS display_name,
+                  audience.joined_at
+           FROM conversation_memberships audience
+           JOIN project_memberships project_membership
+             ON project_membership.workspace_id = audience.workspace_id
+            AND project_membership.project_id = audience.project_id
+            AND project_membership.id = audience.project_membership_id
+            AND project_membership.status = 'active'
+           JOIN workspace_memberships membership
+             ON membership.workspace_id = project_membership.workspace_id
+            AND membership.id = project_membership.workspace_membership_id
+            AND membership.status = 'active'
+           JOIN actors actor ON actor.id = membership.actor_id AND actor.actor_type = 'agent'
+           JOIN agents agent
+             ON agent.workspace_id = membership.workspace_id AND agent.actor_id = membership.actor_id
+           WHERE audience.workspace_id = ? AND audience.conversation_id = ?
+           ORDER BY 7, 1`,
+        ).all(
+          access.conversation.workspace_id,
+          access.conversation.project_id,
+          access.conversation.workspace_id,
+          conversationId,
+        )) as unknown as ConversationParticipantRow[];
     return rows.map((row) => ({
+      scopeMembershipId: row.scope_membership_id,
       workspaceMembershipId: row.membership_id,
       projectMembershipId: row.project_membership_id,
       actorId: row.actor_id,
@@ -3673,6 +5183,207 @@ export class WorkspaceService {
       displayName: row.display_name,
       joinedAt: row.joined_at,
     }));
+  }
+
+  addConversationParticipant(
+    principal: HumanPrincipal,
+    conversationId: string,
+    scopeMembershipId: string,
+    expectedRevision: number,
+    idempotencyKey: string,
+  ): ConversationParticipantView {
+    const existing = this.requireConversationViewAccess(principal.actorId, conversationId);
+    return this.idempotent(
+      existing.conversation.workspace_id,
+      principal.actorId,
+      'AddConversationParticipant',
+      idempotencyKey,
+      { conversationId, scopeMembershipId, expectedRevision },
+      () => {
+        const access = this.requireConversationAudienceAuthority(principal.actorId, conversationId);
+        const participant = this.resolveConversationScopeMembership(access.conversation, scopeMembershipId);
+        this.requireConversationParticipantAdditionAuthority(access, participant, principal.actorId);
+        invariant(
+          access.conversation.revision === expectedRevision,
+          'CONVERSATION_REVISION_CONFLICT',
+          'Conversation revision changed.',
+          409,
+        );
+        const duplicate = this.workspaceDatabase.raw.prepare(
+          `SELECT 1 FROM conversation_memberships
+           WHERE workspace_id = ? AND conversation_id = ? AND scope_membership_id = ?`,
+        ).get(access.conversation.workspace_id, conversationId, scopeMembershipId);
+        invariant(!duplicate, 'CONVERSATION_PARTICIPANT_EXISTS', 'The Membership is already in the private audience.', 409);
+        const timestamp = nowMs();
+        this.workspaceDatabase.raw.prepare(
+          `INSERT INTO conversation_memberships (
+             id, workspace_id, conversation_id, project_id, scope_membership_id,
+             workspace_membership_id, project_membership_id, joined_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          newId(), access.conversation.workspace_id, conversationId, access.conversation.project_id,
+          scopeMembershipId, participant.workspaceMembershipId, participant.projectMembershipId, timestamp,
+        );
+        const updated = this.advanceConversationAudienceRevision(
+          access.conversation,
+          expectedRevision,
+          timestamp,
+        );
+        const projectVersion = access.conversation.project_id
+          ? this.bumpProjectContext(access.conversation.project_id, timestamp)
+          : null;
+        this.appendChange(
+          access.conversation.workspace_id,
+          null,
+          conversationId,
+          updated.contextVersion,
+          'conversation_participant_added',
+          'conversation',
+          conversationId,
+          { scopeMembershipId, revision: updated.revision },
+          timestamp,
+          access.conversation.project_id
+            ? { projectId: access.conversation.project_id, projectVersion: projectVersion! }
+            : {},
+        );
+        this.appendAudit(
+          access.conversation.workspace_id,
+          principal.actorId,
+          access.membership.id,
+          'conversation.participant.add',
+          'conversation_membership',
+          scopeMembershipId,
+          { conversationId, revision: updated.revision },
+          timestamp,
+        );
+        const item = this.listConversationParticipants(principal, conversationId)
+          .find((candidate) => candidate.scopeMembershipId === scopeMembershipId);
+        invariant(item, 'CONVERSATION_PARTICIPANT_NOT_FOUND', 'Conversation participant is unavailable.', 404);
+        return item;
+      },
+    );
+  }
+
+  removeConversationParticipant(
+    principal: HumanPrincipal,
+    conversationId: string,
+    scopeMembershipId: string,
+    expectedRevision: number,
+    idempotencyKey: string,
+  ): {
+    scopeMembershipId: string;
+    revision: number;
+    contextVersion: number;
+    removedAt: number;
+    cancelledAgentRequestIds: string[];
+    cancelledRunIds: string[];
+  } {
+    const existing = this.requireConversationViewAccess(principal.actorId, conversationId);
+    const result = this.idempotent(
+      existing.conversation.workspace_id,
+      principal.actorId,
+      'RemoveConversationParticipant',
+      idempotencyKey,
+      { conversationId, scopeMembershipId, expectedRevision },
+      () => {
+        const access = this.requireConversationAudienceAuthority(principal.actorId, conversationId);
+        invariant(
+          access.conversation.revision === expectedRevision,
+          'CONVERSATION_REVISION_CONFLICT',
+          'Conversation revision changed.',
+          409,
+        );
+        const audience = this.workspaceDatabase.raw.prepare(
+          `SELECT audience.workspace_membership_id, audience.project_membership_id, membership.actor_id
+           FROM conversation_memberships audience
+           JOIN workspace_memberships membership
+             ON membership.workspace_id = audience.workspace_id
+            AND membership.id = audience.workspace_membership_id
+           WHERE audience.workspace_id = ? AND audience.conversation_id = ?
+             AND audience.scope_membership_id = ?`,
+        ).get(access.conversation.workspace_id, conversationId, scopeMembershipId) as {
+          workspace_membership_id: string;
+          project_membership_id: string | null;
+          actor_id: string;
+        } | undefined;
+        invariant(audience, 'CONVERSATION_PARTICIPANT_NOT_FOUND', 'Conversation participant does not exist.', 404);
+        this.requireConversationParticipantRemovalAuthority(
+          access,
+          audience.actor_id,
+          audience.workspace_membership_id,
+        );
+        const timestamp = nowMs();
+        const removed = this.workspaceDatabase.raw.prepare(
+          `DELETE FROM conversation_memberships
+           WHERE workspace_id = ? AND conversation_id = ? AND scope_membership_id = ?`,
+        ).run(access.conversation.workspace_id, conversationId, scopeMembershipId);
+        invariant(removed.changes === 1, 'CONVERSATION_REVISION_CONFLICT', 'Conversation audience changed concurrently.', 409);
+        const updated = this.advanceConversationAudienceRevision(access.conversation, expectedRevision, timestamp);
+        const cancelledAgentRequestIds = this.cancelRequestsAffectedByScopeMembershipRemoval(
+          access.conversation.workspace_id,
+          conversationId,
+          audience.workspace_membership_id,
+          audience.actor_id,
+          timestamp,
+        );
+        const isolated = this.cancelRunsAffectedByConversationMembershipRemoval(
+          access.conversation,
+          audience.workspace_membership_id,
+          audience.project_membership_id,
+          timestamp,
+        );
+        this.fenceRemovedConversationAgentInbox(
+          access.conversation.workspace_id,
+          conversationId,
+          audience.actor_id,
+          timestamp,
+        );
+        const projectVersion = access.conversation.project_id
+          ? this.bumpProjectContext(access.conversation.project_id, timestamp)
+          : null;
+        this.appendChange(
+          access.conversation.workspace_id,
+          null,
+          conversationId,
+          updated.contextVersion,
+          'conversation_participant_removed',
+          'conversation',
+          conversationId,
+          {
+            scopeMembershipId,
+            revision: updated.revision,
+            cancelledAgentRequestIds,
+            cancelledRunIds: isolated.runIds,
+          },
+          timestamp,
+          access.conversation.project_id
+            ? { projectId: access.conversation.project_id, projectVersion: projectVersion! }
+            : {},
+        );
+        this.appendAudit(
+          access.conversation.workspace_id,
+          principal.actorId,
+          access.membership.id,
+          'conversation.participant.remove',
+          'conversation_membership',
+          scopeMembershipId,
+          { conversationId, revision: updated.revision, cancelledRunIds: isolated.runIds },
+          timestamp,
+        );
+        return {
+          scopeMembershipId,
+          revision: updated.revision,
+          contextVersion: updated.contextVersion,
+          removedAt: timestamp,
+          cancelledAgentRequestIds,
+          cancelledRunIds: isolated.runIds,
+          cancelledAttemptIds: isolated.attemptIds,
+        };
+      },
+    );
+    for (const attemptId of result.cancelledAttemptIds) this.localExecutions.cancelIfPresent(attemptId);
+    const { cancelledAttemptIds: _cancelledAttemptIds, ...view } = result;
+    return view;
   }
 
   getAgentRequest(principal: HumanPrincipal, agentRequestId: string): AgentRequestView {
@@ -3807,9 +5518,13 @@ export class WorkspaceService {
         .all(workspaceId, after, membership.id, pageLimit + 1) as unknown as Array<Record<string, unknown>>;
       const hasMore = rows.length > pageLimit;
       const pageRows = rows.slice(0, pageLimit);
-      const items = pageRows.map((row) => this.mapChange(row));
+      const visibleRows = pageRows.filter((row) => (
+        row.conversation_id === null
+        || this.hasConversationAccess(workspaceId, String(row.conversation_id), membership.id)
+      ));
+      const items = visibleRows.map((row) => this.mapChange(row));
       if (hasMore) {
-        return { items, nextCursor: items.at(-1)?.position ?? after };
+        return { items, nextCursor: Number(pageRows.at(-1)?.position ?? after) };
       }
       const head = this.workspaceDatabase.raw
         .prepare('SELECT COALESCE(MAX(position), 0) AS position FROM workspace_changes WHERE workspace_id = ?')
@@ -3892,10 +5607,6 @@ export class WorkspaceService {
         403,
       );
       const project = projectId ? this.requireProject(projectId) : null;
-      const projectRepository = projectId ? this.findActiveProjectRepository(projectId) : null;
-      const projectExecution = projectId && projectRepository
-        ? this.requireReadyProjectWorkingCopy(computerId, projectId)
-        : null;
       const thread = request.result_thread_id === null ? null : this.workspaceDatabase.raw
         .prepare('SELECT * FROM threads WHERE workspace_id = ? AND conversation_id = ? AND id = ?')
         .get(request.workspace_id, request.result_conversation_id, request.result_thread_id) as Record<string, unknown> | undefined;
@@ -3939,20 +5650,15 @@ export class WorkspaceService {
              id, workspace_id, run_id, objective, trigger_message_id, mention_outcome_id,
              source_scope_json, result_scope_json, trigger_frontier_json, agent_membership_id,
              policy_version_id, effective_budget_json, workspace_context_version,
-             project_id, project_context_version,
-             repository_id, repository_identity, repository_base_commit,
-             conversation_id,
+             project_id, project_context_version, conversation_id,
              conversation_context_version, change_cursor, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           runSnapshotId, request.workspace_id, runId, 'Handle pending Agent Inbox messages.', sourceMessage.id,
           this.requireMentionOutcomeId(request.id), canonicalJson(scope), canonicalJson(scope),
           canonicalJson(triggerFrontier), membership.id, policy.id, canonicalJson(budget),
           Number(this.requireWorkspaceVersion(request.workspace_id)), projectId, project?.context_version ?? null,
-          projectExecution?.repository.id ?? null,
-          projectExecution?.repository.repository_identity ?? null,
-          projectExecution?.headCommit ?? null,
           request.result_conversation_id,
           Number(conversation.context_version), changeCursor, timestamp,
         );
@@ -3977,12 +5683,10 @@ export class WorkspaceService {
             id: project.id,
             name: project.name,
             description: project.description,
-            repositoryIdentity: projectExecution?.repository.repository_identity,
           })),
           metadata: {
             name: project.name,
             description: project.description,
-            repositoryIdentity: projectExecution?.repository.repository_identity,
           },
         }] : []),
       ];
@@ -4012,16 +5716,6 @@ export class WorkspaceService {
       invariant(run.status === 'active', 'RUN_NOT_ACTIVE', 'Run is not active.', 409);
       this.authorizeComputerForRunRequest(computerId, runId);
       const pinned = this.getRunContextSnapshot(run.id);
-      if (run.project_id && pinned.repositoryId) {
-        const ready = this.requireReadyProjectWorkingCopy(computerId, run.project_id);
-        invariant(
-          pinned.repositoryId === ready.repository.id
-          && pinned.repositoryIdentity === ready.repository.repository_identity,
-          'PROJECT_REPOSITORY_MISMATCH',
-          'The Computer Working Copy no longer matches the Run Repository.',
-          409,
-        );
-      }
       invariant(run.deadline_at > nowMs(), 'RUN_DEADLINE_EXCEEDED', 'Run deadline has been exceeded.', 409);
       const policy = this.hydrateExecutionPolicy(this.requirePolicyById(run.policy_version_id));
       const activeForAgent = this.workspaceDatabase.raw
@@ -4082,17 +5776,6 @@ export class WorkspaceService {
     const context = this.requireExecutionContext(attemptId);
     const attempt = this.requireAttempt(attemptId);
     const runContext = this.getRunContextSnapshot(context.run_id);
-    if (runContext.projectId && runContext.repositoryId) {
-      const ready = this.requireReadyProjectWorkingCopy(computerId, runContext.projectId);
-      invariant(
-        runContext.repositoryId === ready.repository.id
-        && runContext.repositoryIdentity === ready.repository.repository_identity
-        && runContext.repositoryBaseCommit !== null,
-        'PROJECT_REPOSITORY_MISMATCH',
-        'The Computer Working Copy no longer matches the Run Repository.',
-        409,
-      );
-    }
     const binding = this.workspaceDatabase.raw
       .prepare(
         `SELECT b.runtime_id, b.binding_revision, b.requested_model, b.requested_reasoning_effort, b.requested_mode
@@ -4123,17 +5806,289 @@ export class WorkspaceService {
         reasoningEffort: binding.requested_reasoning_effort,
         mode: binding.requested_mode,
       },
-      executionScope: runContext.repositoryId === null
+      executionScope: runContext.projectId === null
         ? { kind: 'workspace_scratch' }
-        : {
-            kind: 'project_repository',
-            projectId: runContext.projectId!,
-            repositoryId: runContext.repositoryId!,
-            repositoryIdentity: runContext.repositoryIdentity!,
-            baseCommit: runContext.repositoryBaseCommit!,
-          },
+        : { kind: 'project_scratch', projectId: runContext.projectId },
       runContext,
       developerInstructions: this.renderDeveloperInstructions(context.agent_id),
+    };
+  }
+
+  getComputerAgentSessionInput(
+    computerId: string,
+    agentId: string,
+    session?: { kind: AgentSessionKind; key: string },
+  ): AgentSessionInputView {
+    const binding = this.workspaceDatabase.raw.prepare(
+      `SELECT binding.workspace_id, binding.runtime_id, binding.binding_revision,
+              binding.requested_model, binding.requested_reasoning_effort, binding.requested_mode
+       FROM agent_runtime_bindings binding
+       JOIN agents agent
+         ON agent.workspace_id = binding.workspace_id
+        AND agent.actor_id = binding.agent_id
+        AND agent.lifecycle_status = 'active'
+       WHERE binding.computer_id = ? AND binding.agent_id = ? AND binding.status = 'active'`,
+    ).get(computerId, agentId) as {
+      workspace_id: string;
+      runtime_id: RuntimeId;
+      binding_revision: number;
+      requested_model: string | null;
+      requested_reasoning_effort: ReasoningEffort | null;
+      requested_mode: string | null;
+    } | undefined;
+    invariant(binding, 'RUNTIME_BINDING_UNAVAILABLE', 'Computer does not hold this Agent Runtime Binding.', 403);
+    const membership = this.requireMembership(binding.workspace_id, agentId);
+    const resolvedSession = session ?? (() => {
+      const row = this.workspaceDatabase.raw.prepare(
+        `SELECT agent_request_id FROM agent_inbox_items
+         WHERE workspace_id = ? AND agent_id = ? AND state IN ('pending', 'claimed')
+           AND agent_request_id IS NOT NULL ORDER BY sequence LIMIT 1`,
+      ).get(binding.workspace_id, agentId) as { agent_request_id: string } | undefined;
+      return { kind: 'mention' as const, key: row?.agent_request_id ?? 'unbound-session' };
+    })();
+    const workspace = this.workspaceDatabase.raw.prepare(
+      'SELECT id, name, revision, context_version FROM workspaces WHERE id = ?',
+    ).get(binding.workspace_id) as { id: string; name: string; revision: number; context_version: number } | undefined;
+    invariant(workspace, 'WORKSPACE_NOT_FOUND', 'Workspace does not exist.', 404);
+    let projectId: string | null = null;
+    let target: string | null = null;
+    let initialDiscussionFrontier: number | null = null;
+    let discussion: AgentDiscussionBindingView | null = null;
+    let referencedWorkItemIds: string[] = [];
+    let sessionWindow: AgentSessionWindowView = {
+      mode: 'isolated',
+      acceptedMessages: 1,
+      maxMessages: 10,
+      status: 'accepting',
+    };
+    const lines: unknown[] = [{
+      type: 'session',
+      session: resolvedSession,
+      workspaceId: binding.workspace_id,
+      agentId,
+      generatedAt: 0,
+    }];
+    lines.push({
+      type: 'workspace',
+      id: workspace.id,
+      name: workspace.name,
+      revision: workspace.revision,
+      contextVersion: workspace.context_version,
+    });
+    const appendWorkItemMentions = (references: MessageWorkItemReferenceView[]) => {
+      for (const reference of references) {
+        if (referencedWorkItemIds.includes(reference.workItemId)) continue;
+        referencedWorkItemIds.push(reference.workItemId);
+        lines.push({
+          type: 'work_item_mention',
+          workItemId: reference.workItemId,
+          taskNumber: reference.taskNumber,
+          instruction: `use teamctl work-item read ${reference.workItemId} to inspect its current state and artifacts`,
+        });
+      }
+    };
+    if (resolvedSession.kind === 'mention') {
+      const request = this.requireAgentRequest(resolvedSession.key);
+      invariant(request.workspace_id === binding.workspace_id && request.target_agent_id === agentId,
+        'AGENT_REQUEST_SCOPE_MISMATCH', 'Mention Session does not belong to this Agent.', 409);
+      const source = this.requireMessage(request.source_message_id);
+      projectId = source.project_id;
+      target = this.inboxTarget(source.conversation_id, source.thread_id);
+      initialDiscussionFrontier = source.scope_position;
+      invariant(this.hasConversationAccess(binding.workspace_id, source.conversation_id, membership.id),
+        'CONVERSATION_NOT_FOUND', 'Conversation is not accessible to this Agent.', 404);
+      const conversation = this.workspaceDatabase.raw.prepare(
+        'SELECT id, project_id, scope_type, conversation_kind, title, context_version, timeline_frontier FROM conversations WHERE workspace_id = ? AND id = ?',
+      ).get(binding.workspace_id, source.conversation_id) as (Record<string, unknown> & { conversation_kind: ConversationKind }) | undefined;
+      if (conversation) lines.push({ type: 'conversation', ...conversation, threadId: source.thread_id });
+      sessionWindow = {
+        mode: conversation?.conversation_kind === 'dm' ? 'dm' : 'isolated',
+        acceptedMessages: 1,
+        maxMessages: 10,
+        status: 'accepting',
+      };
+      if (sessionWindow.mode === 'dm') {
+        const accepted = Number((this.workspaceDatabase.raw.prepare(
+          `SELECT COUNT(*) AS count
+           FROM agent_inbox_items item
+           JOIN agent_inbox_claim_receipts receipt
+             ON receipt.workspace_id = item.workspace_id AND receipt.receipt = item.claim_receipt
+           WHERE item.workspace_id = ? AND item.agent_id = ?
+             AND item.attention_kind = 'direct_message' AND receipt.agent_request_id = ?`,
+        ).get(binding.workspace_id, agentId, request.id) as { count: number }).count);
+        const latestReceipt = this.workspaceDatabase.raw.prepare(
+          `SELECT handled_at FROM agent_inbox_claim_receipts
+           WHERE workspace_id = ? AND agent_id = ? AND agent_request_id = ?
+           ORDER BY created_at DESC LIMIT 1`,
+        ).get(binding.workspace_id, agentId, request.id) as { handled_at: number | null } | undefined;
+        sessionWindow = {
+          mode: 'dm',
+          acceptedMessages: accepted === 0 ? 1 : Math.min(accepted, 10),
+          maxMessages: 10,
+          status: latestReceipt?.handled_at !== null && latestReceipt !== undefined
+            ? 'completed'
+            : accepted >= 10 ? 'frozen' : 'accepting',
+        };
+      }
+      discussion = {
+        target: this.inboxTarget(source.conversation_id, source.thread_id),
+        agentRequestId: request.id,
+        initialDiscussionFrontier: source.scope_position,
+        sessionWindow,
+      };
+      if (projectId) {
+        const project = this.requireProject(projectId);
+        lines.push({ type: 'project', id: project.id, workspaceId: project.workspace_id, name: project.name, description: project.description, revision: project.revision, contextVersion: project.context_version });
+      }
+      const history = this.workspaceDatabase.raw.prepare(
+        `SELECT * FROM messages
+         WHERE workspace_id = ? AND conversation_id = ? AND thread_id IS ? AND scope_position <= ?
+         ORDER BY scope_position DESC, id DESC LIMIT 200`,
+      ).all(binding.workspace_id, source.conversation_id, source.thread_id, source.scope_position)
+        .reverse() as unknown as MessageRow[];
+      if (source.thread_id !== null) {
+        const root = this.workspaceDatabase.raw.prepare(
+          `SELECT message.* FROM threads thread
+           JOIN messages message ON message.workspace_id = thread.workspace_id AND message.id = thread.root_message_id
+           WHERE thread.workspace_id = ? AND thread.conversation_id = ? AND thread.id = ?`,
+        ).get(binding.workspace_id, source.conversation_id, source.thread_id) as MessageRow | undefined;
+        if (root && !history.some((row) => row.id === root.id)) {
+          lines.push({ type: 'thread_root', message: this.hydrateAgentContextMessage(root, membership) });
+        }
+      }
+      if (history.length === 200) lines.push({ type: 'conversation_history_truncated', omittedBefore: history[0]?.scope_position ?? 0 });
+      lines.push(...history.map((row) => ({ type: 'message', message: this.hydrateAgentContextMessage(row, membership) })));
+      const sourceView = this.hydrateMessage(source, membership);
+      appendWorkItemMentions(sourceView.workItemReferences);
+      lines.push({ type: 'trigger', agentRequestId: request.id, messageId: source.id, scopePosition: source.scope_position });
+    } else {
+      const workItem = this.requireWorkItem(resolvedSession.key);
+      invariant(workItem.workspace_id === binding.workspace_id
+        && this.findProjectMembership(binding.workspace_id, workItem.project_id, membership.id),
+      'WORK_ITEM_NOT_FOUND', 'WorkItem does not exist or is not accessible to this Agent.', 404);
+      projectId = workItem.project_id;
+      target = `work-item:${workItem.id}`;
+      sessionWindow = {
+        mode: 'isolated',
+        acceptedMessages: 0,
+        maxMessages: 10,
+        status: 'accepting',
+      };
+      const project = this.requireProject(projectId);
+      lines.push({ type: 'project', id: project.id, workspaceId: project.workspace_id, name: project.name, description: project.description, revision: project.revision, contextVersion: project.context_version });
+      const workItemView = this.mapWorkItem(workItem);
+      lines.push({ type: 'work_item', workItem: workItemView });
+      referencedWorkItemIds = [workItem.id];
+      lines.push({
+        type: 'work_item_mention',
+        workItemId: workItem.id,
+        taskNumber: workItem.task_number,
+        instruction: `use teamctl work-item read ${workItem.id} to inspect its current state and artifacts`,
+      });
+      for (const reference of workItemView.relatedWorkItemReferences) {
+        lines.push({
+          type: 'work_item_relation',
+          workItemId: workItem.id,
+          relatedWorkItemId: reference.workItemId,
+          relatedTaskNumber: reference.taskNumber,
+          relation: 'created_from_message_reference',
+          instruction: `WorkItem #${workItem.task_number} was created from a message referencing WorkItem #${reference.taskNumber}; use teamctl work-item read ${reference.workItemId} to inspect that related task.`,
+        });
+      }
+      if (workItem.source_conversation_id !== null
+        && workItem.source_message_id !== null
+        && this.hasConversationAccess(binding.workspace_id, workItem.source_conversation_id, membership.id)) {
+        const sourceMessage = this.workspaceDatabase.raw.prepare(
+          `SELECT * FROM messages
+           WHERE workspace_id = ? AND conversation_id = ? AND id = ?`,
+        ).get(binding.workspace_id, workItem.source_conversation_id, workItem.source_message_id) as MessageRow | undefined;
+        if (sourceMessage) {
+          const sourceMessageView = this.hydrateMessage(sourceMessage, membership);
+          lines.push({ type: 'work_item_source_message', message: this.hydrateAgentContextMessage(sourceMessage, membership) });
+          appendWorkItemMentions(sourceMessageView.workItemReferences);
+          const sourceRequest = this.workspaceDatabase.raw.prepare(
+            `SELECT request.id, inbox.state
+             FROM agent_requests request
+             JOIN agent_mention_outcomes outcome
+               ON outcome.workspace_id = request.workspace_id
+              AND outcome.id = request.mention_outcome_id
+             JOIN agent_inbox_items inbox
+               ON inbox.workspace_id = request.workspace_id
+              AND inbox.agent_request_id = request.id
+              AND inbox.agent_id = request.target_agent_id
+             WHERE request.workspace_id = ? AND request.target_agent_id = ?
+               AND outcome.message_id = ? AND request.status IN ('pending', 'accepted')
+               AND inbox.state IN ('pending', 'claimed')
+             ORDER BY request.created_at, request.id
+             LIMIT 1`,
+          ).get(binding.workspace_id, agentId, sourceMessage.id) as { id: string; state: 'pending' | 'claimed' } | undefined;
+          if (sourceRequest) {
+            const sourceConversation = this.workspaceDatabase.raw.prepare(
+              'SELECT id, project_id, scope_type, conversation_kind, title, context_version, timeline_frontier FROM conversations WHERE workspace_id = ? AND id = ?',
+            ).get(binding.workspace_id, sourceMessage.conversation_id) as (Record<string, unknown> & { conversation_kind: ConversationKind }) | undefined;
+            if (sourceConversation) lines.push({ type: 'conversation', ...sourceConversation, threadId: sourceMessage.thread_id });
+            const sourceHistory = this.workspaceDatabase.raw.prepare(
+              `SELECT * FROM messages
+               WHERE workspace_id = ? AND conversation_id = ? AND thread_id IS ? AND scope_position <= ?
+               ORDER BY scope_position DESC, id DESC LIMIT 200`,
+            ).all(binding.workspace_id, sourceMessage.conversation_id, sourceMessage.thread_id, sourceMessage.scope_position)
+              .reverse() as unknown as MessageRow[];
+            if (sourceHistory.length === 200) lines.push({ type: 'conversation_history_truncated', omittedBefore: sourceHistory[0]?.scope_position ?? 0 });
+            lines.push(...sourceHistory.map((row) => ({ type: 'message', message: this.hydrateAgentContextMessage(row, membership) })));
+            discussion = {
+              target: this.inboxTarget(sourceMessage.conversation_id, sourceMessage.thread_id),
+              agentRequestId: sourceRequest.id,
+              initialDiscussionFrontier: sourceMessage.scope_position,
+              sessionWindow: {
+                mode: sourceConversation?.conversation_kind === 'dm' ? 'dm' : 'isolated',
+                acceptedMessages: 1,
+                maxMessages: 10,
+                status: 'accepting',
+              },
+            };
+          }
+        }
+      }
+      const comments = this.workspaceDatabase.raw.prepare(
+        `SELECT * FROM work_item_comments WHERE workspace_id = ? AND work_item_id = ? ORDER BY comment_position, id`,
+      ).all(workItem.workspace_id, workItem.id) as unknown as WorkItemCommentRow[];
+      for (const row of comments) {
+        const comment = this.mapWorkItemComment(row);
+        lines.push({ type: 'work_item_comment', comment });
+        for (const reference of comment.workItemReferences) {
+          if (!referencedWorkItemIds.includes(reference.workItemId)) {
+            referencedWorkItemIds.push(reference.workItemId);
+            lines.push({
+              type: 'work_item_mention',
+              workItemId: reference.workItemId,
+              taskNumber: reference.taskNumber,
+              instruction: `use teamctl work-item read ${reference.workItemId} to inspect its current state and artifacts`,
+            });
+          }
+        }
+      }
+    }
+    const contextJsonl = lines.map((line) => JSON.stringify(line)).join('\n');
+    return {
+      workspaceId: binding.workspace_id,
+      agentId,
+      session: resolvedSession,
+      target,
+      projectId,
+      contextHash: sha256(contextJsonl),
+      contextJsonl,
+      referencedWorkItemIds,
+      initialDiscussionFrontier,
+      discussion,
+      sessionWindow,
+      runtimeId: binding.runtime_id,
+      runtimeBindingRevision: binding.binding_revision,
+      runtimeConfiguration: {
+        model: binding.requested_model,
+        reasoningEffort: binding.requested_reasoning_effort,
+        mode: binding.requested_mode,
+      },
+      developerInstructions: this.renderDeveloperInstructions(agentId),
     };
   }
 
@@ -4297,13 +6252,58 @@ export class WorkspaceService {
     const run = this.requireRun(context.run_id);
     const attempt = this.requireAttempt(attemptId);
     invariant(run.status === 'active' && attempt.status === 'running', 'ATTEMPT_FENCED', 'Run or Attempt is no longer active.', 409);
-    return this.artifacts.registerStagedBlob({
+    this.workspaceDatabase.raw.prepare(
+      `INSERT INTO content_blobs (hash, byte_length, media_type, storage_path, created_at)
+       VALUES (?, ?, ?, ?, ?) ON CONFLICT(hash) DO NOTHING`,
+    ).run(stored.hash, stored.byteLength, stored.mediaType, stored.storagePath, nowMs());
+    const id = newId();
+    const timestamp = nowMs();
+    const expiresAt = timestamp + 24 * 60 * 60 * 1000;
+    this.workspaceDatabase.raw.prepare(
+      `INSERT INTO staged_blobs (
+         id, workspace_id, run_id, attempt_id, blob_hash, media_type,
+         byte_length, created_at, expires_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, context.workspace_id, context.run_id, attemptId, stored.hash, stored.mediaType, stored.byteLength, timestamp, expiresAt);
+    return {
+      id,
       workspaceId: context.workspace_id,
-      actorId: context.agent_id,
-      membershipId: context.agent_membership_id,
       runId: context.run_id,
       attemptId,
-    }, stored);
+      contentDigest: stored.hash,
+      mediaType: stored.mediaType,
+      byteLength: stored.byteLength,
+      expiresAt,
+    };
+  }
+
+  private publishStagedArtifactV2(context: ExecutionContextRow, publication: RuntimeReturnEnvelope['artifactPublications'][number]): import('./types.js').ArtifactV2View {
+    invariant(context.project_id, 'PROJECT_REQUIRED', 'Artifact publication requires the Run to be bound to a Project.', 409);
+    invariant(publication.stagedBlobId, 'STAGED_BLOB_REQUIRED', 'v2 Artifact publication requires a staged file blob.', 400);
+    const staged = this.workspaceDatabase.raw.prepare(
+      `SELECT sb.blob_hash, sb.media_type, sb.byte_length, sb.expires_at, cb.storage_path
+       FROM staged_blobs sb JOIN content_blobs cb ON cb.hash = sb.blob_hash
+       WHERE sb.workspace_id = ? AND sb.id = ? AND sb.run_id = ? AND sb.attempt_id = ? AND sb.expires_at > ?`,
+    ).get(context.workspace_id, publication.stagedBlobId, context.run_id, context.attempt_id, nowMs()) as {
+      blob_hash: string; media_type: string; byte_length: number; expires_at: number; storage_path: string;
+    } | undefined;
+    invariant(staged, 'STAGED_BLOB_NOT_FOUND', 'Staged blob is unavailable or expired.', 404);
+    const agent = this.requireAgentRow(context.workspace_id, context.agent_id);
+    const result = this.artifactV2.publishSync({
+      kind: 'computer', computerId: '', ownerHumanId: agent.owner_human_id, agentId: context.agent_id,
+    }, context.project_id, {
+      ...(publication.artifactId ? { artifactId: publication.artifactId } : {}),
+      fileName: publication.fileName ?? publication.stagedBlobId,
+      ...(publication.artifactName ? { artifactName: publication.artifactName } : {}),
+      ...(publication.artifactPath ? { artifactPath: publication.artifactPath } : {}),
+      ...(publication.expectedLatestVersionId ? { expectedLatestVersionId: publication.expectedLatestVersionId } : {}),
+      ...(publication.parentVersionIds ? { parentVersionIds: publication.parentVersionIds } : {}),
+      ...(publication.sourceResourceRefs ? { sourceResourceRefs: publication.sourceResourceRefs } : {}),
+      ...(publication.taskId ? { taskId: publication.taskId } : {}), ...(publication.messageId ? { messageId: publication.messageId } : {}),
+      ...(publication.publishBatchId ? { publishBatchId: publication.publishBatchId } : {}), ...(publication.note ? { note: publication.note } : {}),
+    }, { hash: staged.blob_hash, storagePath: staged.storage_path, byteLength: staged.byte_length, mediaType: staged.media_type });
+    this.workspaceDatabase.raw.prepare('DELETE FROM staged_blobs WHERE id = ?').run(publication.stagedBlobId);
+    return result.artifact;
   }
 
   returnAttempt(
@@ -4340,28 +6340,29 @@ export class WorkspaceService {
       }
       this.validateReturnDisclosure(current.run_id, envelope);
       const timestamp = nowMs();
-      const publishedArtifacts = envelope.artifactPublications.map((publication) =>
-        this.artifacts.publishFromAgent({
-          workspaceId: current.workspace_id,
-          actorId: current.agent_id,
-          membershipId: current.agent_membership_id,
-          runId: current.run_id,
-          attemptId,
-        }, publication));
+      const publishedArtifactsV2 = envelope.artifactPublications.map((publication) => this.publishStagedArtifactV2(current, publication));
+      const publishedArtifacts = publishedArtifactsV2 as ArtifactV2View[];
       const publishedMessages = [
         ...directMessageRows.map((row) => this.hydrateMessage(
           row,
           this.requireMembership(current.workspace_id, current.agent_id),
         )),
         ...envelope.messages.map((draft, messageIndex) => {
-        const artifactSnapshotIds = envelope.artifactPublications.flatMap((publication, publicationIndex) => {
+        const artifactIds = envelope.artifactPublications.flatMap((publication, publicationIndex) => {
           const indexes = publication.attachToMessageIndexes ?? [];
           invariant(indexes.every((index) => Number.isSafeInteger(index) && index >= 0 && index < envelope.messages.length),
             'INVALID_ARTIFACT_MESSAGE_REFERENCE', 'Artifact publication references an invalid Message index.');
-          const snapshotId = publishedArtifacts[publicationIndex]?.latestSnapshot?.snapshotId;
-          return indexes.includes(messageIndex) && snapshotId ? [snapshotId] : [];
+          const versionId = publishedArtifactsV2[publicationIndex]?.latestVersionId;
+          return indexes.includes(messageIndex) && versionId ? [versionId] : [];
         });
-        return this.publishAgentMessage(current, draft.body, artifactSnapshotIds, timestamp);
+        return this.publishAgentMessage(
+          current,
+          draft.body,
+          artifactIds,
+          draft.mentionedActorIds ?? [],
+          draft.workItemIds ?? [],
+          timestamp,
+        );
         }),
       ];
       this.workspaceDatabase.raw
@@ -4373,9 +6374,9 @@ export class WorkspaceService {
         )
         .run(
           newId(), current.workspace_id, current.run_id, attemptId,
-          envelope.disposition, canonicalJson(publishedArtifacts.map((artifact) => ({
-            artifactId: artifact.id,
-            artifactSnapshotId: artifact.latestSnapshot?.snapshotId ?? null,
+          envelope.disposition, canonicalJson(publishedArtifactsV2.map((artifact) => ({
+            artifactId: artifact.artifactId,
+            artifactVersionId: artifact.latestVersionId,
           }))), timestamp,
         );
       const runUpdate = this.workspaceDatabase.raw
@@ -4388,13 +6389,6 @@ export class WorkspaceService {
       this.workspaceDatabase.raw
         .prepare("UPDATE attempts SET status = 'finished', finished_at = ? WHERE id = ? AND status = 'running'")
         .run(timestamp, attemptId);
-      this.workspaceDatabase.raw
-        .prepare(
-          `UPDATE agent_inbox_items
-           SET state = 'handled', handled_at = ?
-           WHERE workspace_id = ? AND claimed_run_id = ? AND state = 'claimed'`,
-        )
-        .run(timestamp, current.workspace_id, current.run_id);
       const conversation = this.workspaceDatabase.raw
         .prepare('SELECT context_version FROM conversations WHERE workspace_id = ? AND id = ?')
         .get(current.workspace_id, current.conversation_id) as { context_version: number };
@@ -4473,7 +6467,6 @@ export class WorkspaceService {
           .prepare("UPDATE attempts SET status = 'failed', finished_at = ? WHERE id = ? AND status = 'running'")
           .run(timestamp, attemptId);
         invariant(attemptUpdate.changes === 1, 'ATTEMPT_FENCED', 'Attempt became terminal concurrently.', 409);
-        this.markRunInboxHandled(current.workspace_id, current.run_id, timestamp);
         const conversation = this.workspaceDatabase.raw
           .prepare('SELECT context_version FROM conversations WHERE workspace_id = ? AND id = ?')
           .get(current.workspace_id, current.conversation_id) as { context_version: number };
@@ -4596,18 +6589,6 @@ export class WorkspaceService {
     return membership;
   }
 
-  private listWorkspaceOwnerMembershipIds(workspaceId: string): string[] {
-    return this.workspaceDatabase.raw
-      .prepare(
-        `SELECT m.id
-         FROM workspace_memberships m
-         JOIN actors a ON a.id = m.actor_id AND a.actor_type = 'human'
-         WHERE m.workspace_id = ? AND m.status = 'active' AND m.membership_role = 'owner'`,
-      )
-      .all(workspaceId)
-      .map((row) => String((row as { id: string }).id));
-  }
-
   private requireAgentOwner(workspaceId: string, agentId: string, actorId: string): MembershipRow {
     const membership = this.requireMembership(workspaceId, actorId);
     const agent = this.requireAgentRow(workspaceId, agentId);
@@ -4627,28 +6608,72 @@ export class WorkspaceService {
       .get(workspaceId, agentId, membershipId));
   }
 
-  private requireInvitation(invitationId: string): InvitationRow {
-    const row = this.workspaceDatabase.raw.prepare('SELECT * FROM workspace_invitations WHERE id = ?').get(invitationId) as
-      | InvitationRow
+  private hasSharedProjectParticipation(
+    workspaceId: string,
+    humanWorkspaceMembershipId: string,
+    agentWorkspaceMembershipId: string,
+  ): boolean {
+    return Boolean(this.workspaceDatabase.raw.prepare(
+      `SELECT 1
+       FROM project_memberships human_project
+       JOIN project_memberships agent_project
+         ON agent_project.workspace_id = human_project.workspace_id
+        AND agent_project.project_id = human_project.project_id
+        AND agent_project.status = 'active'
+       WHERE human_project.workspace_id = ?
+         AND human_project.workspace_membership_id = ?
+         AND human_project.status = 'active'
+         AND agent_project.workspace_membership_id = ?
+       LIMIT 1`,
+    ).get(workspaceId, humanWorkspaceMembershipId, agentWorkspaceMembershipId));
+  }
+
+  private requireWorkspaceJoinLink(joinLinkId: string): WorkspaceJoinLinkRow {
+    const row = this.workspaceDatabase.raw.prepare('SELECT * FROM workspace_join_links WHERE id = ?').get(joinLinkId) as
+      | WorkspaceJoinLinkRow
       | undefined;
-    invariant(row, 'INVITATION_NOT_FOUND', 'Invitation does not exist.', 404);
+    invariant(row, 'WORKSPACE_JOIN_LINK_NOT_FOUND', 'Workspace join link does not exist.', 404);
     return row;
   }
 
-  private mapInvitation(row: InvitationRow): WorkspaceInvitationView {
+  private requireWorkspaceJoinLinkByToken(token: string): WorkspaceJoinLinkRow {
+    const row = this.workspaceDatabase.raw
+      .prepare('SELECT * FROM workspace_join_links WHERE token_hash = ?')
+      .get(sha256(token)) as WorkspaceJoinLinkRow | undefined;
+    invariant(row, 'WORKSPACE_JOIN_LINK_NOT_FOUND', 'Workspace join link does not exist.', 404);
+    return row;
+  }
+
+  private mapWorkspaceJoinLink(row: WorkspaceJoinLinkRow): WorkspaceJoinLinkView {
     return {
       id: row.id,
       workspaceId: row.workspace_id,
-      verifiedEmail: row.verified_email,
-      membershipRole: row.membership_role,
+      token: row.status === 'active' ? this.decryptWorkspaceJoinLinkToken(row) : null,
       status: row.status,
       revision: row.revision,
-      invitedByMembershipId: row.invited_by_membership_id,
-      acceptedMembershipId: row.accepted_membership_id,
+      createdByMembershipId: row.created_by_membership_id,
+      useCount: row.use_count,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      terminalAt: row.terminal_at,
+      lastUsedAt: row.last_used_at,
+      revokedAt: row.revoked_at,
     };
+  }
+
+  private decryptWorkspaceJoinLinkToken(row: WorkspaceJoinLinkRow): string {
+    if (!row.token_ciphertext) {
+      throw new Error(`Active Workspace join-link ${row.id} has no encrypted token.`);
+    }
+    let token: string;
+    try {
+      token = this.workspaceJoinLinkTokenCipher.decrypt(row.token_ciphertext, row.workspace_id, row.id);
+    } catch (error) {
+      throw new Error(`Workspace join-link ${row.id} token cannot be decrypted with the configured key.`, { cause: error });
+    }
+    if (sha256(token) !== row.token_hash) {
+      throw new Error(`Workspace join-link ${row.id} encrypted token does not match its digest.`);
+    }
+    return token;
   }
 
   private requireHumanMembership(workspaceId: string, membershipId: string): MembershipRow {
@@ -4793,17 +6818,6 @@ export class WorkspaceService {
     auditAction: string,
   ): { membershipId: string; revision: number; removedAt: number } {
     const timestamp = nowMs();
-    const ownedAgents = this.workspaceDatabase.raw
-      .prepare('SELECT actor_id FROM agents WHERE workspace_id = ? AND owner_membership_id = ? ORDER BY actor_id')
-      .all(workspaceId, membershipId)
-      .map((row) => String((row as { actor_id: string }).actor_id));
-    invariant(
-      ownedAgents.length === 0,
-      'AGENT_OWNERSHIP_TRANSFER_REQUIRED',
-      'Human Membership must transfer all owned Agents before it can leave or be removed.',
-      409,
-      { agentIds: ownedAgents },
-    );
     const projectMemberships = this.workspaceDatabase.raw
       .prepare(
         `SELECT pm.*
@@ -4812,6 +6826,28 @@ export class WorkspaceService {
          ORDER BY pm.joined_at, pm.id`,
       )
       .all(workspaceId, membershipId) as unknown as ProjectMembershipRow[];
+    invariant(
+      projectMemberships.every((membership) => membership.project_role !== 'owner'),
+      'PROJECT_OWNER_TRANSFER_REQUIRED',
+      'Transfer every owned Project before leaving or removing this Workspace Membership.',
+      409,
+      { projectIds: projectMemberships.filter((membership) => membership.project_role === 'owner').map((membership) => membership.project_id) },
+    );
+    const ownedAgents = this.workspaceDatabase.raw
+      .prepare('SELECT actor_id FROM agents WHERE workspace_id = ? AND owner_membership_id = ? ORDER BY actor_id')
+      .all(workspaceId, membershipId)
+      .map((row) => String((row as { actor_id: string }).actor_id));
+    for (const agentId of ownedAgents) {
+      const agent = this.requireAgentIdentityRow(workspaceId, agentId);
+      if (agent.membership_status !== 'active') continue;
+      this.terminateAgentMembership(
+        { kind: 'human', actorId },
+        workspaceId,
+        agentId,
+        agent.revision,
+        `auto-terminate-owner-leave:${membershipId}:${agentId}:${expectedRevision}`,
+      );
+    }
     for (const projectMembership of projectMemberships) {
       this.removeProjectMembership(
         this.requireProject(projectMembership.project_id),
@@ -4863,16 +6899,23 @@ export class WorkspaceService {
     auditAction: string,
     fixedTimestamp?: number,
   ): { projectMembershipId: string; revision: number; removedAt: number; cancelledAgentRequestIds: string[] } {
-    if (target.project_role === 'manager') {
-      const managerCount = this.workspaceDatabase.raw
-        .prepare(
-          `SELECT COUNT(*) AS count FROM project_memberships
-           WHERE project_id = ? AND status = 'active' AND project_role = 'manager'`,
-        )
-        .get(project.id) as { count: number };
-      invariant(managerCount.count > 1, 'PROJECT_REQUIRES_MANAGER', 'Project must retain an active Human Manager.', 409);
-    }
+    invariant(
+      target.project_role !== 'owner',
+      'PROJECT_OWNER_TRANSFER_REQUIRED',
+      'Transfer Project ownership before the Owner can leave or be removed.',
+      409,
+    );
     const timestamp = fixedTimestamp ?? nowMs();
+    if (target.project_role === 'manager') {
+      this.removeSponsoredProjectAgents(
+        project,
+        target.id,
+        actorId,
+        actorMembershipId,
+        timestamp,
+        'project.manager-removed.agent-remove',
+      );
+    }
     const updated = this.workspaceDatabase.raw
       .prepare(
         `UPDATE project_memberships
@@ -4889,6 +6932,59 @@ export class WorkspaceService {
         expectedRevision,
       ) as { revision: number } | undefined;
     invariant(updated, 'STALE_REVISION', 'Project Membership revision changed.', 409);
+    const assignedWorkItems = this.workspaceDatabase.raw.prepare(
+      `SELECT * FROM work_items
+       WHERE (workspace_id = ? AND project_id = ? AND assignee_project_membership_id = ?
+          OR (workspace_id = ? AND project_id = ? AND EXISTS (
+            SELECT 1 FROM work_item_assignees assigned
+            WHERE assigned.workspace_id = work_items.workspace_id
+              AND assigned.work_item_id = work_items.id
+              AND assigned.project_membership_id = ?
+          )))
+         AND lifecycle_status IN ('open', 'blocked')
+       ORDER BY created_at, id`,
+    ).all(project.workspace_id, project.id, target.id, project.workspace_id, project.id, target.id) as unknown as WorkItemRow[];
+    const releasedWorkItemIds: string[] = [];
+    for (const workItem of assignedWorkItems) {
+      const remainingIds = this.getWorkItemAssigneeIds(workItem).filter((id) => id !== target.id);
+      const remaining = remainingIds.map((id) => this.getProjectMember(project.workspace_id, project.id, id));
+      const primary = remaining[0] ?? null;
+      const released = this.workspaceDatabase.raw.prepare(
+        `UPDATE work_items
+         SET assignee_membership_id = ?, assignee_project_membership_id = ?,
+             current_submission_id = NULL, assignment_revision = assignment_revision + 1,
+             revision = revision + 1, updated_at = ?
+         WHERE id = ?
+           AND lifecycle_status IN ('open', 'blocked')
+         RETURNING revision, assignment_revision`,
+      ).get(primary?.workspaceMembershipId ?? null, primary?.projectMembershipId ?? null, timestamp, workItem.id) as
+        | { revision: number; assignment_revision: number }
+        | undefined;
+      if (!released) continue;
+      this.replaceWorkItemAssignees(project.workspace_id, project.id, workItem.id, remaining, timestamp);
+      releasedWorkItemIds.push(workItem.id);
+      this.handleWorkItemAttentionAsHandled(project.workspace_id, workItem.id);
+      this.recordWorkItemChange(workItem, 'work_item_unassigned', {
+        reason: 'project_membership_removed',
+        projectMembershipId: target.id,
+        revision: released.revision,
+        assignmentRevision: released.assignment_revision,
+      }, timestamp);
+      this.appendAudit(
+        project.workspace_id,
+        actorId,
+        actorMembershipId,
+        'work_item.unassign.project-member-removed',
+        'work_item',
+        workItem.id,
+        {
+          projectMembershipId: target.id,
+          revision: released.revision,
+          assignmentRevision: released.assignment_revision,
+        },
+        timestamp,
+      );
+    }
     const projectVersion = this.bumpProjectContext(project.id, timestamp);
     const cancelledAgentRequestIds = new Set<string>();
     for (const requestId of this.cancelAcceptedRunsAffectedByProjectMembershipRemoval(project, target, timestamp)) {
@@ -4910,6 +7006,12 @@ export class WorkspaceService {
       )) {
         cancelledAgentRequestIds.add(requestId);
       }
+      this.fenceRemovedConversationAgentInbox(
+        project.workspace_id,
+        conversation.id,
+        removedActor.actor_id,
+        timestamp,
+      );
     }
     const cancelledIds = [...cancelledAgentRequestIds];
     this.appendChange(
@@ -4925,6 +7027,7 @@ export class WorkspaceService {
         workspaceMembershipId: target.workspace_membership_id,
         revision: updated.revision,
         cancelledAgentRequestIds: cancelledIds,
+        releasedWorkItemIds,
       },
       timestamp,
       {
@@ -4938,7 +7041,7 @@ export class WorkspaceService {
       'project.member-removed',
       'project_membership',
       target.id,
-      { projectId: project.id, projectMembershipId: target.id, cancelledAgentRequestIds: cancelledIds },
+      { projectId: project.id, projectMembershipId: target.id, cancelledAgentRequestIds: cancelledIds, releasedWorkItemIds },
       `removed:${target.id}:${updated.revision}`,
       timestamp,
     );
@@ -4954,6 +7057,7 @@ export class WorkspaceService {
         workspaceMembershipId: target.workspace_membership_id,
         revision: updated.revision,
         cancelledAgentRequestIds: cancelledIds,
+        releasedWorkItemIds,
       },
       timestamp,
     );
@@ -4963,6 +7067,34 @@ export class WorkspaceService {
       removedAt: timestamp,
       cancelledAgentRequestIds: cancelledIds,
     };
+  }
+
+  private removeSponsoredProjectAgents(
+    project: ProjectRow,
+    sponsorProjectMembershipId: string,
+    actorId: string,
+    actorMembershipId: string,
+    timestamp: number,
+    auditAction: string,
+  ): string[] {
+    const sponsored = this.workspaceDatabase.raw.prepare(
+      `SELECT * FROM project_memberships
+       WHERE workspace_id = ? AND project_id = ?
+         AND sponsored_by_project_membership_id = ? AND status = 'active'
+       ORDER BY joined_at, id`,
+    ).all(project.workspace_id, project.id, sponsorProjectMembershipId) as unknown as ProjectMembershipRow[];
+    for (const membership of sponsored) {
+      this.removeProjectMembership(
+        project,
+        membership,
+        membership.revision,
+        actorId,
+        actorMembershipId,
+        auditAction,
+        timestamp,
+      );
+    }
+    return sponsored.map((membership) => membership.id);
   }
 
   private cancelAcceptedRunsAffectedByProjectMembershipRemoval(
@@ -5019,7 +7151,7 @@ export class WorkspaceService {
          JOIN workspace_memberships m
            ON m.workspace_id = a.workspace_id AND m.actor_id = a.actor_id AND m.status = 'active'
          JOIN workspace_memberships owner
-           ON owner.workspace_id = a.workspace_id AND owner.id = a.owner_membership_id AND owner.status = 'active'
+           ON owner.workspace_id = a.workspace_id AND owner.id = a.owner_membership_id
          JOIN humans h ON h.actor_id = owner.actor_id
          WHERE a.workspace_id = ? AND a.actor_id = ? AND a.deleted_at IS NULL`,
       )
@@ -5041,7 +7173,7 @@ export class WorkspaceService {
              ORDER BY latest.joined_at DESC, latest.id DESC LIMIT 1
            )
          JOIN workspace_memberships owner
-           ON owner.workspace_id = a.workspace_id AND owner.id = a.owner_membership_id AND owner.status = 'active'
+           ON owner.workspace_id = a.workspace_id AND owner.id = a.owner_membership_id
          JOIN humans h ON h.actor_id = owner.actor_id
          WHERE a.workspace_id = ? AND a.actor_id = ? AND a.deleted_at IS NULL`,
       )
@@ -5598,6 +7730,7 @@ export class WorkspaceService {
         )
         .run(timestamp, workspaceId, agentId, activeBinding.binding_revision);
       invariant(disabled.changes === 1, 'RUNTIME_BINDING_REVISION_CONFLICT', 'Runtime Binding revision changed.', 409);
+      this.fenceAgentInboxBinding(workspaceId, agentId, timestamp);
     }
     const bindingId = newId();
     this.workspaceDatabase.raw
@@ -5699,15 +7832,30 @@ export class WorkspaceService {
     return distinct;
   }
 
+  private normalizeMessageWorkItemIds(access: ConversationAccess, ids?: string[]): string[] {
+    const distinct = [...new Set((ids ?? []).map((id) => id.trim()).filter(Boolean))];
+    invariant(distinct.length <= 50, 'TOO_MANY_WORK_ITEM_REFERENCES', 'A message may reference at most 50 WorkItems.', 400);
+    if (distinct.length === 0) return [];
+    invariant(access.conversation.project_id !== null,
+      'WORK_ITEM_REFERENCE_PROJECT_REQUIRED', 'WorkItem references are only available in Project Conversations.', 409);
+    for (const id of distinct) {
+      const workItem = this.requireWorkItem(id);
+      invariant(workItem.workspace_id === access.conversation.workspace_id
+        && workItem.project_id === access.conversation.project_id,
+      'WORK_ITEM_REFERENCE_NOT_IN_PROJECT', 'Referenced WorkItem does not belong to this Project.', 409);
+    }
+    return distinct;
+  }
+
   private addImplicitDirectAgentTarget(access: ConversationAccess, actorIds: string[]): string[] {
     if (access.conversation.conversation_kind !== 'dm') return actorIds;
     const directAgent = this.workspaceDatabase.raw
       .prepare(
         `SELECT membership.actor_id
-         FROM conversation_direct_memberships direct
+         FROM conversation_memberships direct
          JOIN workspace_memberships membership
            ON membership.workspace_id = direct.workspace_id
-          AND membership.id = direct.membership_id
+          AND membership.id = direct.workspace_membership_id
           AND membership.status = 'active'
          JOIN actors actor ON actor.id = membership.actor_id AND actor.actor_type = 'agent'
          WHERE direct.workspace_id = ? AND direct.conversation_id = ?
@@ -5724,6 +7872,19 @@ export class WorkspaceService {
       : actorIds;
   }
 
+  private addImplicitReplyAuthorTarget(
+    access: ConversationAccess,
+    authorActorId: string,
+    actorIds: string[],
+  ): string[] {
+    if (authorActorId === access.membership.actor_id || actorIds.includes(authorActorId)) return actorIds;
+    const authorIsCurrentParticipant = this.listConversationParticipants(
+      { kind: 'human', actorId: access.membership.actor_id },
+      access.conversation.id,
+    ).some((participant) => participant.actorId === authorActorId);
+    return authorIsCurrentParticipant ? [authorActorId, ...actorIds] : actorIds;
+  }
+
   private resolveMessageMentions(access: ConversationAccess, actorIds: string[]): ConversationParticipantRow[] {
     if (actorIds.length === 0) return [];
     const participants = this.listConversationParticipants(
@@ -5735,6 +7896,7 @@ export class WorkspaceService {
       const participant = byActorId.get(actorId);
       invariant(participant, 'MENTION_TARGET_NOT_IN_CONVERSATION', 'Mention target is not a current Conversation participant.', 409);
       return {
+        scope_membership_id: participant.scopeMembershipId,
         membership_id: participant.workspaceMembershipId,
         project_membership_id: participant.projectMembershipId,
         actor_id: participant.actorId,
@@ -5745,12 +7907,83 @@ export class WorkspaceService {
     });
   }
 
+  private resolveAgentMessageMentions(
+    workspaceId: string,
+    conversationId: string,
+    projectId: string | null,
+    actorIds: string[] = [],
+  ): ConversationParticipantRow[] {
+    const distinct = [...new Set(actorIds.map((id) => id.trim()).filter(Boolean))];
+    invariant(distinct.length <= 50, 'TOO_MANY_MENTIONS', 'A Message may mention at most 50 distinct Agents.', 400);
+    if (distinct.length === 0) return [];
+    const rows = this.workspaceDatabase.raw.prepare(projectId === null
+      ? `SELECT membership.id AS membership_id,
+                NULL AS project_membership_id,
+                membership.actor_id, actor.actor_type,
+                COALESCE(human.display_name, agent.name, membership.actor_id) AS display_name,
+                membership.joined_at
+         FROM conversation_memberships audience
+         JOIN workspace_memberships membership
+           ON membership.workspace_id = audience.workspace_id
+          AND membership.id = audience.workspace_membership_id
+          AND membership.status = 'active'
+         JOIN actors actor ON actor.id = membership.actor_id
+         LEFT JOIN humans human ON human.actor_id = membership.actor_id
+         LEFT JOIN agents agent
+           ON agent.workspace_id = membership.workspace_id AND agent.actor_id = membership.actor_id
+        WHERE audience.workspace_id = ? AND audience.conversation_id = ?
+          AND membership.actor_id IN (${distinct.map(() => '?').join(', ')})
+        ORDER BY audience.joined_at, membership.id`
+      : `SELECT membership.id AS membership_id,
+                project_membership.id AS project_membership_id,
+                membership.actor_id, actor.actor_type,
+                COALESCE(human.display_name, agent.name, membership.actor_id) AS display_name,
+                project_membership.joined_at
+         FROM project_memberships project_membership
+         JOIN workspace_memberships membership
+           ON membership.workspace_id = project_membership.workspace_id
+          AND membership.id = project_membership.workspace_membership_id
+          AND membership.status = 'active'
+         JOIN actors actor ON actor.id = membership.actor_id
+         LEFT JOIN humans human ON human.actor_id = membership.actor_id
+         LEFT JOIN agents agent
+           ON agent.workspace_id = membership.workspace_id AND agent.actor_id = membership.actor_id
+        WHERE project_membership.workspace_id = ? AND project_membership.project_id = ?
+          AND project_membership.status = 'active'
+          AND membership.actor_id IN (${distinct.map(() => '?').join(', ')})
+        ORDER BY project_membership.joined_at, membership.id`)
+      .all(...(projectId === null ? [workspaceId, conversationId, ...distinct] : [workspaceId, projectId, ...distinct])) as unknown as Array<{
+      membership_id: string;
+      project_membership_id: string | null;
+      actor_id: string;
+      actor_type: 'human' | 'agent';
+      display_name: string;
+      joined_at: number;
+    }>;
+    const byActor = new Map(rows.map((row) => [row.actor_id, row]));
+    return distinct.map((actorId) => {
+      const row = byActor.get(actorId);
+      invariant(row, 'MENTION_TARGET_NOT_IN_CONVERSATION', 'Mention target is not a current Conversation participant.', 409);
+      return {
+        scope_membership_id: row.membership_id,
+        membership_id: row.membership_id,
+        project_membership_id: row.project_membership_id,
+        actor_id: row.actor_id,
+        actor_type: row.actor_type,
+        display_name: row.display_name,
+        joined_at: row.joined_at,
+      };
+    });
+  }
+
   private publishHumanMessage(
     access: ConversationAccess,
     body: string,
     threadId: string | null,
+    replyToMessageId: string | null,
     mentions: ConversationParticipantRow[],
-    artifactSelections: Array<{ artifactId: string; snapshotId: string | null }>,
+    artifactSelections: Array<{ artifactId: string; artifactVersionId: string }>,
+    workItemIds: string[],
     timestamp: number,
   ): string {
     const workspaceId = access.conversation.workspace_id;
@@ -5767,10 +8000,10 @@ export class WorkspaceService {
     this.workspaceDatabase.raw
       .prepare(
         `INSERT INTO messages (
-           id, workspace_id, conversation_id, project_id, thread_id, author_actor_id,
+           id, workspace_id, conversation_id, project_id, thread_id, reply_to_message_id, author_actor_id,
            author_membership_id, author_project_membership_id,
            body, conversation_version, scope_position, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         messageId,
@@ -5778,6 +8011,7 @@ export class WorkspaceService {
         conversationId,
         access.conversation.project_id,
         threadId,
+        replyToMessageId,
         access.membership.actor_id,
         access.membership.id,
         access.projectMembership?.id ?? null,
@@ -5787,8 +8021,49 @@ export class WorkspaceService {
         timestamp,
       );
 
-    const snapshots = this.artifacts.resolveMessageSnapshots(workspaceId, access.membership.actor_id, artifactSelections);
-    this.artifacts.insertMessageReferences(workspaceId, messageId, snapshots, timestamp);
+    artifactSelections.forEach((selection) => invariant(selection.artifactVersionId, 'ARTIFACT_VERSION_REQUIRED', 'Messages must reference a fixed Artifact version.', 400));
+    const versionSelections = artifactSelections as Array<{ artifactId: string; artifactVersionId: string }>;
+    const insertVersionReference = this.workspaceDatabase.raw.prepare(
+      `INSERT INTO message_artifact_version_references_v2 (
+         workspace_id, message_id, reference_order, artifact_id, version_id,
+         artifact_name_snapshot, version_number_snapshot, version_created_at_snapshot, file_name_snapshot,
+         media_type_snapshot, content_digest_snapshot, byte_length_snapshot,
+         status_snapshot, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    versionSelections.forEach((selection, index) => {
+      const row = this.workspaceDatabase.raw.prepare(
+        `SELECT a.id AS artifact_id, a.project_id, a.name, a.status AS artifact_status,
+                v.id AS version_id, v.version_number, v.created_at AS version_created_at, v.file_name, v.media_type,
+                v.content_digest, v.byte_length, v.status
+         FROM project_artifacts_v2 a JOIN artifact_versions_v2 v
+           ON v.artifact_id = a.id AND v.workspace_id = a.workspace_id
+         WHERE a.workspace_id = ? AND a.project_id = ? AND a.id = ? AND v.id = ?`,
+       ).get(workspaceId, access.conversation.project_id, selection.artifactId, selection.artifactVersionId) as {
+        artifact_id: string; name: string; artifact_status: 'active' | 'deleted' | 'purged'; version_id: string;
+        version_number: number; version_created_at: number; file_name: string; media_type: string; content_digest: string; byte_length: number; status: 'active' | 'deleted' | 'purged';
+      } | undefined;
+      invariant(row, 'ARTIFACT_VERSION_NOT_FOUND', 'Artifact version does not belong to this Project.', 404);
+      insertVersionReference.run(
+        workspaceId, messageId, index, row.artifact_id, row.version_id, row.name, row.version_number, row.version_created_at,
+        row.file_name, row.media_type, row.content_digest, row.byte_length,
+        row.status === 'active' && row.artifact_status === 'active' ? 'active' : row.status, timestamp,
+      );
+    });
+    const insertWorkItemReference = this.workspaceDatabase.raw.prepare(
+      `INSERT INTO message_work_item_references_v2 (
+         workspace_id, project_id, message_id, reference_order, work_item_id, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    workItemIds.forEach((workItemId, index) => {
+      const workItem = this.requireWorkItem(workItemId);
+      invariant(workItem.workspace_id === workspaceId && workItem.project_id === access.conversation.project_id,
+        'WORK_ITEM_REFERENCE_NOT_IN_PROJECT', 'Referenced WorkItem does not belong to this Project.', 409);
+      insertWorkItemReference.run(
+        workspaceId, access.conversation.project_id!, messageId, index, workItem.id,
+        timestamp,
+      );
+    });
     const insertMention = this.workspaceDatabase.raw.prepare(
       `INSERT INTO message_mentions (
          id, workspace_id, message_id, actor_id, actor_type_snapshot,
@@ -5895,13 +8170,19 @@ export class WorkspaceService {
         requestId,
         timestamp,
       );
+      const wakeSequence = this.enqueueAgentInboxWake(
+        workspaceId,
+        targetAgentId,
+        inboxItemId,
+        timestamp,
+      );
       this.enqueueDelivery(
         workspaceId,
         'agent.inbox_changed',
         'agent',
         targetAgentId,
-        { agentId: targetAgentId, highestSequence: inboxSequence },
-        `agent-inbox:${targetAgentId}:${inboxSequence}`,
+        { agentId: targetAgentId, wakeSequence },
+        `agent-inbox-wake:${targetAgentId}:${wakeSequence}`,
         timestamp,
       );
       outcomeSummaries.push({ targetReference, outcome: 'requested', agentRequestId: requestId });
@@ -5915,7 +8196,7 @@ export class WorkspaceService {
       'message_created',
       'message',
       messageId,
-      { threadId, scopePosition, mentionOutcomes: outcomeSummaries },
+      { threadId, replyToMessageId, scopePosition, mentionOutcomes: outcomeSummaries },
       timestamp,
       this.conversationChangeOptions(access.conversation),
     );
@@ -5935,7 +8216,7 @@ export class WorkspaceService {
       'message.post',
       'message',
       messageId,
-      { conversationId, threadId, mentionCount: mentions.length, agentRequestTargetCount: mentionedAgents.length },
+      { conversationId, threadId, replyToMessageId, mentionCount: mentions.length, agentRequestTargetCount: mentionedAgents.length },
       timestamp,
     );
     return messageId;
@@ -5948,10 +8229,29 @@ export class WorkspaceService {
     return row.sequence;
   }
 
+  private enqueueAgentInboxWake(
+    workspaceId: string,
+    agentId: string,
+    inboxItemId: string,
+    timestamp: number,
+  ): number {
+    const row = this.workspaceDatabase.raw.prepare(
+      'SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_inbox_wakes WHERE workspace_id = ? AND agent_id = ?',
+    ).get(workspaceId, agentId) as { sequence: number };
+    this.workspaceDatabase.raw.prepare(
+      `INSERT INTO agent_inbox_wakes (workspace_id, agent_id, sequence, inbox_item_id, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(workspaceId, agentId, row.sequence, inboxItemId, timestamp);
+    return row.sequence;
+  }
+
   private notifyAgentInboxChanged(messageId: string): void {
     const wakes = this.workspaceDatabase.raw.prepare(
-      `SELECT agent_id, sequence FROM agent_inbox_items
-       WHERE message_id = ? ORDER BY agent_id, sequence`,
+      `SELECT wake.agent_id, wake.sequence
+       FROM agent_inbox_wakes wake
+       JOIN agent_inbox_items item
+         ON item.workspace_id = wake.workspace_id AND item.id = wake.inbox_item_id
+       WHERE item.message_id = ? ORDER BY wake.agent_id, wake.sequence`,
     ).all(messageId) as unknown as Array<{ agent_id: string; sequence: number }>;
     if (wakes.length > 0) this.agentInboxWakeEmitter.emit('changed');
   }
@@ -6021,6 +8321,22 @@ export class WorkspaceService {
         .prepare('SELECT root_message_id FROM threads WHERE workspace_id = ? AND id = ?')
         .get(row.workspace_id, row.thread_id) as { root_message_id: string }
       : null;
+    const workItemReferences = this.workspaceDatabase.raw.prepare(
+      `SELECT reference.work_item_id, item.task_number
+       FROM message_work_item_references_v2 reference
+       JOIN work_items item
+         ON item.workspace_id = reference.workspace_id AND item.id = reference.work_item_id
+       WHERE reference.workspace_id = ? AND reference.message_id = ? ORDER BY reference.reference_order`,
+    ).all(row.workspace_id, row.id).map((reference) => {
+      const item = reference as {
+        work_item_id: string;
+        task_number: number;
+      };
+      return {
+        workItemId: item.work_item_id,
+        taskNumber: item.task_number,
+      } satisfies MessageWorkItemReferenceView;
+    });
     return {
       id: row.id,
       workspaceId: row.workspace_id,
@@ -6028,6 +8344,7 @@ export class WorkspaceService {
       projectId: row.project_id,
       threadId: row.thread_id,
       threadRootMessageId: thread?.root_message_id ?? null,
+      replyToMessageId: row.reply_to_message_id,
       authorActorId: row.author_actor_id,
       authorMembershipId: row.author_membership_id,
       authorProjectMembershipId: row.author_project_membership_id,
@@ -6045,9 +8362,50 @@ export class WorkspaceService {
         displayName: mention.display_name_snapshot,
       })),
       mentionOutcomes,
-      artifactReferences: this.artifacts.messageReferences(row.workspace_id, row.id),
+      artifactReferences: [
+        ...this.workspaceDatabase.raw.prepare(
+          `SELECT reference.artifact_id, reference.version_id, reference.artifact_name_snapshot,
+                  reference.version_number_snapshot, reference.version_created_at_snapshot,
+                  reference.file_name_snapshot, reference.media_type_snapshot, reference.content_digest_snapshot,
+                  reference.byte_length_snapshot, reference.status_snapshot,
+                  version.status AS current_version_status, artifact.status AS current_artifact_status
+           FROM message_artifact_version_references_v2 reference
+           JOIN artifact_versions_v2 version
+             ON version.workspace_id = reference.workspace_id AND version.id = reference.version_id
+           JOIN project_artifacts_v2 artifact
+             ON artifact.workspace_id = reference.workspace_id AND artifact.id = reference.artifact_id
+           WHERE reference.workspace_id = ? AND reference.message_id = ? ORDER BY reference.reference_order`,
+        ).all(row.workspace_id, row.id).map((reference) => {
+          const item = reference as {
+            artifact_id: string; version_id: string; artifact_name_snapshot: string; version_number_snapshot: number; version_created_at_snapshot: number;
+            file_name_snapshot: string; media_type_snapshot: string; content_digest_snapshot: string; byte_length_snapshot: number; status_snapshot: 'active' | 'deleted' | 'purged';
+            current_version_status: 'active' | 'deleted' | 'purged'; current_artifact_status: 'active' | 'deleted' | 'purged';
+          };
+          return {
+            artifactId: item.artifact_id,
+            artifactVersionId: item.version_id,
+            artifactName: item.artifact_name_snapshot,
+            version: item.version_number_snapshot,
+            fileName: item.file_name_snapshot,
+            mediaType: item.media_type_snapshot,
+            contentDigest: item.content_digest_snapshot,
+            byteLength: item.byte_length_snapshot,
+            contentAvailable: item.current_version_status === 'active' && item.current_artifact_status === 'active',
+            artifactStatus: item.current_version_status === 'active' ? item.current_artifact_status : item.current_version_status,
+          } as unknown as MessageArtifactReferenceView;
+        }),
+      ],
+      workItemReferences,
       createdAt: row.created_at,
     };
+  }
+
+  private hydrateAgentContextMessage(row: MessageRow, observerMembership: MembershipRow): MessageView {
+    const message = this.hydrateMessage(row, observerMembership);
+    // WorkItem references are capabilities, not context snapshots. The
+    // Mention Session receives their IDs in dedicated work_item_mention lines
+    // and reads the authoritative entity through teamctl.
+    return { ...message, workItemReferences: [] };
   }
 
   private requireAgentRequest(agentRequestId: string): AgentRequestRow {
@@ -6096,43 +8454,10 @@ export class WorkspaceService {
       } else if (target.has_runtime === 0) {
         intake = { disposition: 'waiting', reasons: ['runtime_unavailable'] };
       } else {
-        const projectScope = this.workspaceDatabase.raw
-          .prepare('SELECT project_id FROM conversations WHERE workspace_id = ? AND id = ?')
-          .get(row.workspace_id, row.result_conversation_id) as { project_id: string | null } | undefined;
-        const projectHasRepository = projectScope?.project_id !== null && Boolean(this.workspaceDatabase.raw
-          .prepare("SELECT 1 FROM project_repositories WHERE project_id = ? AND status = 'active'")
-          .get(projectScope?.project_id ?? ''));
-        const workingCopyReady = projectScope?.project_id === null || !projectHasRepository || Boolean(this.workspaceDatabase.raw
-          .prepare(
-            `SELECT 1
-             FROM agent_runtime_bindings binding
-             JOIN computers computer
-               ON computer.id = binding.computer_id
-              AND computer.status = 'active'
-              AND computer.last_seen_at >= ?
-             JOIN computer_project_working_copies wc
-               ON wc.computer_id = binding.computer_id
-              AND wc.project_id = ?
-              AND wc.availability = 'ready'
-              AND wc.checked_at >= ?
-              AND wc.branch IS NOT NULL
-              AND wc.head_commit IS NOT NULL
-             JOIN project_repositories repository
-               ON repository.project_id = wc.project_id
-              AND repository.id = wc.repository_id
-              AND repository.status = 'active'
-             WHERE binding.workspace_id = ? AND binding.agent_id = ? AND binding.status = 'active'`,
-          )
-          .get(
-            nowMs() - COMPUTER_ONLINE_WINDOW_MS,
-            projectScope?.project_id ?? '',
-            nowMs() - COMPUTER_ONLINE_WINDOW_MS,
-            row.workspace_id,
-            row.target_agent_id,
-          ));
-        intake = workingCopyReady
-          ? { disposition: 'ready', reasons: [] }
-          : { disposition: 'waiting', reasons: ['project_working_copy_unavailable'] };
+        // Project execution uses an isolated scratch directory.
+        // Once the Agent has an active runtime binding it can use the scoped
+        // Resource/Artifact APIs from an isolated scratch directory.
+        intake = { disposition: 'ready', reasons: [] };
       }
     }
     const runRow = row.status === 'accepted'
@@ -6216,20 +8541,26 @@ export class WorkspaceService {
              ON membership.workspace_id = conversation.workspace_id
             AND membership.id = ?
             AND membership.status = 'active'
+           JOIN actors actor ON actor.id = membership.actor_id
            LEFT JOIN project_memberships project_membership
              ON project_membership.workspace_id = conversation.workspace_id
             AND project_membership.project_id = conversation.project_id
             AND project_membership.workspace_membership_id = membership.id
             AND project_membership.status = 'active'
-           LEFT JOIN conversation_direct_memberships direct
-             ON direct.workspace_id = conversation.workspace_id
-            AND direct.conversation_id = conversation.id
-            AND direct.membership_id = membership.id
+           LEFT JOIN conversation_memberships audience
+             ON audience.workspace_id = conversation.workspace_id
+            AND audience.conversation_id = conversation.id
+            AND (
+              (conversation.project_id IS NULL AND audience.workspace_membership_id = membership.id)
+              OR
+              (conversation.project_id IS NOT NULL AND audience.project_membership_id = project_membership.id)
+            )
            WHERE conversation.workspace_id = ? AND conversation.id = ?
+             AND (conversation.project_id IS NULL OR project_membership.id IS NOT NULL)
              AND (
-               (conversation.conversation_kind = 'channel'
-                 AND (conversation.project_id IS NULL OR project_membership.id IS NOT NULL))
-               OR (conversation.conversation_kind = 'dm' AND direct.id IS NOT NULL)
+               (conversation.membership_mode = 'workspace_all' AND actor.actor_type = 'human')
+               OR (conversation.membership_mode = 'project_all' AND actor.actor_type = 'human')
+               OR audience.id IS NOT NULL
              )`,
         )
         .get(membershipId, workspaceId, conversationId),
@@ -6266,19 +8597,100 @@ export class WorkspaceService {
     return rows.map((row) => row.id);
   }
 
+  private cancelRunsAffectedByConversationMembershipRemoval(
+    conversation: ConversationAccess['conversation'],
+    removedWorkspaceMembershipId: string,
+    removedProjectMembershipId: string | null,
+    timestamp: number,
+  ): { runIds: string[]; attemptIds: string[] } {
+    const rows = this.workspaceDatabase.raw.prepare(
+      `SELECT DISTINCT run.id AS run_id, attempt.id AS attempt_id
+       FROM runs run
+       JOIN agent_requests request
+         ON request.workspace_id = run.workspace_id AND request.id = run.agent_request_id
+       JOIN agent_mention_outcomes outcome
+         ON outcome.workspace_id = request.workspace_id AND outcome.id = request.mention_outcome_id
+       JOIN messages source
+         ON source.workspace_id = outcome.workspace_id AND source.id = outcome.message_id
+       LEFT JOIN attempts attempt
+         ON attempt.workspace_id = run.workspace_id
+        AND attempt.run_id = run.id
+        AND attempt.status = 'running'
+       WHERE run.workspace_id = ? AND request.result_conversation_id = ? AND run.status = 'active'
+         AND (
+           (? IS NULL AND (run.agent_membership_id = ? OR source.author_membership_id = ?))
+           OR
+           (? IS NOT NULL AND (
+             run.agent_project_membership_id = ? OR source.author_project_membership_id = ?
+           ))
+         )
+       ORDER BY run.created_at, run.id`,
+    ).all(
+      conversation.workspace_id,
+      conversation.id,
+      conversation.project_id,
+      removedWorkspaceMembershipId,
+      removedWorkspaceMembershipId,
+      conversation.project_id,
+      removedProjectMembershipId,
+      removedProjectMembershipId,
+    ) as unknown as Array<{ run_id: string; attempt_id: string | null }>;
+    for (const row of rows) {
+      if (row.attempt_id) {
+        this.workspaceDatabase.raw.prepare(
+          "UPDATE attempts SET status = 'cancelled', finished_at = ? WHERE id = ? AND status = 'running'",
+        ).run(timestamp, row.attempt_id);
+      }
+      this.workspaceDatabase.raw.prepare(
+        "UPDATE runs SET status = 'terminal', outcome = 'cancelled', terminal_at = ? WHERE id = ? AND status = 'active'",
+      ).run(timestamp, row.run_id);
+      this.workspaceDatabase.raw.prepare(
+        'UPDATE private_context_grants SET revoked_at = ? WHERE workspace_id = ? AND run_id = ? AND revoked_at IS NULL',
+      ).run(timestamp, conversation.workspace_id, row.run_id);
+      this.enqueueDelivery(
+        conversation.workspace_id,
+        'run.cancelled',
+        'run',
+        row.run_id,
+        { runId: row.run_id, reason: 'conversation_authority_revoked' },
+        `cancelled:${row.run_id}:conversation-authority-revoked`,
+        timestamp,
+      );
+    }
+    return {
+      runIds: rows.map((row) => row.run_id),
+      attemptIds: rows.flatMap((row) => row.attempt_id ? [row.attempt_id] : []),
+    };
+  }
+
+  private fenceRemovedConversationAgentInbox(
+    workspaceId: string,
+    conversationId: string,
+    actorId: string,
+    timestamp: number,
+  ): void {
+    const actor = this.workspaceDatabase.raw.prepare('SELECT actor_type FROM actors WHERE id = ?')
+      .get(actorId) as { actor_type: 'human' | 'agent' } | undefined;
+    if (actor?.actor_type !== 'agent') return;
+    this.workspaceDatabase.raw.prepare(
+      `UPDATE agent_inbox_items
+       SET state = 'handled', handled_at = ?
+       WHERE workspace_id = ? AND agent_id = ? AND state IN ('pending', 'claimed')
+         AND conversation_id = ?`,
+    ).run(timestamp, workspaceId, actorId, conversationId);
+    this.workspaceDatabase.raw.prepare(
+      `UPDATE agent_inbox_claim_receipts
+       SET handled_at = ?, updated_at = ?
+       WHERE workspace_id = ? AND agent_id = ? AND conversation_id = ? AND handled_at IS NULL`,
+    ).run(timestamp, timestamp, workspaceId, actorId, conversationId);
+  }
+
   private markInboxRequestsHandled(workspaceId: string, requestIds: string[], timestamp: number): void {
     const update = this.workspaceDatabase.raw.prepare(
       `UPDATE agent_inbox_items SET state = 'handled', handled_at = ?
        WHERE workspace_id = ? AND agent_request_id = ? AND state = 'pending'`,
     );
     requestIds.forEach((requestId) => update.run(timestamp, workspaceId, requestId));
-  }
-
-  private markRunInboxHandled(workspaceId: string, runId: string, timestamp: number): void {
-    this.workspaceDatabase.raw.prepare(
-      `UPDATE agent_inbox_items SET state = 'handled', handled_at = ?
-       WHERE workspace_id = ? AND claimed_run_id = ? AND state = 'claimed'`,
-    ).run(timestamp, workspaceId, runId);
   }
 
   private bumpConversationContext(conversationId: string, expectedVersion: number | null, timestamp: number): number {
@@ -6294,6 +8706,13 @@ export class WorkspaceService {
       ? statement.get(timestamp, conversationId)
       : statement.get(timestamp, conversationId, expectedVersion)) as { context_version: number } | undefined;
     invariant(row, 'CONVERSATION_VERSION_CONFLICT', 'Conversation context version changed.', 409);
+    return row.context_version;
+  }
+
+  private requireConversationContextVersion(conversationId: string): number {
+    const row = this.workspaceDatabase.raw.prepare('SELECT context_version FROM conversations WHERE id = ?')
+      .get(conversationId) as { context_version: number } | undefined;
+    invariant(row, 'CONVERSATION_NOT_FOUND', 'Conversation does not exist.', 404);
     return row.context_version;
   }
 
@@ -6391,117 +8810,733 @@ export class WorkspaceService {
     return row;
   }
 
-  private requireProjectRepository(projectId: string): ProjectRepositoryRow {
-    const row = this.findActiveProjectRepository(projectId);
-    invariant(row, 'PROJECT_REPOSITORY_NOT_FOUND', 'Project Repository does not exist.', 404);
+  private requireWorkItem(workItemId: string): WorkItemRow {
+    const row = this.workspaceDatabase.raw.prepare('SELECT * FROM work_items WHERE id = ?')
+      .get(workItemId) as WorkItemRow | undefined;
+    invariant(row, 'WORK_ITEM_NOT_FOUND', 'WorkItem does not exist or is not accessible.', 404);
     return row;
   }
 
-  private findActiveProjectRepository(projectId: string): ProjectRepositoryRow | undefined {
-    return this.workspaceDatabase.raw
-      .prepare("SELECT * FROM project_repositories WHERE project_id = ? AND status = 'active'")
-      .get(projectId) as ProjectRepositoryRow | undefined;
-  }
-
-  private requireProjectResourceLink(linkId: string): Record<string, unknown> & {
-    id: string;
-    workspace_id: string;
-    project_id: string;
-    created_by_membership_id: string;
-  } {
-    const row = this.workspaceDatabase.raw.prepare('SELECT * FROM project_resource_links WHERE id = ?').get(linkId) as
-      | (Record<string, unknown> & {
-          id: string;
-          workspace_id: string;
-          project_id: string;
-          created_by_membership_id: string;
-        })
-      | undefined;
-    invariant(row, 'PROJECT_RESOURCE_LINK_NOT_FOUND', 'Resource Link does not exist.', 404);
-    return row;
-  }
-
-  private normalizeProjectResourceLink(input: { title: string; url: string; description?: string | null }): {
-    title: string;
-    url: string;
-    description: string | null;
-  } {
-    const title = input.title.trim();
-    invariant(title.length > 0 && title.length <= 200, 'INVALID_RESOURCE_LINK_TITLE', 'Resource Link title is required.');
-    let url: URL;
-    try {
-      url = new URL(input.url.trim());
-    } catch {
-      throw new DomainError('INVALID_RESOURCE_LINK_URL', 'Resource Link URL must be a valid http or https URL.', 400);
+  private normalizeWorkItemAssigneeIds(input: {
+    assigneeProjectMembershipId?: string | null;
+    assigneeProjectMembershipIds?: string[];
+  }): string[] {
+    if (input.assigneeProjectMembershipIds !== undefined) {
+      const ids = [...new Set(input.assigneeProjectMembershipIds.map((id) => id.trim()).filter(Boolean))];
+      invariant(ids.length <= 50, 'TOO_MANY_WORK_ITEM_ASSIGNEES', 'A WorkItem may have at most 50 responsible members.', 400);
+      return ids;
     }
-    invariant(url.protocol === 'http:' || url.protocol === 'https:', 'INVALID_RESOURCE_LINK_URL',
-      'Resource Link URL must use http or https.');
-    invariant(url.toString().length <= 4000, 'INVALID_RESOURCE_LINK_URL', 'Resource Link URL is too long.');
-    const description = input.description?.trim() || null;
-    invariant(description === null || description.length <= 3000, 'INVALID_RESOURCE_LINK_DESCRIPTION',
-      'Resource Link description is too long.');
-    return { title, url: url.toString(), description };
+    return input.assigneeProjectMembershipId ? [input.assigneeProjectMembershipId] : [];
   }
 
-  private mapProjectResourceLink(row: Record<string, unknown>): ProjectResourceLinkView {
+  private replaceWorkItemAssignees(
+    workspaceId: string,
+    projectId: string,
+    workItemId: string,
+    assignees: Array<Pick<ProjectMemberView, 'projectMembershipId' | 'workspaceMembershipId'>>,
+    timestamp: number,
+  ): void {
+    this.workspaceDatabase.raw.prepare(
+      'DELETE FROM work_item_assignees WHERE workspace_id = ? AND work_item_id = ?',
+    ).run(workspaceId, workItemId);
+    const insert = this.workspaceDatabase.raw.prepare(
+      `INSERT INTO work_item_assignees (
+         workspace_id, project_id, work_item_id, assignment_order,
+         project_membership_id, workspace_membership_id, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    assignees.forEach((member, index) => insert.run(
+      workspaceId, projectId, workItemId, index, member.projectMembershipId, member.workspaceMembershipId, timestamp,
+    ));
+  }
+
+  private getWorkItemAssigneeIds(workItem: WorkItemRow): string[] {
+    const rows = this.workspaceDatabase.raw.prepare(
+      `SELECT project_membership_id FROM work_item_assignees
+       WHERE workspace_id = ? AND work_item_id = ? ORDER BY assignment_order`,
+    ).all(workItem.workspace_id, workItem.id) as unknown as Array<{ project_membership_id: string }>;
+    return rows.length > 0
+      ? rows.map((row) => row.project_membership_id)
+      : (workItem.assignee_project_membership_id ? [workItem.assignee_project_membership_id] : []);
+  }
+
+  private requireAssignedAgentWorkItem(workspaceId: string, agentId: string, workItemId: string): WorkItemRow {
+    const membership = this.requireMembership(workspaceId, agentId);
+    const workItem = this.requireWorkItem(workItemId);
+    invariant(
+      workItem.workspace_id === workspaceId
+      && this.getWorkItemAssigneeIds(workItem).length > 0
+      && (workItem.assignee_membership_id === membership.id
+        || this.workspaceDatabase.raw.prepare(
+          `SELECT 1 FROM work_item_assignees
+           WHERE workspace_id = ? AND work_item_id = ? AND workspace_membership_id = ? LIMIT 1`,
+        ).get(workspaceId, workItem.id, membership.id)),
+      'WORK_ITEM_ASSIGNMENT_REQUIRED',
+      'WorkItem is not assigned to this Agent.',
+      403,
+    );
+    const projectMembership = this.findProjectMembership(workspaceId, workItem.project_id, membership.id);
+    invariant(projectMembership && this.getWorkItemAssigneeIds(workItem).includes(projectMembership.id),
+      'WORK_ITEM_ASSIGNMENT_FENCED', 'The WorkItem assignment is no longer active.', 409);
+    return workItem;
+  }
+
+  private requireHumanWorkItemAuthority(actorId: string, workItem: WorkItemRow): MembershipRow {
+    const workspaceMembership = this.requireMembership(workItem.workspace_id, actorId);
+    const projectMembership = this.findProjectMembership(
+      workItem.workspace_id,
+      workItem.project_id,
+      workspaceMembership.id,
+    );
+    invariant(
+      projectMembership?.project_role === 'owner'
+      || projectMembership?.project_role === 'manager'
+      || workItem.assignee_membership_id === workspaceMembership.id
+      || this.workspaceDatabase.raw.prepare(
+        `SELECT 1 FROM work_item_assignees
+         WHERE workspace_id = ? AND work_item_id = ? AND workspace_membership_id = ? LIMIT 1`,
+      ).get(workItem.workspace_id, workItem.id, workspaceMembership.id),
+      'WORK_ITEM_AUTHORITY_REQUIRED',
+      'Only the current Human assignee or a Project Owner or Manager may change this WorkItem.',
+      403,
+    );
+    return workspaceMembership;
+  }
+
+  private requireWorkItemManager(actorId: string, workItem: WorkItemRow): MembershipRow {
+    return this.requireProjectManagerOrWorkspaceOwner(actorId, workItem.project_id).workspaceMembership;
+  }
+
+  private normalizeWorkItemCommentReferences(workItem: WorkItemRow, ids?: string[]): string[] {
+    const distinct = [...new Set((ids ?? []).map((id) => id.trim()).filter(Boolean))];
+    invariant(distinct.length <= 50, 'TOO_MANY_WORK_ITEM_REFERENCES', 'A WorkItem comment may reference at most 50 WorkItems.', 400);
+    for (const id of distinct) {
+      const referenced = this.requireWorkItem(id);
+      invariant(referenced.workspace_id === workItem.workspace_id && referenced.project_id === workItem.project_id,
+        'WORK_ITEM_REFERENCE_NOT_IN_PROJECT', 'Referenced WorkItem does not belong to this Project.', 409);
+    }
+    return distinct;
+  }
+
+  private insertWorkItemCommentReferences(
+    workItem: WorkItemRow,
+    commentId: string,
+    workItemIds: string[],
+  ): void {
+    const insert = this.workspaceDatabase.raw.prepare(
+      `INSERT INTO work_item_comment_work_item_references_v2 (
+         workspace_id, project_id, comment_id, reference_order, work_item_id
+       ) VALUES (?, ?, ?, ?, ?)`,
+    );
+    workItemIds.forEach((workItemId, referenceOrder) => {
+      insert.run(workItem.workspace_id, workItem.project_id, commentId, referenceOrder, workItemId);
+    });
+  }
+
+  private insertWorkItemCommentArtifactReferences(
+    workItem: WorkItemRow,
+    commentId: string,
+    selections: Array<{ artifactId: string; artifactVersionId: string }>,
+    timestamp: number,
+  ): void {
+    invariant(selections.length <= 100, 'TOO_MANY_ARTIFACT_REFERENCES', 'A WorkItem comment may reference at most 100 Artifacts.', 400);
+    const insert = this.workspaceDatabase.raw.prepare(
+      `INSERT INTO work_item_comment_artifact_version_references_v2 (
+         workspace_id, project_id, comment_id, reference_order, artifact_id, version_id,
+         artifact_name_snapshot, version_number_snapshot, version_created_at_snapshot, file_name_snapshot,
+         media_type_snapshot, content_digest_snapshot, byte_length_snapshot, status_snapshot, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    selections.forEach((selection, referenceOrder) => {
+      const row = this.workspaceDatabase.raw.prepare(
+        `SELECT artifact.id AS artifact_id, artifact.name AS artifact_name,
+                artifact.status AS artifact_status, version.id AS version_id,
+                version.version_number, version.created_at AS version_created_at,
+                version.file_name, version.media_type, version.content_digest,
+                version.byte_length, version.status AS version_status
+         FROM artifact_versions_v2 version
+         JOIN project_artifacts_v2 artifact
+           ON artifact.workspace_id = version.workspace_id AND artifact.id = version.artifact_id
+         WHERE version.workspace_id = ? AND artifact.project_id = ?
+           AND artifact.id = ? AND version.id = ?`,
+      ).get(workItem.workspace_id, workItem.project_id, selection.artifactId, selection.artifactVersionId) as {
+        artifact_id: string;
+        artifact_name: string;
+        artifact_status: 'active' | 'deleted' | 'purged';
+        version_id: string;
+        version_number: number;
+        version_created_at: number;
+        file_name: string;
+        media_type: string;
+        content_digest: string;
+        byte_length: number;
+        version_status: 'active' | 'deleted' | 'purged';
+      } | undefined;
+      invariant(row, 'ARTIFACT_VERSION_NOT_FOUND', 'Artifact version does not belong to this Project.', 404);
+      insert.run(
+        workItem.workspace_id, workItem.project_id, commentId, referenceOrder,
+        row.artifact_id, row.version_id, row.artifact_name, row.version_number, row.version_created_at,
+        row.file_name, row.media_type, row.content_digest, row.byte_length,
+        row.version_status === 'active' && row.artifact_status === 'active' ? 'active' : row.version_status,
+        timestamp,
+      );
+    });
+  }
+
+  private insertWorkItemComment(
+    workItem: WorkItemRow,
+    authorMembership: MembershipRow,
+    authorProjectMembership: ProjectMembershipRow,
+    body: string,
+    mentionedActorIds: string[],
+    referencedWorkItemIds: string[],
+    artifactSelections: Array<{ artifactId: string; artifactVersionId: string }>,
+    auditActorId: string,
+  ): { commentId: string; wakeCount: number } {
+    const mentions = mentionedActorIds.map((actorId) => {
+      const row = this.workspaceDatabase.raw.prepare(
+        `SELECT membership.id AS workspace_membership_id,
+                project_membership.id AS project_membership_id,
+                actor.actor_type
+         FROM project_memberships project_membership
+         JOIN workspace_memberships membership
+           ON membership.workspace_id = project_membership.workspace_id
+          AND membership.id = project_membership.workspace_membership_id
+          AND membership.status = 'active'
+         JOIN actors actor ON actor.id = membership.actor_id
+         WHERE project_membership.workspace_id = ? AND project_membership.project_id = ?
+           AND project_membership.status = 'active' AND membership.actor_id = ?`,
+      ).get(workItem.workspace_id, workItem.project_id, actorId) as {
+        workspace_membership_id: string;
+        project_membership_id: string;
+        actor_type: 'human' | 'agent';
+      } | undefined;
+      invariant(row, 'WORK_ITEM_MENTION_TARGET_NOT_FOUND',
+        'A WorkItem comment can only mention an active Project participant.', 404);
+      return { actorId, ...row };
+    });
+    const timestamp = nowMs();
+    const frontier = this.workspaceDatabase.raw.prepare(
+      `UPDATE work_items
+       SET comment_frontier = comment_frontier + 1, updated_at = ?
+       WHERE workspace_id = ? AND id = ?
+       RETURNING comment_frontier`,
+    ).get(timestamp, workItem.workspace_id, workItem.id) as { comment_frontier: number } | undefined;
+    invariant(frontier, 'WORK_ITEM_NOT_FOUND', 'WorkItem does not exist.', 404);
+    const commentId = newId();
+    this.workspaceDatabase.raw.prepare(
+      `INSERT INTO work_item_comments (
+         id, workspace_id, project_id, work_item_id, author_actor_id,
+         author_membership_id, author_project_membership_id, body,
+         comment_position, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      commentId,
+      workItem.workspace_id,
+      workItem.project_id,
+      workItem.id,
+      authorMembership.actor_id,
+      authorMembership.id,
+      authorProjectMembership.id,
+      body,
+      frontier.comment_frontier,
+      timestamp,
+    );
+    const insertMention = this.workspaceDatabase.raw.prepare(
+      `INSERT INTO work_item_comment_mentions (
+         workspace_id, comment_id, actor_id, mention_order
+       ) VALUES (?, ?, ?, ?)`,
+    );
+    let wakeCount = 0;
+    mentions.forEach((mention, mentionOrder) => {
+      insertMention.run(workItem.workspace_id, commentId, mention.actorId, mentionOrder);
+      if (mention.actor_type === 'agent') {
+        this.enqueueWorkItemAttention(
+          workItem.workspace_id,
+          mention.actorId,
+          workItem.id,
+          commentId,
+          'work_item_mention',
+          timestamp,
+        );
+        wakeCount += 1;
+      }
+    });
+    this.insertWorkItemCommentReferences(workItem, commentId, referencedWorkItemIds);
+    this.insertWorkItemCommentArtifactReferences(workItem, commentId, artifactSelections, timestamp);
+    this.recordWorkItemChange(workItem, 'work_item_comment_created', {
+      commentId,
+      commentPosition: frontier.comment_frontier,
+      mentionedActorIds,
+      workItemIds: referencedWorkItemIds,
+      artifactSelections,
+    }, timestamp);
+    this.appendAudit(
+      workItem.workspace_id,
+      auditActorId,
+      authorMembership.id,
+      'work_item.comment.post',
+      'work_item_comment',
+      commentId,
+      { workItemId: workItem.id, commentPosition: frontier.comment_frontier, mentionedActorIds, workItemIds: referencedWorkItemIds, artifactSelections },
+      timestamp,
+    );
+    return { commentId, wakeCount };
+  }
+
+  private requireWorkItemComment(commentId: string): WorkItemCommentRow {
+    const row = this.workspaceDatabase.raw.prepare(
+      'SELECT * FROM work_item_comments WHERE id = ?',
+    ).get(commentId) as WorkItemCommentRow | undefined;
+    invariant(row, 'WORK_ITEM_COMMENT_NOT_FOUND', 'WorkItem comment does not exist.', 404);
+    return row;
+  }
+
+  private mapWorkItemComment(row: WorkItemCommentRow): WorkItemCommentView {
+    const author = this.workspaceDatabase.raw.prepare(
+      `SELECT actor.actor_type, COALESCE(human.display_name, agent.name) AS display_name
+       FROM workspace_memberships membership
+       JOIN actors actor ON actor.id = membership.actor_id
+       LEFT JOIN humans human ON human.actor_id = membership.actor_id
+       LEFT JOIN agents agent
+         ON agent.workspace_id = membership.workspace_id AND agent.actor_id = membership.actor_id
+       WHERE membership.workspace_id = ? AND membership.id = ?`,
+    ).get(row.workspace_id, row.author_membership_id) as {
+      actor_type: 'human' | 'agent';
+      display_name: string;
+    } | undefined;
+    invariant(author, 'WORK_ITEM_COMMENT_AUTHOR_NOT_FOUND', 'WorkItem comment author is unavailable.', 409);
+    const mentionedActorIds = this.workspaceDatabase.raw.prepare(
+      `SELECT actor_id FROM work_item_comment_mentions
+       WHERE workspace_id = ? AND comment_id = ? ORDER BY mention_order`,
+    ).all(row.workspace_id, row.id).map((item) => String((item as { actor_id: string }).actor_id));
+    const mentions = this.workspaceDatabase.raw.prepare(
+      `SELECT mention.actor_id, actor.actor_type,
+              COALESCE(human.display_name, agent.name, mention.actor_id) AS display_name
+       FROM work_item_comment_mentions mention
+       JOIN actors actor ON actor.id = mention.actor_id
+       LEFT JOIN humans human ON human.actor_id = mention.actor_id
+       LEFT JOIN agents agent
+         ON agent.workspace_id = mention.workspace_id AND agent.actor_id = mention.actor_id
+       WHERE mention.workspace_id = ? AND mention.comment_id = ?
+       ORDER BY mention.mention_order`,
+    ).all(row.workspace_id, row.id).map((value) => {
+      const mention = value as { actor_id: string; actor_type: 'human' | 'agent'; display_name: string };
+      return { actorId: mention.actor_id, actorType: mention.actor_type, displayName: mention.display_name };
+    });
+    const workItemReferences = this.workspaceDatabase.raw.prepare(
+      `SELECT reference.work_item_id, item.task_number
+       FROM work_item_comment_work_item_references_v2 reference
+       JOIN work_items item
+         ON item.workspace_id = reference.workspace_id AND item.id = reference.work_item_id
+       WHERE reference.workspace_id = ? AND reference.comment_id = ?
+       ORDER BY reference.reference_order`,
+    ).all(row.workspace_id, row.id).map((value) => {
+      const reference = value as { work_item_id: string; task_number: number };
+      return { workItemId: reference.work_item_id, taskNumber: reference.task_number };
+    });
+    const artifactReferences = this.mapWorkItemCommentArtifactReferences(row.workspace_id, row.id);
     return {
-      id: String(row.id),
-      projectId: String(row.project_id),
-      title: String(row.title),
-      url: String(row.url),
-      description: row.description === null ? null : String(row.description),
-      revision: Number(row.revision),
-      createdByMembershipId: String(row.created_by_membership_id),
-      createdAt: Number(row.created_at),
-      updatedAt: Number(row.updated_at),
+      id: row.id,
+      workspaceId: row.workspace_id,
+      projectId: row.project_id,
+      workItemId: row.work_item_id,
+      authorActorId: row.author_actor_id,
+      authorMembershipId: row.author_membership_id,
+      authorProjectMembershipId: row.author_project_membership_id,
+      authorActorType: author.actor_type,
+      authorDisplayName: author.display_name,
+      body: row.body,
+      mentionedActorIds,
+      mentions,
+      workItemReferences,
+      artifactReferences,
+      position: row.comment_position,
+      createdAt: row.created_at,
     };
   }
 
-  private requireOwnedComputer(principal: ComputerPrincipal): void {
-    const row = this.workspaceDatabase.raw
-      .prepare("SELECT id FROM computers WHERE id = ? AND owner_human_id = ? AND status = 'active'")
-      .get(principal.computerId, principal.ownerHumanId) as { id: string } | undefined;
-    invariant(row, 'COMPUTER_NOT_FOUND', 'Computer does not exist or is not active.', 404);
+  private mapWorkItemCommentArtifactReferences(
+    workspaceId: string,
+    commentId: string,
+  ): WorkItemArtifactReferenceView[] {
+    return this.workspaceDatabase.raw.prepare(
+      `SELECT reference.artifact_id, reference.version_id,
+              reference.artifact_name_snapshot, reference.version_number_snapshot,
+              reference.file_name_snapshot, reference.media_type_snapshot,
+              reference.content_digest_snapshot, reference.byte_length_snapshot,
+              reference.status_snapshot, version.status AS current_version_status,
+              artifact.status AS current_artifact_status
+       FROM work_item_comment_artifact_version_references_v2 reference
+       JOIN artifact_versions_v2 version
+         ON version.workspace_id = reference.workspace_id AND version.id = reference.version_id
+       JOIN project_artifacts_v2 artifact
+         ON artifact.workspace_id = reference.workspace_id AND artifact.id = reference.artifact_id
+       WHERE reference.workspace_id = ? AND reference.comment_id = ?
+       ORDER BY reference.reference_order`,
+    ).all(workspaceId, commentId).map((value) => {
+      const item = value as {
+        artifact_id: string; version_id: string; artifact_name_snapshot: string;
+        version_number_snapshot: number; file_name_snapshot: string; media_type_snapshot: string;
+        content_digest_snapshot: string; byte_length_snapshot: number; status_snapshot: 'active' | 'deleted' | 'purged';
+        current_version_status: 'active' | 'deleted' | 'purged'; current_artifact_status: 'active' | 'deleted' | 'purged';
+      };
+      return {
+        artifactId: item.artifact_id,
+        artifactVersionId: item.version_id,
+        artifactName: item.artifact_name_snapshot,
+        version: item.version_number_snapshot,
+        fileName: item.file_name_snapshot,
+        mediaType: item.media_type_snapshot,
+        contentDigest: item.content_digest_snapshot,
+        byteLength: item.byte_length_snapshot,
+        contentAvailable: item.current_version_status === 'active' && item.current_artifact_status === 'active',
+        artifactStatus: item.current_version_status === 'active'
+          ? item.current_artifact_status
+          : item.current_version_status,
+      };
+    });
   }
 
-  private requireReadyProjectWorkingCopy(computerId: string, projectId: string): {
-    repository: ProjectRepositoryRow;
-    headCommit: string;
-  } {
-    const repository = this.requireProjectRepository(projectId);
-    const row = this.workspaceDatabase.raw
-      .prepare(
-        `SELECT wc.repository_id, wc.availability, wc.branch, wc.head_commit, wc.checked_at,
-                computer.status AS computer_status, computer.last_seen_at
-         FROM computer_project_working_copies wc
-         JOIN computers computer ON computer.id = wc.computer_id
-         WHERE wc.computer_id = ? AND wc.project_id = ?`,
-      )
-      .get(computerId, projectId) as {
-        repository_id: string;
-        availability: ProjectWorkingCopyView['availability'];
-        branch: string | null;
-        head_commit: string | null;
-        checked_at: number;
-        computer_status: 'active' | 'disabled';
-        last_seen_at: number | null;
-      } | undefined;
-    const timestamp = nowMs();
-    invariant(
-      row
-      && row.repository_id === repository.id
-      && row.availability === 'ready'
-      && row.branch !== null
-      && row.head_commit !== null
-      && timestamp - row.checked_at <= COMPUTER_ONLINE_WINDOW_MS
-      && row.computer_status === 'active'
-      && row.last_seen_at !== null
-      && timestamp - row.last_seen_at <= COMPUTER_ONLINE_WINDOW_MS,
-      'PROJECT_WORKING_COPY_UNAVAILABLE',
-      'The selected Computer does not have a fresh matching Project Working Copy.',
-      409,
+  private insertWorkItemSubmissionArtifactReferences(
+    workItem: WorkItemRow,
+    submissionId: string,
+    artifactVersionIds: string[],
+    timestamp: number,
+  ): void {
+    const insert = this.workspaceDatabase.raw.prepare(
+      `INSERT INTO work_item_submission_artifact_references_v2 (
+         workspace_id, submission_id, reference_order, artifact_id, version_id,
+         artifact_name_snapshot, version_number_snapshot, version_created_at_snapshot,
+         file_name_snapshot, media_type_snapshot, content_digest_snapshot,
+         byte_length_snapshot, status_snapshot, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    return { repository, headCommit: row.head_commit };
+    artifactVersionIds.forEach((versionId, referenceOrder) => {
+      const row = this.workspaceDatabase.raw.prepare(
+        `SELECT artifact.id AS artifact_id, artifact.name AS artifact_name,
+                artifact.status AS artifact_status, version.id AS version_id,
+                version.version_number, version.created_at AS version_created_at,
+                version.file_name, version.media_type, version.content_digest,
+                version.byte_length, version.status AS version_status
+         FROM artifact_versions_v2 version
+         JOIN project_artifacts_v2 artifact
+           ON artifact.workspace_id = version.workspace_id AND artifact.id = version.artifact_id
+         WHERE version.workspace_id = ? AND artifact.project_id = ? AND version.id = ?`,
+      ).get(workItem.workspace_id, workItem.project_id, versionId) as {
+        artifact_id: string;
+        artifact_name: string;
+        artifact_status: 'active' | 'deleted' | 'purged';
+        version_id: string;
+        version_number: number;
+        version_created_at: number;
+        file_name: string;
+        media_type: string;
+        content_digest: string;
+        byte_length: number;
+        version_status: 'active' | 'deleted' | 'purged';
+      } | undefined;
+      invariant(row, 'ARTIFACT_VERSION_NOT_FOUND', 'Artifact version does not belong to this Project.', 404);
+      invariant(row.artifact_status === 'active' && row.version_status === 'active',
+        'ARTIFACT_VERSION_NOT_AVAILABLE', 'Only active Artifact versions can be submitted as a result.', 409);
+      insert.run(
+        workItem.workspace_id,
+        submissionId,
+        referenceOrder,
+        row.artifact_id,
+        row.version_id,
+        row.artifact_name,
+        row.version_number,
+        row.version_created_at,
+        row.file_name,
+        row.media_type,
+        row.content_digest,
+        row.byte_length,
+        row.version_status,
+        timestamp,
+      );
+    });
+  }
+
+  private mapWorkItemSubmissionArtifactReferences(
+    workspaceId: string,
+    submissionId: string,
+  ): WorkItemArtifactReferenceView[] {
+    return this.workspaceDatabase.raw.prepare(
+      `SELECT reference.artifact_id, reference.version_id,
+              reference.artifact_name_snapshot, reference.version_number_snapshot,
+              reference.file_name_snapshot, reference.media_type_snapshot,
+              reference.content_digest_snapshot, reference.byte_length_snapshot,
+              reference.status_snapshot, version.status AS current_version_status,
+              artifact.status AS current_artifact_status
+       FROM work_item_submission_artifact_references_v2 reference
+       JOIN artifact_versions_v2 version
+         ON version.workspace_id = reference.workspace_id AND version.id = reference.version_id
+       JOIN project_artifacts_v2 artifact
+         ON artifact.workspace_id = reference.workspace_id AND artifact.id = reference.artifact_id
+       WHERE reference.workspace_id = ? AND reference.submission_id = ?
+       ORDER BY reference.reference_order`,
+    ).all(workspaceId, submissionId).map((value) => {
+      const row = value as {
+        artifact_id: string;
+        version_id: string;
+        artifact_name_snapshot: string;
+        version_number_snapshot: number;
+        file_name_snapshot: string;
+        media_type_snapshot: string;
+        content_digest_snapshot: string;
+        byte_length_snapshot: number;
+        status_snapshot: 'active' | 'deleted' | 'purged';
+        current_version_status: 'active' | 'deleted' | 'purged';
+        current_artifact_status: 'active' | 'deleted' | 'purged';
+      };
+      return {
+        artifactId: row.artifact_id,
+        artifactVersionId: row.version_id,
+        artifactName: row.artifact_name_snapshot,
+        version: row.version_number_snapshot,
+        fileName: row.file_name_snapshot,
+        mediaType: row.media_type_snapshot,
+        contentDigest: row.content_digest_snapshot,
+        byteLength: row.byte_length_snapshot,
+        contentAvailable: row.current_version_status === 'active' && row.current_artifact_status === 'active',
+        artifactStatus: row.current_version_status === 'active'
+          ? row.current_artifact_status
+          : row.current_version_status,
+      };
+    });
+  }
+
+  private enqueueWorkItemAttention(
+    workspaceId: string,
+    agentId: string,
+    workItemId: string,
+    commentId: string | null,
+    attentionKind: 'work_item_assignment' | 'work_item_mention',
+    timestamp: number,
+  ): number {
+    const inboxItemId = newId();
+    const inboxSequence = this.nextAgentInboxSequence(workspaceId, agentId);
+    this.workspaceDatabase.raw.prepare(
+      `INSERT INTO agent_inbox_items (
+         id, workspace_id, agent_id, sequence, attention_kind,
+         message_id, conversation_id, thread_id, agent_request_id,
+         work_item_id, work_item_comment_id, created_at
+       ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)`,
+    ).run(
+      inboxItemId,
+      workspaceId,
+      agentId,
+      inboxSequence,
+      attentionKind,
+      workItemId,
+      commentId,
+      timestamp,
+    );
+    const wakeSequence = this.enqueueAgentInboxWake(workspaceId, agentId, inboxItemId, timestamp);
+    this.enqueueDelivery(
+      workspaceId,
+      'agent.inbox_changed',
+      'agent',
+      agentId,
+      { agentId, wakeSequence, workItemId },
+      `agent-inbox-wake:${agentId}:${wakeSequence}`,
+      timestamp,
+    );
+    return wakeSequence;
+  }
+
+  private handleWorkItemAttentionAsHandled(workspaceId: string, workItemId: string, agentId?: string): void {
+    this.workspaceDatabase.raw.prepare(
+      `UPDATE agent_inbox_items
+       SET state = 'handled', handled_at = ?
+       WHERE workspace_id = ? AND work_item_id = ? AND state = 'pending'
+         AND (? IS NULL OR agent_id = ?)`,
+    ).run(nowMs(), workspaceId, workItemId, agentId ?? null, agentId ?? null);
+  }
+
+  private mapWorkItem(row: WorkItemRow): WorkItemView {
+    const creator = this.workspaceDatabase.raw.prepare(
+      `SELECT COALESCE(human.display_name, agent.name) AS display_name
+       FROM workspace_memberships membership
+       LEFT JOIN humans human ON human.actor_id = membership.actor_id
+       LEFT JOIN agents agent
+         ON agent.workspace_id = membership.workspace_id AND agent.actor_id = membership.actor_id
+       WHERE membership.workspace_id = ? AND membership.id = ?`,
+    ).get(row.workspace_id, row.created_by_membership_id) as { display_name: string } | undefined;
+    invariant(creator, 'WORK_ITEM_CREATOR_NOT_FOUND', 'WorkItem creator provenance is unavailable.', 409);
+    const assigneeRows = this.workspaceDatabase.raw.prepare(
+      `SELECT project_membership.id AS project_membership_id,
+              project_membership.workspace_membership_id,
+              membership.actor_id, actor.actor_type,
+              COALESCE(human.display_name, agent.name) AS display_name
+       FROM project_memberships project_membership
+       JOIN workspace_memberships membership
+         ON membership.workspace_id = project_membership.workspace_id
+        AND membership.id = project_membership.workspace_membership_id
+       JOIN actors actor ON actor.id = membership.actor_id
+       LEFT JOIN humans human ON human.actor_id = membership.actor_id
+       LEFT JOIN agents agent
+         ON agent.workspace_id = membership.workspace_id AND agent.actor_id = membership.actor_id
+       WHERE project_membership.workspace_id = ? AND project_membership.project_id = ?
+         AND project_membership.id IN (
+           SELECT project_membership_id FROM work_item_assignees
+           WHERE workspace_id = ? AND work_item_id = ? ORDER BY assignment_order
+         )
+       ORDER BY (SELECT assignment_order FROM work_item_assignees
+                 WHERE workspace_id = ? AND work_item_id = ?
+                   AND project_membership_id = project_membership.id)`,
+    ).all(row.workspace_id, row.project_id, row.workspace_id, row.id, row.workspace_id, row.id) as unknown as Array<{
+      project_membership_id: string;
+      workspace_membership_id: string;
+      actor_id: string;
+      actor_type: 'human' | 'agent';
+      display_name: string;
+    }>;
+    if (assigneeRows.length === 0 && row.assignee_project_membership_id !== null) {
+      const legacy = this.workspaceDatabase.raw.prepare(
+        `SELECT project_membership.id AS project_membership_id,
+                project_membership.workspace_membership_id,
+                membership.actor_id, actor.actor_type,
+                COALESCE(human.display_name, agent.name) AS display_name
+         FROM project_memberships project_membership
+         JOIN workspace_memberships membership
+           ON membership.workspace_id = project_membership.workspace_id
+          AND membership.id = project_membership.workspace_membership_id
+         JOIN actors actor ON actor.id = membership.actor_id
+         LEFT JOIN humans human ON human.actor_id = membership.actor_id
+         LEFT JOIN agents agent ON agent.workspace_id = membership.workspace_id AND agent.actor_id = membership.actor_id
+         WHERE project_membership.workspace_id = ? AND project_membership.project_id = ?
+           AND project_membership.id = ?`,
+      ).get(row.workspace_id, row.project_id, row.assignee_project_membership_id) as typeof assigneeRows[number] | undefined;
+      if (legacy) assigneeRows.push(legacy);
+    }
+    invariant(row.assignee_project_membership_id === null || assigneeRows.length > 0,
+      'WORK_ITEM_ASSIGNEE_NOT_FOUND', 'WorkItem assignee provenance is unavailable.', 409);
+    const assignees = assigneeRows.map((assignee) => ({
+      projectMembershipId: assignee.project_membership_id,
+      workspaceMembershipId: assignee.workspace_membership_id,
+      actorId: assignee.actor_id,
+      actorType: assignee.actor_type,
+      displayName: assignee.display_name,
+    }));
+    const submission = row.current_submission_id === null ? null : this.workspaceDatabase.raw.prepare(
+      `SELECT submission.id, submission.comment_id, submission.submitted_by_membership_id,
+              submission.submitted_by_project_membership_id, submission.assignment_revision,
+              submission.created_at, membership.actor_id,
+              COALESCE(human.display_name, agent.name) AS display_name
+       FROM work_item_submissions submission
+       JOIN workspace_memberships membership
+         ON membership.workspace_id = submission.workspace_id
+        AND membership.id = submission.submitted_by_membership_id
+       LEFT JOIN humans human ON human.actor_id = membership.actor_id
+       LEFT JOIN agents agent
+         ON agent.workspace_id = membership.workspace_id AND agent.actor_id = membership.actor_id
+       WHERE submission.workspace_id = ? AND submission.work_item_id = ? AND submission.id = ?`,
+    ).get(row.workspace_id, row.id, row.current_submission_id) as {
+      id: string;
+      comment_id: string | null;
+      submitted_by_membership_id: string;
+      submitted_by_project_membership_id: string;
+      assignment_revision: number;
+      created_at: number;
+      actor_id: string;
+      display_name: string;
+    } | undefined;
+    invariant(row.current_submission_id === null || submission,
+      'WORK_ITEM_SUBMISSION_NOT_FOUND', 'Current WorkItem submission is unavailable.', 409);
+    const relatedWorkItemReferences = row.source_message_id === null ? [] : this.workspaceDatabase.raw.prepare(
+      `SELECT reference.work_item_id, item.task_number
+       FROM message_work_item_references_v2 reference
+       JOIN work_items item
+         ON item.workspace_id = reference.workspace_id
+        AND item.project_id = ?
+        AND item.id = reference.work_item_id
+       WHERE reference.workspace_id = ?
+         AND reference.message_id = ?
+         AND reference.work_item_id <> ?
+       ORDER BY reference.reference_order`,
+    ).all(row.project_id, row.workspace_id, row.source_message_id, row.id).map((value) => {
+      const reference = value as { work_item_id: string; task_number: number };
+      return { workItemId: reference.work_item_id, taskNumber: reference.task_number };
+    });
+    return {
+      id: row.id,
+      workspaceId: row.workspace_id,
+      projectId: row.project_id,
+      taskNumber: row.task_number,
+      description: row.description,
+      relatedWorkItemReferences,
+      sourceConversationId: row.source_conversation_id,
+      sourceMessageId: row.source_message_id,
+      sourceThreadId: row.source_thread_id,
+      lifecycleStatus: row.lifecycle_status,
+      blockerReason: row.blocker_reason,
+      cancellationReason: row.cancellation_reason,
+      assignee: assignees[0] ?? null,
+      assignees,
+      currentSubmission: submission ? {
+        id: submission.id,
+        commentId: submission.comment_id,
+        submittedByMembershipId: submission.submitted_by_membership_id,
+        submittedByProjectMembershipId: submission.submitted_by_project_membership_id,
+        submittedByActorId: submission.actor_id,
+        submittedByDisplayName: submission.display_name,
+        assignmentRevision: submission.assignment_revision,
+        artifactReferences: this.mapWorkItemSubmissionArtifactReferences(row.workspace_id, submission.id),
+        createdAt: submission.created_at,
+      } : null,
+      assignmentRevision: row.assignment_revision,
+      commentFrontier: row.comment_frontier,
+      revision: row.revision,
+      createdByMembershipId: row.created_by_membership_id,
+      createdByProjectMembershipId: row.created_by_project_membership_id,
+      createdByDisplayName: creator.display_name,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      completedAt: row.completed_at,
+      cancelledAt: row.cancelled_at,
+    };
+  }
+
+  private nextProjectTaskNumber(workspaceId: string, projectId: string): number {
+    const row = this.workspaceDatabase.raw.prepare(
+      `SELECT COALESCE(MAX(task_number), 0) + 1 AS task_number
+       FROM work_items WHERE workspace_id = ? AND project_id = ?`,
+    ).get(workspaceId, projectId) as { task_number: number };
+    invariant(Number.isSafeInteger(row.task_number) && row.task_number > 0,
+      'TASK_NUMBER_EXHAUSTED', 'Project task numbering is exhausted.', 409);
+    return row.task_number;
+  }
+
+  private recordWorkItemChange(
+    workItem: WorkItemRow,
+    changeType: string,
+    payload: Record<string, unknown>,
+    timestamp: number,
+  ): void {
+    const projectVersion = this.bumpProjectContext(workItem.project_id, timestamp);
+    this.appendChange(
+      workItem.workspace_id,
+      null,
+      null,
+      null,
+      changeType,
+      'work_item',
+      workItem.id,
+      { workItemId: workItem.id, projectId: workItem.project_id, ...payload },
+      timestamp,
+      { projectId: workItem.project_id, projectVersion },
+    );
+    this.enqueueDelivery(
+      workItem.workspace_id,
+      `work-item.${changeType.slice('work_item_'.length).replaceAll('_', '-')}`,
+      'work_item',
+      workItem.id,
+      { workItemId: workItem.id, projectId: workItem.project_id, ...payload },
+      `${changeType}:${workItem.id}:${String(payload.revision ?? timestamp)}`,
+      timestamp,
+    );
   }
 
   private findProjectMembership(
@@ -6544,21 +9579,42 @@ export class WorkspaceService {
     return { project, workspaceMembership, projectMembership };
   }
 
+  private requireProjectManager(actorId: string, projectId: string): {
+    project: ProjectRow;
+    workspaceMembership: MembershipRow;
+    projectMembership: ProjectMembershipRow;
+  } {
+    const access = this.requireProjectAccess(actorId, projectId);
+    invariant(
+      access.projectMembership.project_role === 'owner' || access.projectMembership.project_role === 'manager',
+      'PROJECT_MANAGER_REQUIRED',
+      'An active Human Project Owner or Manager is required.',
+      403,
+    );
+    return access;
+  }
+
   private requireProjectManagerOrWorkspaceOwner(actorId: string, projectId: string): {
     project: ProjectRow;
     workspaceMembership: MembershipRow;
-    projectMembership: ProjectMembershipRow | null;
+    projectMembership: ProjectMembershipRow;
   } {
-    const project = this.requireProject(projectId);
-    const workspaceMembership = this.requireMembership(project.workspace_id, actorId);
-    const projectMembership = this.findProjectMembership(project.workspace_id, projectId, workspaceMembership.id) ?? null;
+    return this.requireProjectManager(actorId, projectId);
+  }
+
+  private requireProjectOwner(actorId: string, projectId: string): {
+    project: ProjectRow;
+    workspaceMembership: MembershipRow;
+    projectMembership: ProjectMembershipRow;
+  } {
+    const access = this.requireProjectAccess(actorId, projectId);
     invariant(
-      projectMembership?.project_role === 'manager' || workspaceMembership.membership_role === 'owner',
-      'PROJECT_MANAGER_REQUIRED',
-      'A Project Manager or Workspace Owner is required.',
+      access.projectMembership.project_role === 'owner',
+      'PROJECT_OWNER_REQUIRED',
+      'The active Project Owner is required.',
       403,
     );
-    return { project, workspaceMembership, projectMembership };
+    return access;
   }
 
   private requireActiveWorkspaceMember(workspaceId: string, workspaceMembershipId: string): WorkspaceMemberView {
@@ -6571,56 +9627,15 @@ export class WorkspaceService {
         `SELECT
            (SELECT COUNT(*) FROM project_memberships pm
             WHERE pm.project_id = ? AND pm.status = 'active') AS active_member_count,
-           (SELECT COUNT(*) FROM conversations c WHERE c.project_id = ?) AS conversation_count,
-           (SELECT COUNT(*)
-            FROM computer_project_working_copies wc
-            JOIN computers computer ON computer.id = wc.computer_id
-            WHERE wc.project_id = ? AND computer.owner_human_id = ?) AS connected_computer_count,
-           (SELECT COUNT(*)
-           FROM computer_project_working_copies wc
-            JOIN computers computer ON computer.id = wc.computer_id
-            WHERE wc.project_id = ? AND computer.owner_human_id = ?
-              AND wc.availability = 'ready'
-              AND wc.checked_at >= ?
-              AND computer.status = 'active'
-              AND computer.last_seen_at >= ?) AS ready_computer_count,
-           (SELECT COUNT(*)
-            FROM computer_project_working_copies wc
-            JOIN computers computer ON computer.id = wc.computer_id
-            WHERE wc.project_id = ? AND computer.owner_human_id = ?
-              AND wc.availability = 'mismatch') AS mismatch_computer_count,
-           (SELECT COUNT(*)
-            FROM computer_project_working_copies wc
-            JOIN computers computer ON computer.id = wc.computer_id
-            WHERE wc.project_id = ? AND computer.owner_human_id = ?
-              AND wc.availability = 'ready'
-              AND (wc.checked_at < ? OR computer.status <> 'active' OR computer.last_seen_at IS NULL OR computer.last_seen_at < ?)
-           ) AS offline_computer_count`,
+           (SELECT COUNT(*) FROM conversations c WHERE c.project_id = ?) AS conversation_count`,
       )
       .get(
         project.id,
         project.id,
-        project.id,
-        humanId,
-        project.id,
-        humanId,
-        nowMs() - COMPUTER_ONLINE_WINDOW_MS,
-        nowMs() - COMPUTER_ONLINE_WINDOW_MS,
-        project.id,
-        humanId,
-        project.id,
-        humanId,
-        nowMs() - COMPUTER_ONLINE_WINDOW_MS,
-        nowMs() - COMPUTER_ONLINE_WINDOW_MS,
       ) as {
         active_member_count: number;
         conversation_count: number;
-        connected_computer_count: number;
-        ready_computer_count: number;
-        mismatch_computer_count: number;
-        offline_computer_count: number;
       };
-    const repository = membership ? this.findActiveProjectRepository(project.id) ?? null : null;
     return {
       id: project.id,
       workspaceId: project.workspace_id,
@@ -6633,73 +9648,10 @@ export class WorkspaceService {
       governanceOnly: membership === null,
       activeMemberCount: counts.active_member_count,
       conversationCount: counts.conversation_count,
-      repository: repository ? this.mapProjectRepository(repository) : null,
-      connectedComputerCount: membership ? counts.connected_computer_count : 0,
-      readyComputerCount: membership ? counts.ready_computer_count : 0,
-      workingCopySummary: membership === null || counts.connected_computer_count === 0
-        ? 'not_connected'
-        : counts.ready_computer_count > 0
-          ? 'connected'
-          : counts.mismatch_computer_count > 0
-            ? 'mismatch'
-            : counts.offline_computer_count > 0
-              ? 'computer_offline'
-              : 'not_connected',
       createdByMembershipId: project.created_by_membership_id,
       createdAt: project.created_at,
       updatedAt: project.updated_at,
     };
-  }
-
-  private mapProjectRepository(repository: ProjectRepositoryRow): ProjectRepositoryView {
-    return {
-      id: repository.id,
-      cloneUrl: repository.clone_url,
-      repositoryIdentity: repository.repository_identity,
-      defaultBranch: repository.default_branch,
-      revision: repository.revision,
-    };
-  }
-
-  private mapProjectWorkingCopy(row: {
-    computer_id: string;
-    computer_name: string;
-    computer_status: 'active' | 'disabled';
-    last_seen_at: number | null;
-    availability: ProjectWorkingCopyView['availability'];
-    branch: string | null;
-    head_commit: string | null;
-    dirty: number | null;
-    checked_at: number;
-  }): ProjectWorkingCopyView {
-    return {
-      computerId: row.computer_id,
-      computerName: row.computer_name,
-      connectionStatus: row.computer_status === 'active'
-        && row.last_seen_at !== null
-        && nowMs() - row.last_seen_at <= COMPUTER_ONLINE_WINDOW_MS
-        ? 'online'
-        : 'offline',
-      availability: row.availability,
-      branch: row.branch,
-      headCommit: row.head_commit,
-      dirty: row.dirty === null ? null : Boolean(row.dirty),
-      checkedAt: row.checked_at,
-    };
-  }
-
-  private requireProjectWorkingCopyView(computerId: string, projectId: string): ProjectWorkingCopyView {
-    const row = this.workspaceDatabase.raw
-      .prepare(
-        `SELECT wc.computer_id, computer.name AS computer_name, computer.status AS computer_status,
-                computer.last_seen_at, wc.availability, wc.branch, wc.head_commit, wc.dirty, wc.checked_at
-         FROM computer_project_working_copies wc
-         JOIN computers computer ON computer.id = wc.computer_id
-         WHERE wc.computer_id = ? AND wc.project_id = ?`,
-      )
-      .get(computerId, projectId) as Parameters<WorkspaceService['mapProjectWorkingCopy']>[0] | undefined;
-    invariant(row, 'PROJECT_WORKING_COPY_NOT_FOUND', 'Working Copy connection does not exist.', 404);
-    return this.mapProjectWorkingCopy(row);
   }
 
   private mapProjectMember(row: {
@@ -6709,6 +9661,7 @@ export class WorkspaceService {
     actor_type: 'human' | 'agent';
     display_name: string;
     project_role: ProjectRole;
+    sponsored_by_project_membership_id: string | null;
     revision: number;
     joined_at: number;
   }): ProjectMemberView {
@@ -6719,6 +9672,7 @@ export class WorkspaceService {
       actorType: row.actor_type,
       displayName: row.display_name,
       role: row.project_role,
+      sponsoredByProjectMembershipId: row.sponsored_by_project_membership_id,
       revision: row.revision,
       joinedAt: row.joined_at,
     };
@@ -6729,7 +9683,7 @@ export class WorkspaceService {
       .prepare(
         `SELECT pm.id AS project_membership_id, pm.workspace_membership_id,
                 wm.actor_id, a.actor_type, COALESCE(h.display_name, ag.name) AS display_name,
-                pm.project_role, pm.revision, pm.joined_at
+                pm.project_role, pm.sponsored_by_project_membership_id, pm.revision, pm.joined_at
          FROM project_memberships pm
          JOIN workspace_memberships wm
            ON wm.workspace_id = pm.workspace_id AND wm.id = pm.workspace_membership_id AND wm.status = 'active'
@@ -6759,7 +9713,8 @@ export class WorkspaceService {
     creatorProjectMembership: ProjectMembershipRow | null,
     kind: ConversationKind,
     title: string | undefined,
-    directWorkspaceMembershipIds: string[],
+    visibility: ConversationVisibility,
+    participantScopeMembershipIds: string[] | undefined,
   ): ConversationView {
     invariant(
       projectId === null || kind === 'channel',
@@ -6772,50 +9727,77 @@ export class WorkspaceService {
       'INVALID_CONVERSATION_SCOPE',
       'Conversation creator does not belong to the requested scope.',
     );
-    const directMembershipIds = [...new Set(directWorkspaceMembershipIds)];
+    invariant(kind !== 'dm' || visibility === 'private', 'DM_MUST_BE_PRIVATE', 'A DM must be private.');
+    const scopeType = projectId !== null
+      ? 'project_group' as const
+      : kind === 'dm' ? 'direct_message' as const : 'workspace_general' as const;
+    const membershipMode = scopeType === 'workspace_general'
+      ? 'workspace_all' as const
+      : scopeType === 'project_group' && visibility === 'public'
+        ? 'project_all' as const
+        : 'explicit' as const;
+    const participantMembershipIds = participantScopeMembershipIds === undefined
+      ? undefined
+      : [...new Set(participantScopeMembershipIds)];
     if (kind === 'dm') {
-      invariant(directMembershipIds.length === 2, 'INVALID_DM_PARTICIPANTS', 'A DM must contain exactly two memberships.');
-      for (const membershipId of directMembershipIds) this.requireActiveWorkspaceMember(workspaceId, membershipId);
-    } else {
+      invariant(participantMembershipIds?.length === 2, 'INVALID_DM_PARTICIPANTS', 'A DM must contain exactly two memberships.');
+      for (const membershipId of participantMembershipIds) this.requireActiveWorkspaceMember(workspaceId, membershipId);
+    } else if (visibility === 'public') {
       invariant(
-        directMembershipIds.length === 0,
-        'CHANNEL_MEMBERS_ARE_DERIVED',
-        'Channel members are derived from the Workspace or Project scope.',
+        participantMembershipIds === undefined,
+        'PUBLIC_CHANNEL_PARTICIPANTS_FORBIDDEN',
+        'A public Channel cannot carry an explicit participant audience.',
       );
+    } else if (projectId === null) {
+      invariant(participantMembershipIds && participantMembershipIds.length > 0,
+        'PRIVATE_CHANNEL_PARTICIPANTS_REQUIRED', 'A private Channel must include its creator.');
+      for (const membershipId of participantMembershipIds) this.requireActiveWorkspaceMember(workspaceId, membershipId);
+    } else {
+      invariant(participantMembershipIds && participantMembershipIds.length > 0,
+        'PRIVATE_CHANNEL_PARTICIPANTS_REQUIRED', 'A private Channel must include its creator.');
+      for (const membershipId of participantMembershipIds) {
+        this.requireProjectMembership(workspaceId, projectId, membershipId);
+      }
     }
     const conversationId = newId();
     const timestamp = nowMs();
     this.workspaceDatabase.raw
       .prepare(
         `INSERT INTO conversations (
-           id, workspace_id, project_id, conversation_kind, title,
+           id, workspace_id, project_id, scope_type, membership_mode,
+           conversation_kind, visibility, title,
            created_by_membership_id, created_by_project_membership_id,
            context_version, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
       )
       .run(
         conversationId,
         workspaceId,
         projectId,
+        scopeType,
+        membershipMode,
         kind,
+        visibility,
         title?.trim() || null,
         creator.id,
         creatorProjectMembership?.id ?? null,
         timestamp,
         timestamp,
       );
-    const insertDirectMembership = this.workspaceDatabase.raw.prepare(
-      `INSERT INTO conversation_direct_memberships (
-         id, workspace_id, conversation_id, membership_id, joined_at
-       ) VALUES (?, ?, ?, ?, ?)`,
+    const insertMembership = this.workspaceDatabase.raw.prepare(
+      `INSERT INTO conversation_memberships (
+         id, workspace_id, conversation_id, project_id, scope_membership_id,
+         workspace_membership_id, project_membership_id, joined_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    for (const membershipId of directMembershipIds) {
-      insertDirectMembership.run(
-        newId(),
-        workspaceId,
-        conversationId,
-        membershipId,
-        timestamp,
+    for (const scopeMembershipId of participantMembershipIds ?? []) {
+      const projectMembership = projectId === null
+        ? null
+        : this.requireProjectMembership(workspaceId, projectId, scopeMembershipId);
+      insertMembership.run(
+        newId(), workspaceId, conversationId, projectId, scopeMembershipId,
+        projectMembership?.workspace_membership_id ?? scopeMembershipId,
+        projectMembership?.id ?? null, timestamp,
       );
     }
     const projectVersion = projectId ? this.bumpProjectContext(projectId, timestamp) : null;
@@ -6828,22 +9810,29 @@ export class WorkspaceService {
       'conversation',
       conversationId,
       {
+        scopeType,
+        membershipMode,
         kind,
         projectId,
-        ...(kind === 'dm' ? { directWorkspaceMembershipIds: directMembershipIds } : {}),
+        visibility,
+        ...(visibility === 'private' ? { participantScopeMembershipIds: participantMembershipIds } : {}),
       },
       timestamp,
       { projectId, projectVersion },
     );
     this.appendAudit(workspaceId, principal.actorId, creator.id, 'conversation.create', 'conversation', conversationId, {
       kind,
+      visibility,
       projectId,
     }, timestamp);
     return this.mapConversation({
       id: conversationId,
       workspace_id: workspaceId,
       project_id: projectId,
+      scope_type: scopeType,
+      membership_mode: membershipMode,
       conversation_kind: kind,
+      visibility,
       title: title?.trim() || null,
       lifecycle_status: 'active',
       revision: 1,
@@ -6855,7 +9844,7 @@ export class WorkspaceService {
       timeline_frontier: 0,
       created_at: timestamp,
       updated_at: timestamp,
-    });
+    }, 'content');
   }
 
   private conversationChangeOptions(conversation: ConversationAccess['conversation']): {
@@ -6867,7 +9856,7 @@ export class WorkspaceService {
     return { projectId: project.id, projectVersion: project.context_version };
   }
 
-  private requireConversationAccess(actorId: string, conversationId: string): ConversationAccess {
+  private requireConversationViewAccess(actorId: string, conversationId: string): ConversationAccess {
     const conversation = this.workspaceDatabase.raw.prepare('SELECT * FROM conversations WHERE id = ?').get(conversationId) as
       | ConversationAccess['conversation']
       | undefined;
@@ -6876,19 +9865,148 @@ export class WorkspaceService {
     const projectMembership = conversation.project_id
       ? this.findProjectMembership(conversation.workspace_id, conversation.project_id, membership.id) ?? null
       : null;
+    const hasContent = this.hasConversationAccess(conversation.workspace_id, conversationId, membership.id);
+    const hasGovernance = conversation.scope_type === 'project_group'
+      && conversation.membership_mode === 'explicit'
+      && (
+        conversation.created_by_membership_id === membership.id
+        || projectMembership?.project_role === 'owner'
+        || projectMembership?.project_role === 'manager'
+      );
+    invariant(hasContent || hasGovernance, 'CONVERSATION_NOT_FOUND', 'Conversation does not exist or is not accessible.', 404);
+    return { conversation, membership, projectMembership, accessMode: hasContent ? 'content' : 'governance' };
+  }
+
+  private requireConversationAccess(actorId: string, conversationId: string): ConversationAccess {
+    const access = this.requireConversationViewAccess(actorId, conversationId);
     invariant(
-      conversation.project_id === null || projectMembership,
-      'CONVERSATION_NOT_FOUND',
-      'Conversation does not exist or is not accessible.',
-      404,
+      access.accessMode === 'content',
+      'CONVERSATION_CONTENT_FORBIDDEN',
+      'This administrator has governance access only and cannot read or write Conversation content.',
+      403,
     );
+    return access;
+  }
+
+  private requireConversationAudienceAuthority(actorId: string, conversationId: string): ConversationAccess {
+    const access = this.requireConversationViewAccess(actorId, conversationId);
     invariant(
-      this.hasConversationAccess(conversation.workspace_id, conversationId, membership.id),
-      'CONVERSATION_NOT_FOUND',
-      'Conversation does not exist or is not accessible.',
-      404,
+      access.conversation.scope_type !== 'direct_message',
+      'DM_PARTICIPANTS_IMMUTABLE',
+      'DM participants are fixed and cannot be changed.',
+      409,
     );
-    return { conversation, membership, projectMembership };
+    return access;
+  }
+
+  private resolveConversationScopeMembership(
+    conversation: ConversationAccess['conversation'],
+    scopeMembershipId: string,
+  ): {
+    workspaceMembershipId: string;
+    projectMembershipId: string | null;
+    actorId: string;
+    actorType: 'human' | 'agent';
+  } {
+    if (conversation.project_id === null) {
+      const workspaceMember = this.requireActiveWorkspaceMember(conversation.workspace_id, scopeMembershipId);
+      return {
+        workspaceMembershipId: workspaceMember.membershipId,
+        projectMembershipId: null,
+        actorId: workspaceMember.actorId,
+        actorType: workspaceMember.actorType,
+      };
+    }
+    const projectMembership = this.requireProjectMembership(
+      conversation.workspace_id,
+      conversation.project_id,
+      scopeMembershipId,
+    );
+    const workspaceMember = this.requireActiveWorkspaceMember(
+      conversation.workspace_id,
+      projectMembership.workspace_membership_id,
+    );
+    return {
+      workspaceMembershipId: projectMembership.workspace_membership_id,
+      projectMembershipId: projectMembership.id,
+      actorId: workspaceMember.actorId,
+      actorType: workspaceMember.actorType,
+    };
+  }
+
+  private requireConversationParticipantAdditionAuthority(
+    access: ConversationAccess,
+    participant: { actorId: string; actorType: 'human' | 'agent' },
+    actorId: string,
+  ): void {
+    if (participant.actorType === 'agent') {
+      this.requireAgentOwner(access.conversation.workspace_id, participant.actorId, actorId);
+      return;
+    }
+    invariant(
+      access.conversation.membership_mode === 'explicit'
+      && access.conversation.scope_type === 'project_group'
+      && (
+        access.conversation.created_by_membership_id === access.membership.id
+        || access.projectMembership?.project_role === 'owner'
+        || access.projectMembership?.project_role === 'manager'
+      ),
+      'FORBIDDEN',
+      'Only the group creator or a Project Owner or Manager may add Human participants.',
+      403,
+    );
+  }
+
+  private requireConversationParticipantRemovalAuthority(
+    access: ConversationAccess,
+    participantActorId: string,
+    participantWorkspaceMembershipId: string,
+  ): void {
+    const target = this.requireActiveWorkspaceMember(
+      access.conversation.workspace_id,
+      participantWorkspaceMembershipId,
+    );
+    if (target.actorType === 'agent') {
+      const projectAdmin = access.conversation.project_id !== null
+        && (access.projectMembership?.project_role === 'owner' || access.projectMembership?.project_role === 'manager');
+      invariant(
+        projectAdmin || this.isCurrentAgentOwner(access.conversation.workspace_id, participantActorId, access.membership.id),
+        'FORBIDDEN',
+        'Only the Agent Owner or a Project Owner or Manager may remove this Agent.',
+        403,
+      );
+      return;
+    }
+    invariant(
+      access.conversation.membership_mode === 'explicit'
+      && access.conversation.scope_type === 'project_group'
+      && (
+        access.conversation.created_by_membership_id === access.membership.id
+        || access.projectMembership?.project_role === 'owner'
+        || access.projectMembership?.project_role === 'manager'
+      ),
+      'FORBIDDEN',
+      'Only the group creator or a Project Owner or Manager may remove Human participants.',
+      403,
+    );
+  }
+
+  private advanceConversationAudienceRevision(
+    conversation: ConversationAccess['conversation'],
+    expectedRevision: number,
+    timestamp: number,
+  ): { revision: number; contextVersion: number } {
+    const row = this.workspaceDatabase.raw.prepare(
+      `UPDATE conversations
+       SET revision = revision + 1, context_version = context_version + 1, updated_at = ?
+       WHERE workspace_id = ? AND id = ? AND revision = ?
+       RETURNING revision, context_version`,
+    ).get(timestamp, conversation.workspace_id, conversation.id, expectedRevision) as {
+      revision: number;
+      context_version: number;
+    } | undefined;
+    invariant(row, 'CONVERSATION_REVISION_CONFLICT', 'Conversation audience changed concurrently.', 409);
+    return { revision: row.revision, contextVersion: row.context_version };
   }
 
   private transitionConversationLifecycle(
@@ -6899,7 +10017,7 @@ export class WorkspaceService {
     expectedRevision: number,
     idempotencyKey: string,
   ): ConversationView {
-    const existing = this.requireConversationAccess(principal.actorId, conversationId);
+    const existing = this.requireConversationViewAccess(principal.actorId, conversationId);
     const command = to === 'archived' ? 'ArchiveConversation' : 'RestoreConversation';
     return this.idempotent(
       existing.conversation.workspace_id,
@@ -6908,7 +10026,7 @@ export class WorkspaceService {
       idempotencyKey,
       { conversationId, expectedRevision },
       () => {
-        const access = this.requireConversationAccess(principal.actorId, conversationId);
+        const access = this.requireConversationViewAccess(principal.actorId, conversationId);
         this.requireConversationLifecycleAuthority(access);
         invariant(
           access.conversation.lifecycle_status === from,
@@ -7001,20 +10119,26 @@ export class WorkspaceService {
         const row = this.workspaceDatabase.raw
           .prepare('SELECT * FROM conversations WHERE workspace_id = ? AND id = ?')
           .get(access.conversation.workspace_id, conversationId) as ConversationAccess['conversation'];
-        return this.mapConversation(row);
+        return this.mapConversation(row, access.accessMode);
       },
     );
   }
 
   private requireConversationLifecycleAuthority(access: ConversationAccess): void {
     const allowed = access.conversation.conversation_kind === 'dm'
-      || access.conversation.created_by_membership_id === access.membership.id
-      || access.membership.membership_role === 'owner'
-      || access.projectMembership?.project_role === 'manager';
+      || (
+        access.conversation.scope_type === 'project_group'
+        && access.conversation.membership_mode === 'explicit'
+        && (
+          access.conversation.created_by_membership_id === access.membership.id
+          || access.projectMembership?.project_role === 'owner'
+          || access.projectMembership?.project_role === 'manager'
+        )
+      );
     invariant(
       allowed,
       'FORBIDDEN',
-      'Only a DM participant, Conversation creator, Project Manager, or Workspace Owner may change Conversation lifecycle.',
+      'Only a DM participant or the current scope administrator may change Conversation lifecycle.',
       403,
     );
   }
@@ -7030,10 +10154,10 @@ export class WorkspaceService {
     const row = this.workspaceDatabase.raw
       .prepare(
         `SELECT COUNT(*) AS count
-         FROM conversation_direct_memberships direct
+         FROM conversation_memberships direct
          JOIN workspace_memberships m
            ON m.workspace_id = direct.workspace_id
-          AND m.id = direct.membership_id
+          AND m.id = direct.workspace_membership_id
           AND m.status = 'active'
          WHERE direct.workspace_id = ? AND direct.conversation_id = ?`,
       )
@@ -7050,7 +10174,10 @@ export class WorkspaceService {
     id: string;
     workspace_id: string;
     project_id: string | null;
+    scope_type: 'workspace_general' | 'direct_message' | 'project_group';
+    membership_mode: 'workspace_all' | 'project_all' | 'explicit';
     conversation_kind: ConversationKind;
+    visibility: ConversationVisibility;
     title: string | null;
     lifecycle_status: 'active' | 'archived';
     revision: number;
@@ -7062,12 +10189,17 @@ export class WorkspaceService {
     timeline_frontier: number;
     created_at: number;
     updated_at: number;
-  }): ConversationView {
+  }, accessMode: ConversationAccessMode): ConversationView {
     return {
       id: row.id,
       workspaceId: row.workspace_id,
       projectId: row.project_id,
+      scope: row.scope_type === 'project_group'
+        ? { type: 'project_group', projectId: row.project_id!, membershipMode: row.membership_mode as 'project_all' | 'explicit' }
+        : { type: row.scope_type },
       kind: row.conversation_kind,
+      visibility: row.visibility,
+      accessMode,
       title: row.title,
       lifecycleStatus: row.lifecycle_status,
       revision: row.revision,
@@ -7103,15 +10235,19 @@ export class WorkspaceService {
           AND project_membership.project_id = conversation.project_id
           AND project_membership.workspace_membership_id = membership.id
           AND project_membership.status = 'active'
-         LEFT JOIN conversation_direct_memberships direct
-           ON direct.workspace_id = conversation.workspace_id
-          AND direct.conversation_id = conversation.id
-          AND direct.membership_id = membership.id
+         LEFT JOIN conversation_memberships audience
+           ON audience.workspace_id = conversation.workspace_id
+          AND audience.conversation_id = conversation.id
+          AND (
+            (conversation.project_id IS NULL AND audience.workspace_membership_id = membership.id)
+            OR
+            (conversation.project_id IS NOT NULL AND audience.project_membership_id = project_membership.id)
+          )
          WHERE conversation.workspace_id = ? AND conversation.id = ?
+           AND (conversation.project_id IS NULL OR project_membership.id IS NOT NULL)
            AND (
-             (conversation.conversation_kind = 'channel'
-               AND (conversation.project_id IS NULL OR project_membership.id IS NOT NULL))
-             OR (conversation.conversation_kind = 'dm' AND direct.id IS NOT NULL)
+             (conversation.conversation_kind = 'channel' AND conversation.visibility = 'public')
+             OR (conversation.visibility = 'private' AND audience.id IS NOT NULL)
            )
          ORDER BY membership.id`,
       )
@@ -7419,19 +10555,60 @@ export class WorkspaceService {
     ).get(agentId) as { name: string; description: string | null; workspace_name: string } | undefined;
     invariant(agent, 'AGENT_NOT_FOUND', 'Agent does not exist.', 404);
     return [
-      '# Agent identity and Workspace protocol',
-      '',
-      `You are ${agent.name}, a persistent Agent in the ${agent.workspace_name} Workspace.`,
+      `You are ${agent.name}, an Agent in the ${agent.workspace_name} Workspace. Each Mention or WorkItem has an isolated Session. A WorkItem created from a Conversation Mention may use one composite WorkItem Session with both task and Discussion obligations.`,
       agent.description?.trim() ? `Your role: ${agent.description.trim()}` : '',
-      `Stable Agent ID: ${agentId}`,
       '',
-      `Identify yourself as ${agent.name}; do not describe yourself as a generic Runtime, Codex session, or Attempt.`,
-      'On each lightweight wake, use teamctl to inspect the Agent Inbox and explicitly claim the pending Discussion Scope.',
-      'User Message bodies are available only through teamctl message check/read/resolve and are never embedded in wake text.',
-      'Workspace documents and Artifacts are shared team knowledge, not identity instructions.',
-      'Publish messages, Artifact changes, and final status only through the injected Workspace tools.',
-      'Security, authorization, budgets, and disclosure rules are enforced by the Workspace and Local Computer gateway.',
-    ].filter(Boolean).join('\n').trim();
+      '## teamctl CLI',
+      '',
+      'Your Workspace communication and shared output are performed with `teamctl`. Standard output is not delivered to users.',
+      'The Local Computer Runtime is a disposable cache. The Session JSONL supplied at startup is authoritative and must never be mixed with another Session.',
+      '',
+      '### Inbox',
+      '',
+      '- `teamctl inbox check` lists pending targets without claiming or consuming them.',
+      '- Discussion targets use `conversation:<conversation-id>` or `conversation:<conversation-id>:thread:<thread-id>`.',
+      '- Agent Inbox contains Discussion attention plus explicit WorkItem assignment or mention attention. Workspace, Project, File, Document, and Artifact changes remain in shared history and are not Inbox items.',
+      '- Inbox delivery and Runtime wake are separate. Ordinary accessible Discussion Messages remain queryable without waking you; Human-Agent direct Messages and explicit mentions create content-free wakes.',
+      '- A wake contains no Message body. The Session JSONL contains the bounded context for exactly one Mention or WorkItem; a source-message WorkItem Session may also include one linked Conversation and its Discussion capability.',
+      '',
+      '### WorkItems',
+      '',
+      '- `teamctl work-item list [--project-id <id>]` lists every WorkItem in a Project where you are an active Project member.',
+      '- `teamctl work-item read <work-item-id>` returns the immutable description and task number, current assignment revision, lifecycle, comment frontier, current Result Submission, and optional source Conversation/Message/Thread IDs.',
+      '- Mention and WorkItem Sessions include a `work_item_mention` line for each referenced WorkItem. Use `teamctl work-item read <work-item-id>` to inspect current state and Artifact references; Project membership, not the current Session, governs read/list access.',
+      '- WorkItem comments are independent from Conversation Messages. Use `teamctl work-item comment <work-item-id> --body <text> [--mention <actor-id> ...] [--work-item-id <id> ...] [--artifact-ref <artifact-id>:<artifact-version-id> ...]` for task-specific collaboration.',
+      '- If assigned work cannot advance, run `teamctl work-item block <work-item-id> --reason <text>` with a concrete blocker. Only an authorized Human can unblock it.',
+      '- Publish result files with `teamctl artifact publish --file <path> --task-id <work-item-id>`, then run `teamctl work-item submit <work-item-id> --artifact-version-id <version-id> [--comment-id <comment-id>]`. The Artifact version is the structured Result Submission; the comment is optional explanation only. Submission does not complete the WorkItem; an authorized Human completes or cancels it.',
+      '',
+      '### Messages',
+      '',
+      '- `teamctl message check --target <discussion-target>` claims pending Inbox events for this Session and reads only Discussion messages after the Session JSONL frontier. The initial Mention is already in the snapshot and is not repeated as a second user message.',
+      '- The Session JSONL is a fixed startup snapshot. New messages remain in Inbox until a later check; they are never appended to the already-sent ACP context.',
+      '- A DM Session accepts at most 10 messages total, including its initial trigger. When the window reaches 10 it is frozen; stop checking and reply or return no-output. Overflow messages stay pending for the next Session.',
+      '- Never claim another Group Mention Session. In a DM, a pending message may join this active window only while it is accepting and below the limit; otherwise it belongs to the next Session.',
+      '- `teamctl message read --target <discussion-target> [--before <position>|--after <position>] [--limit <count>]` reads additional Conversation history without changing Inbox state.',
+      '- `teamctl message resolve <message-id> --target <discussion-target>` resolves one referenced Message in that scope.',
+      '- Immediately before `message send` or Discussion `return no-output`, run `teamctl message check --target <discussion-target>` again and review everything it returns.',
+      '- `teamctl message send --target <discussion-target> --body <text> [--mention <actor-id> ...] [--work-item-id <id> ...] [--artifact-version-id <version-id> ...]` stages the body and all references durably on this Local Computer, then asks Workspace to atomically freshness-check and publish them. Use `--body-file <path>` for any multi-line or long content (including paragraphs, lists, and code); use `--body` only for one-line text. A literal `\\n` in `--body` is not converted to a line break.',
+      '- A successful command returns `status: "published"`. `status: "held"` is a normal freshness result, not a tool failure: the candidate was not published and the receipt remains active.',
+      '- After a hold choose exactly one path: revise with `message send --target ... --body ...` for one-line text or `message send --target ... --body-file <path>` for multi-line text; retry unchanged with `message send --target ... --send-draft`; inspect it with `message draft get --target ...` and stay silent with `message draft discard --target ...`; or, only after at least one hold, knowingly publish with `message send --target ... --send-draft --anyway`.',
+      '',
+      '### Artifacts',
+      '',
+      '- `teamctl artifact read <artifact-id>` fetches the active Project Artifact and its latest readable version into the Agent work directory. The response includes the immutable `versionId` and version number used by Message references.',
+      '- `teamctl artifact publish --file <path> [--artifact-id <id> --expected-latest-version-id <version-id>] [--artifact-name <name>] [--artifact-path <path>]` publishes one file as a new Artifact or appends a version to an existing Artifact. Publication records source Resource revisions/digests and optional Task/Message/batch provenance.',
+      '- Derived Artifacts accept repeated `--parent-version-id <version-id>` flags at creation time; parents must be active versions in the same Project.',
+      '- A concurrent append returns `status: "held"` with the expected/current latest version IDs and a durable draft. Inspect the current Artifact, then retry with `artifact publish --send-draft --draft-id ...`, discard with `artifact draft discard --draft-id ...`, or force after review with `artifact publish --send-draft --draft-id ... --anyway`.',
+      '- A successful Artifact publication writes the Artifact and its Workspace change history. It does not create an Agent Inbox item or Runtime wake. Share an Artifact with another Agent by referencing it from a Message.',
+      '',
+      '### Completing without a Message',
+      '',
+      '- `teamctl return no-output --target <discussion-target>` completes a claimed Discussion when no Message is appropriate. It can return `status: "review_required"`; review its delta and decide again.',
+      '- Every claimed target must finish with either `message send` or `return no-output`; otherwise it remains pending for recovery.',
+      '- When a WorkItem Session includes a linked Discussion, complete both sides in this same Session: use `teamctl work-item ...` for the assigned task and `teamctl message check/send --target <discussion-target>` for the source Conversation reply. Do not wait for or create another Session.',
+      '',
+      'On startup run both `teamctl work-item list` and `teamctl inbox check`. After every `Agent Inbox changed.` wake, inspect the Inbox, claim each pending target with the matching check command, handle all returned events, and explicitly complete every claimed target.',
+    ].join('\n').replace(/\n{3,}/gu, '\n\n').trim();
   }
 
   private messageSourceRef(
@@ -7500,9 +10677,6 @@ export class WorkspaceService {
       workspaceContextVersion: Number(row.workspace_context_version),
       projectId: row.project_id === null ? null : String(row.project_id),
       projectContextVersion: row.project_context_version === null ? null : Number(row.project_context_version),
-      repositoryId: row.repository_id === null ? null : String(row.repository_id),
-      repositoryIdentity: row.repository_identity === null ? null : String(row.repository_identity),
-      repositoryBaseCommit: row.repository_base_commit === null ? null : String(row.repository_base_commit),
       conversationContextVersion: Number(row.conversation_context_version),
       changeCursor: Number(row.change_cursor),
       sources: this.hydrateSourceRefs(String(row.id)),
@@ -7558,10 +10732,81 @@ export class WorkspaceService {
     }
   }
 
+  private insertFixedArtifactVersionReferences(
+    workspaceId: string,
+    messageId: string,
+    projectId: string | null,
+    versionIds: string[],
+    timestamp: number,
+  ): void {
+    if (versionIds.length === 0) return;
+    invariant(projectId, 'PROJECT_REQUIRED', 'Artifact Message references require a Project.', 400);
+    const insertReference = this.workspaceDatabase.raw.prepare(
+      `INSERT INTO message_artifact_version_references_v2 (
+         workspace_id, message_id, reference_order, artifact_id, version_id,
+         artifact_name_snapshot, version_number_snapshot, version_created_at_snapshot, file_name_snapshot,
+         media_type_snapshot, content_digest_snapshot, byte_length_snapshot, status_snapshot, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    versionIds.forEach((versionId, index) => {
+      const row = this.workspaceDatabase.raw.prepare(
+        `SELECT a.id AS artifact_id, a.name, a.status AS artifact_status, v.id AS version_id,
+                v.version_number, v.created_at AS version_created_at, v.file_name, v.media_type,
+                v.content_digest, v.byte_length, v.status
+         FROM project_artifacts_v2 a JOIN artifact_versions_v2 v ON v.artifact_id = a.id AND v.workspace_id = a.workspace_id
+         WHERE a.workspace_id = ? AND a.project_id = ? AND v.id = ?`,
+      ).get(workspaceId, projectId, versionId) as {
+        artifact_id: string; name: string; artifact_status: 'active' | 'deleted' | 'purged'; version_id: string;
+        version_number: number; version_created_at: number; file_name: string; media_type: string; content_digest: string; byte_length: number; status: 'active' | 'deleted' | 'purged';
+      } | undefined;
+      invariant(row, 'ARTIFACT_VERSION_NOT_FOUND', 'Artifact version does not belong to this Project.', 404);
+      insertReference.run(workspaceId, messageId, index, row.artifact_id, row.version_id, row.name,
+        row.version_number, row.version_created_at, row.file_name, row.media_type, row.content_digest,
+        row.byte_length, row.status === 'active' && row.artifact_status === 'active' ? 'active' : row.status, timestamp);
+    });
+  }
+
+  private insertAgentMessageReferences(
+    workspaceId: string,
+    messageId: string,
+    projectId: string | null,
+    workItemIds: string[],
+    mentions: ConversationParticipantRow[],
+    timestamp: number,
+  ): void {
+    const distinctWorkItemIds = [...new Set(workItemIds.map((id) => id.trim()).filter(Boolean))];
+    invariant(distinctWorkItemIds.length <= 50, 'TOO_MANY_WORK_ITEM_REFERENCES', 'A Message may reference at most 50 WorkItems.', 400);
+    if (distinctWorkItemIds.length > 0) {
+      invariant(projectId, 'WORK_ITEM_REFERENCE_PROJECT_REQUIRED', 'WorkItem references are only available in Project Conversations.', 409);
+      const insert = this.workspaceDatabase.raw.prepare(
+        `INSERT INTO message_work_item_references_v2
+          (workspace_id, project_id, message_id, reference_order, work_item_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      );
+      for (const [index, workItemId] of distinctWorkItemIds.entries()) {
+        const workItem = this.requireWorkItem(workItemId);
+        invariant(workItem.workspace_id === workspaceId && workItem.project_id === projectId,
+          'WORK_ITEM_REFERENCE_NOT_IN_PROJECT', 'Referenced WorkItem does not belong to this Project.', 409);
+        insert.run(workspaceId, projectId, messageId, index, workItemId, timestamp);
+      }
+    }
+    for (const [index, mention] of mentions.entries()) {
+      this.workspaceDatabase.raw.prepare(
+        `INSERT INTO message_mentions (
+           id, workspace_id, message_id, actor_id, actor_type_snapshot,
+           display_name_snapshot, mention_order, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(newId(), workspaceId, messageId, mention.actor_id, mention.actor_type,
+        mention.display_name, index, timestamp);
+    }
+  }
+
   private publishAgentMessage(
     context: ExecutionContextRow,
     body: string,
-    artifactSnapshotIds: string[],
+    artifactIds: string[],
+    mentionedActorIds: string[] = [],
+    workItemIds: string[] = [],
     timestamp: number,
   ): MessageView {
     const normalizedBody = body.trim();
@@ -7588,8 +10833,11 @@ export class WorkspaceService {
         normalizedBody, conversationVersion, scopePosition,
         context.run_id, context.attempt_id, timestamp,
       );
-    const artifactSnapshots = this.artifacts.validateMessageSnapshotIds(context.workspace_id, artifactSnapshotIds);
-    this.artifacts.insertMessageReferences(context.workspace_id, messageId, artifactSnapshots, timestamp);
+    this.insertFixedArtifactVersionReferences(context.workspace_id, messageId, context.project_id, artifactIds, timestamp);
+    const mentions = this.resolveAgentMessageMentions(
+      context.workspace_id, context.conversation_id, context.project_id, mentionedActorIds,
+    );
+    this.insertAgentMessageReferences(context.workspace_id, messageId, context.project_id, workItemIds, mentions, timestamp);
     this.appendChange(
       context.workspace_id, null, context.conversation_id, conversationVersion,
       'message_created', 'message', messageId,
@@ -7599,12 +10847,111 @@ export class WorkspaceService {
         projectVersion: this.requireProject(context.project_id).context_version,
       } : {},
     );
+    this.markOwnMessageDelivered(context.workspace_id, context.agent_id, messageId, timestamp);
     this.appendAudit(
       context.workspace_id, context.agent_id, context.agent_membership_id,
       'message.post', 'message', messageId,
       { runId: context.run_id, attemptId: context.attempt_id }, timestamp,
     );
     return this.hydrateMessage(this.requireMessage(messageId), this.requireMembership(context.workspace_id, context.agent_id));
+  }
+
+  private publishPersistentAgentMessage(
+    workspaceId: string,
+    agentId: string,
+    conversationId: string,
+    threadId: string | null,
+    body: string,
+    artifactIds: string[],
+    mentionedActorIds: string[],
+    workItemIds: string[],
+    bindingRevision: number,
+    timestamp: number,
+  ): MessageView {
+    const normalizedBody = body.trim();
+    invariant(normalizedBody.length > 0, 'INVALID_MESSAGE', 'Agent Message body is required.');
+    const membership = this.requireMembership(workspaceId, agentId);
+    invariant(this.hasConversationAccess(workspaceId, conversationId, membership.id),
+      'CONVERSATION_NOT_FOUND', 'Conversation is not accessible to this Agent.', 404);
+    const conversation = this.workspaceDatabase.raw.prepare(
+      'SELECT * FROM conversations WHERE workspace_id = ? AND id = ?',
+    ).get(workspaceId, conversationId) as ConversationAccess['conversation'] | undefined;
+    invariant(conversation, 'CONVERSATION_NOT_FOUND', 'Conversation does not exist.', 404);
+    this.requireConversationWritable(conversation);
+    const projectMembership = conversation.project_id === null ? null : this.workspaceDatabase.raw.prepare(
+      `SELECT id FROM project_memberships
+       WHERE workspace_id = ? AND project_id = ? AND workspace_membership_id = ? AND status = 'active'`,
+    ).get(workspaceId, conversation.project_id, membership.id) as { id: string } | undefined;
+    invariant(conversation.project_id === null || projectMembership,
+      'PROJECT_MEMBERSHIP_REQUIRED', 'Agent is not an active Project member.', 403);
+    const conversationVersion = this.bumpConversationContext(conversationId, null, timestamp);
+    const scopePosition = this.advanceDiscussionFrontier(workspaceId, conversationId, threadId);
+    const messageId = newId();
+    this.workspaceDatabase.raw.prepare(
+      `INSERT INTO messages (
+         id, workspace_id, conversation_id, project_id, thread_id,
+         author_actor_id, author_membership_id, author_project_membership_id,
+         body, conversation_version, scope_position, producing_run_id, producing_attempt_id,
+         created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`,
+    ).run(
+      messageId,
+      workspaceId,
+      conversationId,
+      conversation.project_id,
+      threadId,
+      agentId,
+      membership.id,
+      projectMembership?.id ?? null,
+      normalizedBody,
+      conversationVersion,
+      scopePosition,
+      timestamp,
+    );
+    this.insertFixedArtifactVersionReferences(workspaceId, messageId, conversation.project_id, artifactIds, timestamp);
+    const mentions = this.resolveAgentMessageMentions(workspaceId, conversationId, conversation.project_id, mentionedActorIds);
+    this.insertAgentMessageReferences(workspaceId, messageId, conversation.project_id, workItemIds, mentions, timestamp);
+    this.appendChange(
+      workspaceId,
+      null,
+      conversationId,
+      conversationVersion,
+      'message_created',
+      'message',
+      messageId,
+      { threadId, scopePosition, runtimeBindingRevision: bindingRevision },
+      timestamp,
+      conversation.project_id ? {
+        projectId: conversation.project_id,
+        projectVersion: this.requireProject(conversation.project_id).context_version,
+      } : {},
+    );
+    this.markOwnMessageDelivered(workspaceId, agentId, messageId, timestamp);
+    this.appendAudit(
+      workspaceId,
+      agentId,
+      membership.id,
+      'message.post',
+      'message',
+      messageId,
+      { runtimeBindingRevision: bindingRevision, source: 'persistent_agent_session' },
+      timestamp,
+    );
+    return this.hydrateMessage(this.requireMessage(messageId), membership);
+  }
+
+  private markOwnMessageDelivered(
+    workspaceId: string,
+    agentId: string,
+    messageId: string,
+    timestamp: number,
+  ): void {
+    this.workspaceDatabase.raw.prepare(
+      `UPDATE agent_inbox_items
+       SET state = 'handled', handled_at = ?
+       WHERE workspace_id = ? AND agent_id = ? AND message_id = ?
+         AND attention_kind = 'discussion_change' AND state = 'pending'`,
+    ).run(timestamp, workspaceId, agentId, messageId);
   }
 
   private mapChange(row: Record<string, unknown>): ChangeRecord {

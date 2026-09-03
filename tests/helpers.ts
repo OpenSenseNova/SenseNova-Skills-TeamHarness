@@ -4,7 +4,12 @@ import { resolve } from 'node:path';
 import { afterEach } from 'vitest';
 import { WorkspaceService } from '../src/domain/workspace-service.js';
 import type { VerificationCodeNotice } from '../src/domain/auth-service.js';
-import type { RuntimeConfigurationCapabilities, RuntimeId } from '../src/domain/types.js';
+import type {
+  ConversationView,
+  HumanPrincipal,
+  RuntimeConfigurationCapabilities,
+  RuntimeId,
+} from '../src/domain/types.js';
 import { SqliteDatabase } from '../src/storage/database.js';
 
 const cleanups: Array<() => void> = [];
@@ -82,7 +87,7 @@ export function testRuntimeConfigurationCapabilities(): RuntimeConfigurationCapa
       },
       {
         id: 'fake-pro', label: 'Fake Pro', description: null,
-        supportedReasoningEfforts: null,
+        supportedReasoningEfforts: ['high'],
       },
     ],
     defaultModelId: 'runtime-default',
@@ -95,4 +100,51 @@ export function testRuntimeConfigurationCapabilities(): RuntimeConfigurationCapa
     ],
     defaultModeId: 'default',
   } as RuntimeConfigurationCapabilities;
+}
+
+export function workspaceGeneral(
+  service: WorkspaceService,
+  principal: HumanPrincipal,
+  workspaceId: string,
+): ConversationView {
+  const conversation = service.listConversations(principal, workspaceId).items.find(
+    (item) => item.scope.type === 'workspace_general',
+  );
+  if (!conversation) throw new Error('Workspace general group is missing.');
+  return conversation;
+}
+
+export function projectMain(
+  service: WorkspaceService,
+  principal: HumanPrincipal,
+  projectId: string,
+): ConversationView {
+  const conversation = service.listProjectConversations(principal, projectId).items.find(
+    (item) => item.scope.type === 'project_group' && item.scope.membershipMode === 'project_all',
+  );
+  if (!conversation) throw new Error('Project main group is missing.');
+  return conversation;
+}
+
+export function authorizeAgentInConversation(
+  service: WorkspaceService,
+  principal: HumanPrincipal,
+  conversation: ConversationView,
+  workspaceMembershipId: string,
+  idempotencyKey: string,
+): ConversationView {
+  const scopeMembershipId = conversation.scope.type === 'project_group'
+    ? service.listProjectMembers(principal, conversation.scope.projectId).items.find(
+      (item) => item.workspaceMembershipId === workspaceMembershipId,
+    )?.projectMembershipId
+    : workspaceMembershipId;
+  if (!scopeMembershipId) throw new Error('Conversation participant has no active scope membership.');
+  service.addConversationParticipant(
+    principal,
+    conversation.id,
+    scopeMembershipId,
+    conversation.revision,
+    idempotencyKey,
+  );
+  return service.getConversation(principal, conversation.id);
 }
