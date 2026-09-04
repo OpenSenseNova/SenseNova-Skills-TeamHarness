@@ -1,3 +1,0 @@
-# MVP includes Threads and defers WorkItems
-
-The MVP delivers the end-to-end Conversation collaboration loop: Conversation Timeline, optional-per-conversation but fully supported Threads, immutable Messages, per-target Agent Mention Outcomes, durable Agent Requests for valid targets, Run/Attempt execution, and ordinary Agent Message publication back to the exact source Discussion Scope. WorkItem, assignment, claim, delegation, Result Submission, Completion Policy, and Review are deferred to a later explicit-work layer. The MVP does not prebuild their storage, commands, projections, or UI; previously confirmed Work decisions remain the future layer's domain baseline.

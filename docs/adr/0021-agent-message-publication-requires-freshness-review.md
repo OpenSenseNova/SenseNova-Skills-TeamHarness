@@ -1,3 +1,0 @@
-# Agent Message publication requires freshness review
-
-An Agent submits an ordinary candidate Message with the Discussion Frontier observed for its exact target Scope. The Workspace atomically appends it only while that frontier is current; otherwise it appends nothing, returns `freshness_review_required` with the exact intervening Messages, and leaves Run and WorkItem state unchanged. The candidate remains a Local Node Held Draft, and after reviewing the delta the Agent may revise, discard, retry unchanged, or use an audited publish-anyway path that preserves the stale candidate; every path still compares the latest frontier actually reviewed by the Agent, as well as identity, permission, scope, capability, and structured-state fencing.

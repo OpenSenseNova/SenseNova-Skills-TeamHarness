@@ -1,0 +1,83 @@
+{
+  "name": "ai-native-collaboration",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A self-hosted workspace for humans and local AI agents to collaborate on conversations, work items, and artifacts.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lgl0980/ai_native_collaboration.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lgl0980/ai_native_collaboration/issues"
+  },
+  "keywords": ["ai-agents", "collaboration", "workspace", "local-first", "sqlite"],
+  "type": "module",
+  "workspaces": [
+    "web"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "npm run package:local-computer && npm run build:api && npm run build --workspace web",
+    "build:api": "tsc -p tsconfig.build.json",
+    "dev": "npm run package:local-computer && concurrently -k -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "tsx src/server.ts",
+    "dev:web": "npm run dev --workspace web",
+    "package:local-computer": "npm --prefix local-computer run package:web",
+    "start": "NODE_ENV=production node dist/server.js",
+    "test": "npm run test:api && npm run test --workspace web",
+    "test:api": "vitest run",
+    "test:integration:backend": "vitest run tests/http-api.test.ts tests/conversation-visibility.test.ts tests/agent-session-window.test.ts tests/artifact-v2.test.ts tests/local-computer-worker.test.ts",
+    "test:regression": "npm run openapi:lint && npm run db:check && npm run typecheck && npm test && npm run build",
+    "check": "npm run openapi:lint && npm run db:check && npm run typecheck && npm test",
+    "openapi:check": "npm run openapi && git diff --exit-code -- docs/contracts/openapi.json web/src/api/generated.ts",
+    "package:check": "node scripts/check-package.mjs",
+    "docs:check": "node scripts/check-docs.mjs",
+    "license:check": "node scripts/check-licenses.mjs --check",
+    "assets:check": "node scripts/check-assets.mjs",
+    "verify:public": "npm run openapi:lint && npm run openapi:check && npm run db:check && npm run typecheck && npm test && npm run docs:check && npm run license:check && npm run assets:check && npm run package:check && npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && npm run typecheck --workspace web",
+    "openapi": "tsx src/cli/generate-openapi.ts && npm run api:types",
+    "api:types": "npm exec --workspace web -- openapi-typescript ../docs/contracts/openapi.json -o src/api/generated.ts",
+    "openapi:lint": "tsx scripts/validate-openapi.ts",
+    "db:check": "tsx scripts/validate-database-schemas.ts",
+    "smoke:codex": "tsx scripts/smoke-runtime.ts codex",
+    "smoke:claude": "tsx scripts/smoke-runtime.ts claude",
+    "smoke:gemini": "tsx scripts/smoke-runtime.ts gemini",
+    "smoke:goose": "tsx scripts/smoke-runtime.ts goose",
+    "smoke:hermes": "tsx scripts/smoke-runtime.ts hermes"
+  },
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "^0.69.0",
+    "@agentclientprotocol/codex-acp": "^1.4.0",
+    "@agentclientprotocol/sdk": "^1.3.0",
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/multipart": "^10.1.1",
+    "@fastify/rate-limit": "^11.2.0",
+    "@fastify/static": "^10.1.3",
+    "@fastify/swagger": "^9.5.1",
+    "@fastify/type-provider-typebox": "^5.2.0",
+    "@hocuspocus/extension-database": "^4.6.0",
+    "@hocuspocus/server": "^4.6.0",
+    "@sinclair/typebox": "^0.34.41",
+    "fastify": "^5.6.1",
+    "mime-types": "^3.0.2",
+    "ws": "^8.21.3",
+    "yjs": "^13.6.32"
+  },
+  "devDependencies": {
+    "@hocuspocus/provider": "^4.6.0",
+    "@redocly/ajv": "8.11.2",
+    "@redocly/openapi-core": "1.34.19",
+    "@types/deep-eql": "^4.0.2",
+    "@types/mime-types": "^3.0.1",
+    "@types/node": "^24.10.1",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.16"
+  }
+}

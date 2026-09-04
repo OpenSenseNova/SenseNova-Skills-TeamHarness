@@ -1,5 +1,0 @@
-# Run terminal closes new Agent Message publication
-
-Run terminal is the authoritative point after which that Run cannot first-publish another Agent-authored Message. Agent Message first publication and the producing Run's terminal transition use one Workspace commit order: publication-first may commit before terminal, while terminal-first rejects the new publication. A recognized idempotent retry of a publication already committed before terminal returns the prior logical result and creates no new Message.
-
-This preserves two distinct truths without creating two authorities: Message existence does not determine Run outcome, but an ended logical execution cannot originate new shared effects. Runtime process exit is only a local signal; normal shutdown settles pending local publication intents before requesting terminal, while cancellation, revocation, timeout, or another forced terminal may close publication first. The model therefore has no separate `RunWritePermission` object or independently mutable publication-open state.
