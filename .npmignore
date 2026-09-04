@@ -1,0 +1,8 @@
+node_modules/
+.data/
+.env
+*.log
+dist/
+web/dist/
+web/public/downloads/
+local-computer/dist/

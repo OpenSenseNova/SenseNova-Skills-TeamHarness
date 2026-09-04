@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { Readable, Writable } from 'node:stream';
 import { resolve } from 'node:path';
 import { agent, methods, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
@@ -109,69 +109,6 @@ function publishThroughTeamctl(): void {
       throw new Error('Artifact review fixture expected the reviewed draft to publish.');
     }
     runTeamctl(['return', 'no-output', '--target', target]);
-    return;
-  }
-  if (mode === 'multi-ppt') {
-    const writerFixture = process.env.FAKE_ACP_PPT_WRITER_PATH;
-    const reviewedFixture = process.env.FAKE_ACP_PPT_REVIEWED_PATH;
-    if (!writerFixture || !reviewedFixture) {
-      throw new Error('Multi-PPT fixture paths are required.');
-    }
-    const artifactPath = resolve(process.cwd(), 'multi-agent-ppt-e2e.pptx');
-    if (/\[role=deck-builder\]/iu.test(attentionObjective)) {
-      copyFileSync(writerFixture, artifactPath);
-      const publication = runTeamctl([
-        'artifact', 'publish', '--file', artifactPath, '--name', 'multi-agent-ppt-e2e.pptx',
-        '--type', 'file',
-      ]);
-      if ((publication.result as { status?: string } | undefined)?.status !== 'published') {
-        throw new Error('Deck Builder did not publish the initial PowerPoint.');
-      }
-      const artifactId = String((publication.result as { artifact?: { id?: unknown } }).artifact?.id ?? '');
-      if (!artifactId) throw new Error('Deck Builder publication did not return an Artifact id.');
-      runTeamctl(['message', 'check', '--target', target]);
-      runTeamctl([
-        'message', 'send', '--target', target,
-        '--body', 'Deck Builder published the initial PowerPoint.',
-        '--artifact-id', artifactId,
-      ]);
-      return;
-    }
-
-    const referencedArtifactId = discussionMessages.flatMap((message) => message.artifactReferences ?? [])
-      .map((reference) => reference.artifactId).find(Boolean);
-    if (!referencedArtifactId) throw new Error('Deck Reviewer did not receive a PowerPoint Artifact reference.');
-    const read = runTeamctl(['artifact', 'read', referencedArtifactId]);
-    const materialized = read.result as {
-      artifact?: { id?: string; name?: string; artifactType?: string; stateHash?: string };
-      filePath?: string;
-    } | undefined;
-    if (
-      !materialized?.artifact?.id
-      || materialized.artifact.name !== 'multi-agent-ppt-e2e.pptx'
-      || materialized.artifact.artifactType !== 'file'
-      || !materialized.artifact.stateHash
-      || !materialized.filePath
-      || readFileSync(materialized.filePath).subarray(0, 2).toString('utf8') !== 'PK'
-    ) {
-      throw new Error('Deck Reviewer did not materialize a valid PowerPoint baseline.');
-    }
-    copyFileSync(reviewedFixture, artifactPath);
-    const publication = runTeamctl([
-      'artifact', 'publish', '--file', artifactPath,
-      '--name', materialized.artifact.name, '--type', 'file',
-      '--artifact-id', materialized.artifact.id,
-      '--base-hash', materialized.artifact.stateHash,
-    ]);
-    if ((publication.result as { status?: string } | undefined)?.status !== 'published') {
-      throw new Error('Deck Reviewer did not publish the reviewed PowerPoint.');
-    }
-    runTeamctl(['message', 'check', '--target', target]);
-    runTeamctl([
-      'message', 'send', '--target', target,
-      '--body', 'Deck Reviewer published the approved PowerPoint.',
-      '--artifact-id', materialized.artifact.id,
-    ]);
     return;
   }
   if (mode !== 'multi-artifact') throw new Error(`Unsupported FAKE_ACP_USE_TEAMCTL mode ${mode}.`);

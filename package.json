@@ -1,6 +1,7 @@
 {
   "name": "ai-native-collaboration",
-  "version": "1.0.0",
+  "version": "0.1.0",
+  "private": true,
   "description": "A self-hosted workspace for humans and local AI agents to collaborate on conversations, work items, and artifacts.",
   "license": "MIT",
   "repository": {
@@ -31,6 +32,12 @@
     "test:integration:backend": "vitest run tests/http-api.test.ts tests/conversation-visibility.test.ts tests/agent-session-window.test.ts tests/artifact-v2.test.ts tests/local-computer-worker.test.ts",
     "test:regression": "npm run openapi:lint && npm run db:check && npm run typecheck && npm test && npm run build",
     "check": "npm run openapi:lint && npm run db:check && npm run typecheck && npm test",
+    "openapi:check": "npm run openapi && git diff --exit-code -- docs/contracts/openapi.json web/src/api/generated.ts",
+    "package:check": "node scripts/check-package.mjs",
+    "docs:check": "node scripts/check-docs.mjs",
+    "license:check": "node scripts/check-licenses.mjs --check",
+    "assets:check": "node scripts/check-assets.mjs",
+    "verify:public": "npm run openapi:lint && npm run openapi:check && npm run db:check && npm run typecheck && npm test && npm run docs:check && npm run license:check && npm run assets:check && npm run package:check && npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm run typecheck --workspace web",
     "openapi": "tsx src/cli/generate-openapi.ts && npm run api:types",
     "api:types": "npm exec --workspace web -- openapi-typescript ../docs/contracts/openapi.json -o src/api/generated.ts",

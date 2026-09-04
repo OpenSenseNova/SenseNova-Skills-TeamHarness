@@ -1,0 +1,24 @@
+name: Pull request policy
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate pull request title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf '%s\n' "$PR_TITLE" | grep -Eq '^(feat|fix|docs|refactor|test|build|ci|chore|perf|revert)(\([^)]*\))?!?: .+'
+      - name: Require public behavior summary
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n' "$PR_BODY" | grep -Eiq '(user-visible|用户可见|validation|验证命令)'

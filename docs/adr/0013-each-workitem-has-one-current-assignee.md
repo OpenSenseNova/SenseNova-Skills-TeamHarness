@@ -1,3 +1,0 @@
-# Each WorkItem has one current assignee
-
-A WorkItem has at most one current Work Assignee, whether assigned explicitly or established by an Agent Claim. The WorkItem also retains the current assignment kind and a monotonically increasing assignment revision: kind governs whether an Agent may self-release, while revision fences delayed commands from an earlier assignment, including an earlier assignment to the same Agent. Responsibility changes remain auditable facts rather than a separate Assignment Tenure object. Parallel responsibility is explicitly modeled through related or Child WorkItems, while reviewers and conversational Agent Requests remain separate from assignment; mentioning multiple Agents never changes WorkItem ownership or implicitly creates work.

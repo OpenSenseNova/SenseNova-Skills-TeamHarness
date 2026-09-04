@@ -1,5 +1,0 @@
-# Workspace Membership is an irreversible participation tenure
-
-Human and Agent identities remain stable, while each continuous period in a Workspace is a distinct Workspace Membership. At most one Membership is active per actor in the same Workspace; removal is terminal and re-entry to that Workspace creates a new Membership. A Human may simultaneously have active Memberships in different Workspaces, while an Agent remains confined to its owning Workspace. Workspace Channel access derives from current Workspace Membership; Project Channel access additionally derives from current Project Membership; DM and execution grants reference exact Memberships. Shared history records both actor and membership-at-time.
-
-This makes Membership identity the participation fence. Re-entry restores public scope-derived Channel access but does not revive private Channel audience, fixed DM references, or old execution grants. The cost is that one actor may have multiple historical Memberships in a Workspace, which queries and audit must distinguish.

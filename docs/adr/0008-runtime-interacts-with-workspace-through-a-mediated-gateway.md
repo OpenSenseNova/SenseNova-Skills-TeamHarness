@@ -1,3 +1,0 @@
-# Runtime interacts with Workspace through a mediated gateway
-
-A Runtime may actively query shared context, publish ordinary Messages, create permitted Child WorkItems, address other Agents, and issue explicitly allowed WorkItem or Review commands while executing a Run, but every operation passes through a Workspace Interaction Gateway bound to the current Agent and execution authority. Natural-language output never changes structured state. CLI, MCP, and future mechanisms are adapters to this protocol-neutral capability boundary; the Runtime receives neither long-lived Workspace credentials nor authority to assert its own identity, scope, or permissions.

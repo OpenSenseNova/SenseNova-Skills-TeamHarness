@@ -1,6 +1,6 @@
 {
   "name": "@ai-native-collaboration/local-computer",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Independent Local Computer client for AI-Native Collaboration",
   "license": "MIT",
   "type": "module",
@@ -10,7 +10,8 @@
   "files": [
     "dist",
     "schema",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/sync-schema.mjs",
