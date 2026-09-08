@@ -6,10 +6,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lgl0980/ai_native_collaboration.git"
+    "url": "git+https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness.git"
   },
   "bugs": {
-    "url": "https://github.com/lgl0980/ai_native_collaboration/issues"
+    "url": "https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness/issues"
   },
   "keywords": ["ai-agents", "collaboration", "workspace", "local-first", "sqlite"],
   "type": "module",

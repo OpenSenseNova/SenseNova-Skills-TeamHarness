@@ -21,8 +21,8 @@ AI-Native Collaboration 是一个面向开发者自托管的协作工作区，�
 环境要求：Node.js 24 和 npm。服务端从源码运行；不提供 Docker 镜像和 npm 包。
 
 ```bash
-git clone https://github.com/lgl0980/ai_native_collaboration.git
-cd ai_native_collaboration
+git clone https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness.git
+cd SenseNova-Skills-TeamHarness
 cp .env.example .env
 npm ci
 npm run dev

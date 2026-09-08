@@ -5,8 +5,8 @@ AI-Native Collaboration 使用 Node.js 24 和 npm 从源码运行。完成身份
 ## 服务端
 
 ```bash
-git clone https://github.com/lgl0980/ai_native_collaboration.git
-cd ai_native_collaboration
+git clone https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness.git
+cd SenseNova-Skills-TeamHarness
 cp .env.example .env
 npm ci
 npm run dev

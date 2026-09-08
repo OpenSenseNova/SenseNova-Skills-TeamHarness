@@ -5,8 +5,8 @@ AI-Native Collaboration is run from source with Node.js 24 and npm. Use a truste
 ## Server
 
 ```bash
-git clone https://github.com/lgl0980/ai_native_collaboration.git
-cd ai_native_collaboration
+git clone https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness.git
+cd SenseNova-Skills-TeamHarness
 cp .env.example .env
 npm ci
 npm run dev

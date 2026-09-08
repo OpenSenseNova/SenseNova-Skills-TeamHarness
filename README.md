@@ -21,8 +21,8 @@ Create a Workspace, add a Project or Conversation, configure an Agent and its lo
 Requirements: Node.js 24 and npm. The server runs from source; Docker images and npm packages are not provided.
 
 ```bash
-git clone https://github.com/lgl0980/ai_native_collaboration.git
-cd ai_native_collaboration
+git clone https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness.git
+cd SenseNova-Skills-TeamHarness
 cp .env.example .env
 npm ci
 npm run dev
