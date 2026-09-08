@@ -8746,12 +8746,18 @@ export class WorkspaceService {
     dedupeKey: string,
     timestamp: number,
   ): void {
+    // The (workspace_id, topic, dedupe_key) UNIQUE index makes this an
+    // at-most-once outbox enqueue: a duplicate logical event must be a silent
+    // no-op, never a constraint error. Without ON CONFLICT the plain INSERT
+    // would throw, and the surrounding idempotent() wrapper would surface it as
+    // CONSTRAINT_VIOLATION (409), rolling back the entire (unrelated) command.
     this.workspaceDatabase.raw
       .prepare(
         `INSERT INTO delivery_jobs (
            id, workspace_id, topic, aggregate_type, aggregate_id, payload_json,
            dedupe_key, state, attempts, next_attempt_at, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+         ON CONFLICT (workspace_id, topic, dedupe_key) DO NOTHING`,
       )
       .run(newId(), workspaceId, topic, aggregateType, aggregateId, canonicalJson(payload), dedupeKey, timestamp, timestamp);
   }
