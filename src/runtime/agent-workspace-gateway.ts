@@ -718,6 +718,26 @@ export class AgentWorkspaceGateway {
         result: { artifact: result, mediaType: result.mediaType, filePath },
       };
     }
+    if (raw.kind === 'resource.list') {
+      invariant(this.activeProjectId, 'PROJECT_REQUIRED', 'Resource listing requires an active Project.', 409);
+      const result = await this.api.request<{ items: Array<{ resourceId: string; name: string; path: string; kind: string; mediaType: string | null; byteLength: number | null }> }>(`/v1/computers/self/agents/${this.agentId}/projects/${this.activeProjectId}/resources`, { method: 'GET' });
+      return { kind: raw.kind, result };
+    }
+    if (raw.kind === 'resource.read') {
+      invariant(typeof raw.resourceId === 'string', 'INVALID_WORKSPACE_COMMAND', 'resource read requires a Resource ID.', 400);
+      invariant(this.activeProjectId, 'PROJECT_REQUIRED', 'Resource reads require an active Project.', 409);
+      const result = await this.api.request<{ resource: { resourceId: string; name: string; path: string; kind: string; mediaType: string | null; byteLength: number | null }; contentBase64?: string }>(`/v1/computers/self/agents/${this.agentId}/projects/${this.activeProjectId}/resources/${raw.resourceId}`, { method: 'GET' });
+      invariant(result.resource.kind === 'file' && result.contentBase64 !== undefined,
+        'RESOURCE_IS_DIRECTORY', 'Only file resources contain readable content.', 409);
+      const resourceDirectory = resolve(this.workingDirectory, 'resources');
+      mkdirSync(resourceDirectory, { recursive: true, mode: 0o700 });
+      const filePath = resolve(resourceDirectory, `${result.resource.resourceId}-${basename(result.resource.name)}`);
+      writeFileSync(filePath, Buffer.from(result.contentBase64, 'base64'), { mode: 0o600 });
+      return {
+        kind: raw.kind,
+        result: { resource: result.resource, mediaType: result.resource.mediaType, filePath },
+      };
+    }
     if (raw.kind === 'artifact.draft_get') {
       invariant(typeof raw.draftId === 'string', 'INVALID_WORKSPACE_COMMAND', 'artifact draft get requires draftId.', 400);
       const draft = this.heldArtifactById(raw.draftId);
@@ -1306,6 +1326,11 @@ if (args[0] === 'work-item' && args[1] === 'list') {
 } else if (args[0] === 'artifact' && args[1] === 'read') {
   if (!args[2] || args[2].startsWith('--')) throw new Error('artifact read requires an Artifact ID.');
   command = { kind: 'artifact.read', artifactId: args[2] };
+} else if (args[0] === 'resource' && args[1] === 'list') {
+  command = { kind: 'resource.list' };
+} else if (args[0] === 'resource' && args[1] === 'read') {
+  if (!args[2] || args[2].startsWith('--')) throw new Error('resource read requires a Resource ID.');
+  command = { kind: 'resource.read', resourceId: args[2] };
 } else if (args[0] === 'artifact' && args[1] === 'draft' && args[2] === 'get') {
   command = { kind: 'artifact.draft_get', draftId: required('draft-id') };
 } else if (args[0] === 'artifact' && args[1] === 'draft' && args[2] === 'discard') {
@@ -1348,7 +1373,7 @@ if (args[0] === 'work-item' && args[1] === 'list') {
     };
   }
 } else {
-  process.stderr.write('Usage:\\n  teamctl artifact publish --file <path> [--file-name <name>] [--artifact-id <id> --expected-latest-version-id <version-id>] [--artifact-name <name>] [--artifact-path <path>] [--parent-version-id <version-id> ...] [--source-resource-ref <json> ...] [--draft-id <id>]\\n  teamctl artifact publish --send-draft --draft-id <id> [--anyway]\\n  teamctl artifact read <artifact-id>\\n  teamctl artifact draft get --draft-id <id>\\n  teamctl artifact draft discard --draft-id <id>\\n');
+  process.stderr.write('Usage:\\n  teamctl resource list\\n  teamctl resource read <resource-id>\\n  teamctl artifact publish --file <path> [--file-name <name>] [--artifact-id <id> --expected-latest-version-id <version-id>] [--artifact-name <name>] [--artifact-path <path>] [--parent-version-id <version-id> ...] [--source-resource-ref <json> ...] [--draft-id <id>]\\n  teamctl artifact publish --send-draft --draft-id <id> [--anyway]\\n  teamctl artifact read <artifact-id>\\n  teamctl artifact draft get --draft-id <id>\\n  teamctl artifact draft discard --draft-id <id>\\n');
   process.exit(2);
 }
 await send(command);
