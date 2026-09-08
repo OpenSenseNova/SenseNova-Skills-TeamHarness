@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in the public MVP.
+description: Report a reproducible problem in the project.
 title: "bug: "
 labels: [bug]
 body:

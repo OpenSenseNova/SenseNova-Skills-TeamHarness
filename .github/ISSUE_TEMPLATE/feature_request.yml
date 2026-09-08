@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest a focused improvement to the public MVP.
+description: Suggest a focused improvement to the project.
 title: "feat: "
 labels: [enhancement]
 body:

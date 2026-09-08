@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve this self-hosted MVP. Keep changes focused on public behavior and preserve the existing HTTP API, Runtime semantics, and SQLite schema baseline unless a separate compatibility decision is explicitly approved.
+Thanks for helping improve this self-hosted project. Keep changes focused on public behavior and preserve the existing HTTP API, Runtime semantics, and SQLite schema baseline unless a separate compatibility decision is explicitly approved.
 
 ## Development
 
@@ -12,7 +12,7 @@ npm run verify:public
 
 Use Node.js 24. The OpenAPI document at `docs/contracts/openapi.json` is the public HTTP contract; after changing a route, run `npm run openapi` and review both the contract and generated Web client types. Validate schema changes with `npm run db:check`. Do not add private design notes, credentials, databases, logs, or generated build output to the repository.
 
-Public documentation is intentionally small: README, installation, contribution, security, MVP, product overview, Local Computer reference, changelog, license, and the OpenAPI contract. Explain extension points in this file or its Chinese counterpart rather than adding internal architecture dossiers.
+Public documentation is intentionally small: README, installation, contribution, security, product overview, Local Computer reference, changelog, license, and the OpenAPI contract. Explain extension points in this file or its Chinese counterpart rather than adding internal architecture dossiers.
 
 ## Pull requests
 

@@ -1,6 +1,6 @@
 # 贡献指南
 
-感谢你帮助改进这个自托管 MVP。请围绕公开行为提交小而明确的变更；除非另有兼容性决策，不要改变现有 HTTP API、Runtime 语义或 SQLite schema 基线。
+感谢你帮助改进这个自托管项目。请围绕公开行为提交小而明确的变更；除非另有兼容性决策，不要改变现有 HTTP API、Runtime 语义或 SQLite schema 基线。
 
 ## 开发
 
@@ -12,7 +12,7 @@ npm run verify:public
 
 使用 Node.js 24。`docs/contracts/openapi.json` 是公开 HTTP 契约；修改路由后运行 `npm run openapi`，同时检查契约和生成的 Web client 类型。Schema 变化使用 `npm run db:check` 校验。不要把私有设计笔记、凭据、数据库、日志或构建产物加入仓库。
 
-公开文档保持精简：README、安装、贡献、安全、MVP、产品介绍、Local Computer 命令参考、变更记录、许可证和 OpenAPI 契约。扩展说明写在本文件或英文版本中，不新增内部架构专题文档。
+公开文档保持精简：README、安装、贡献、安全、产品介绍、Local Computer 命令参考、变更记录、许可证和 OpenAPI 契约。扩展说明写在本文件或英文版本中，不新增内部架构专题文档。
 
 ## Pull Request
 

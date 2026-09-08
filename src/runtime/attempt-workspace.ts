@@ -7,7 +7,7 @@ import { invariant } from '../lib/errors.js';
  * Creates the disposable local directory for one Runtime Attempt.
  *
  * Project repositories and shared Working Copies are intentionally outside
- * the MVP. Every attempt receives an isolated scratch directory and cleanup
+ * the current scope. Every attempt receives an isolated scratch directory and cleanup
  * is fenced to that directory.
  */
 export class AttemptWorkspaceManager {

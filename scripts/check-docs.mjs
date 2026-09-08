@@ -7,7 +7,7 @@ const publicDocs = [
   'README.md', 'README_CN.md', 'INSTALL.md', 'INSTALL_CN.md',
   'CONTRIBUTING.md', 'CONTRIBUTING_CN.md', 'SECURITY.md', 'SECURITY_CN.md',
   'CHANGELOG.md', 'LICENSE', '.env.example', 'THIRD_PARTY_NOTICES.md',
-  'docs/MVP.md', 'docs/PRODUCT_OVERVIEW.md', 'docs/contracts/openapi.json',
+  'docs/PRODUCT_OVERVIEW.md', 'docs/contracts/openapi.json',
   'local-computer/README.md', 'local-computer/LICENSE',
 ];
 const publicSet = new Set(publicDocs);
