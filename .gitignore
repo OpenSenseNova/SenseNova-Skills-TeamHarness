@@ -1,20 +1,48 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
 web/dist/
+local-computer/dist/
 *.tsbuildinfo
-.DS_Store
+
+# Generated / packaged artifacts (produced from source)
+local-computer/schema/
+web/public/downloads/*.tgz
+
+# Runtime artifact store (content-addressed, generated at runtime)
+artifacts/
+
+# Runtime data & local state
+.data/
+.local-data/
+.tmp/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+coverage/
+
+# Environment & secrets
 .env
 .env.*
 !.env.example
 !.env.example.local
+*.pem
+*.key
+
+# Logs & caches
 *.log
-coverage/
-.data/
-*.sqlite
-*.sqlite-shm
-*.sqlite-wal
-artifacts/runtime-smoke/
-local-computer/schema/
-web/public/downloads/*.tgz
-.local-data/
-.tmp/
+npm-debug.log*
+yarn-error.log*
+.eslintcache
+
+# Editor & tooling
+.claude/
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
