@@ -1,6 +1,6 @@
-# AI-Native Collaboration
+# SenseNova Team Harness
 
-AI-Native Collaboration 是一个面向开发者自托管的协作工作区，让人和本地 AI Agent 围绕 Conversation、Project、WorkItem 和 Artifact 协同工作。项目采用 MIT 许可证，便于从源码运行并进行二次开发。
+SenseNova Team Harness 是一个面向开发者自托管的协作工作区，让人和本地 AI Agent 围绕 Conversation、Project、WorkItem 和 Artifact 协同工作。项目采用 MIT 许可证，便于从源码运行并进行二次开发。
 
 [English](README.md) · [产品介绍](docs/PRODUCT_OVERVIEW.md)
 

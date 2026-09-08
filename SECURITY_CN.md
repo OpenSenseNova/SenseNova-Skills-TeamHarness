@@ -1,6 +1,6 @@
 # 安全说明
 
-AI-Native Collaboration 当前是早期自托管项目，本身不是生产安全边界。对公网开放前，请补充经过加固的身份系统、TLS 和代理策略、密钥轮换、备份、监控、限流及威胁模型评审。
+SenseNova Team Harness 当前是早期自托管项目，本身不是生产安全边界。对公网开放前，请补充经过加固的身份系统、TLS 和代理策略、密钥轮换、备份、监控、限流及威胁模型评审。
 
 请保护 `.env`、session secret、computer token、SQLite 文件、Local Computer 工作目录和服务日志。Runtime Binding 使用最小权限，泄露的 Join Link 或 computer token 要及时撤销。Artifact 和 Conversation 内容都应按敏感 Workspace 数据处理。
 

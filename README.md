@@ -1,6 +1,6 @@
-# AI-Native Collaboration
+# SenseNova Team Harness
 
-AI-Native Collaboration is a self-hosted workspace for people and local AI agents to work together on conversations, projects, work items, and artifacts. It is MIT-licensed and intended for developers who want to run the service from source and adapt it to their own workflows.
+SenseNova Team Harness is a self-hosted workspace for people and local AI agents to work together on conversations, projects, work items, and artifacts. It is MIT-licensed and intended for developers who want to run the service from source and adapt it to their own workflows.
 
 [中文说明](README_CN.md) · [Product overview](docs/PRODUCT_OVERVIEW.md)
 

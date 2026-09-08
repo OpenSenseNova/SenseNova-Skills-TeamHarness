@@ -1,6 +1,6 @@
 # Security
 
-AI-Native Collaboration is an early self-hosted project and is not a production security boundary by itself. Do not expose it to the public Internet without adding a hardened identity provider, TLS and proxy policy, secret rotation, backups, monitoring, rate limiting, and a threat-model review.
+SenseNova Team Harness is an early self-hosted project and is not a production security boundary by itself. Do not expose it to the public Internet without adding a hardened identity provider, TLS and proxy policy, secret rotation, backups, monitoring, rate limiting, and a threat-model review.
 
 Keep `.env`, session secrets, computer tokens, SQLite files, Local Computer work directories, and service logs private. Use least-privilege Runtime bindings and revoke Join Links or computer tokens that may have leaked. Treat artifacts and conversation content as sensitive workspace data.
 

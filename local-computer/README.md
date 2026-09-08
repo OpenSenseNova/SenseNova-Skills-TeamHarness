@@ -1,6 +1,6 @@
 # ANC Local Computer
 
-Local Computer 是连接 AI-Native Collaboration 服务并在本机运行 ACP Agent 的命令行客户端。它负责本机 Runtime 凭据、工作目录和服务生命周期；服务端只保存共享协作事实。
+Local Computer 是连接 SenseNova Team Harness 服务并在本机运行 ACP Agent 的命令行客户端。它负责本机 Runtime 凭据、工作目录和服务生命周期；服务端只保存共享协作事实。
 
 ## 安装
 

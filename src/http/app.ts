@@ -1046,7 +1046,7 @@ export async function buildApp(service: WorkspaceService, options: BuildAppOptio
     openapi: {
       openapi: '3.1.0',
       info: {
-        title: 'AI Native Collaboration API',
+        title: 'SenseNova Team Harness API',
         version: '1.0.0',
         description: 'Workspace authority, pull-based Agent Inbox, privacy grants, and mediated local runtime execution.',
       },

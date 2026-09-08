@@ -1,6 +1,6 @@
 # Installation
 
-AI-Native Collaboration is run from source with Node.js 24 and npm. Use a trusted development network until you have added the identity, secret rotation, backup, monitoring, and rate-limit controls required by your deployment.
+SenseNova Team Harness is run from source with Node.js 24 and npm. Use a trusted development network until you have added the identity, secret rotation, backup, monitoring, and rate-limit controls required by your deployment.
 
 ## Server
 

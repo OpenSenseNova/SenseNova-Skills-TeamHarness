@@ -13,7 +13,7 @@ function AuthFrame({ children, title, subtitle }: { children: React.ReactNode; t
   return (
     <main className="auth-page">
       <ThemeToggleButton className="auth-theme-toggle" compact />
-      <div className="auth-brand"><RobotOutlined /><span>AI Native Collaboration</span></div>
+      <div className="auth-brand"><RobotOutlined /><span>SenseNova Team Harness</span></div>
       <Card className="auth-card" variant="borderless">
         <Text className="auth-kicker">HUMAN + LOCAL AGENT</Text>
         <Title level={2}>{title}</Title>

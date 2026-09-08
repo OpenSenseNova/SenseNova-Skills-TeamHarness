@@ -1,7 +1,7 @@
 {
   "name": "@ai-native-collaboration/local-computer",
   "version": "0.1.0",
-  "description": "Independent Local Computer client for AI-Native Collaboration",
+  "description": "Independent Local Computer client for SenseNova Team Harness",
   "license": "MIT",
   "type": "module",
   "bin": {

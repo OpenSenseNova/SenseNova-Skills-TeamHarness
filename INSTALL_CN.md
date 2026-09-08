@@ -1,6 +1,6 @@
 # 安装指南
 
-AI-Native Collaboration 使用 Node.js 24 和 npm 从源码运行。完成身份系统、密钥轮换、备份、监控和限流等安全措施前，请只在可信开发网络中使用。
+SenseNova Team Harness 使用 Node.js 24 和 npm 从源码运行。完成身份系统、密钥轮换、备份、监控和限流等安全措施前，请只在可信开发网络中使用。
 
 ## 服务端
 
