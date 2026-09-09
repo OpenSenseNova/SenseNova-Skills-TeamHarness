@@ -242,6 +242,11 @@ export class LocalComputerWorker {
     );
     const boundGateway = await gateway.prepare();
     const launch = requireLocalRuntimeLaunch(input.runtimeId, this.detections);
+    // Honor the binding's requested permission mode. `bypassPermissions` grants
+    // the Runtime full tool access (needed to write a local file before
+    // `teamctl artifact publish` can read it); any other mode keeps the
+    // restrictive teamctl-only bridge.
+    const permissionMode = input.runtimeConfiguration.mode;
     const activity = new AgentActivityReporter(this.options.api, agentId, this.options.onLog);
     const open = (priorSessionId?: string) => this.integration.openExecution({
       ...launch,
@@ -255,7 +260,8 @@ export class LocalComputerWorker {
       env: { ...launch.env, ...boundGateway.env },
       onEvent: () => {},
       onActivity: (event) => activity.record(event),
-      requestPermission: async (permission) => localAgentPermissionDecision(permission),
+      requestPermission: async (permission) =>
+        permissionMode === 'bypassPermissions' ? 'allow_once' : localAgentPermissionDecision(permission),
     });
     let controller: RuntimeExecutionController;
     try {
