@@ -121,9 +121,9 @@ npm run build
 
 Review authentication, network exposure, secret storage, backups, and local-agent permissions before using the project beyond a trusted development network.
 
-- [Installation](INSTALL.md) · [Chinese installation guide](INSTALL_CN.md)
-- [Contributing](CONTRIBUTING.md) · [Chinese contributing guide](CONTRIBUTING_CN.md)
-- [Security](SECURITY.md) · [Chinese security guide](SECURITY_CN.md)
+- [Installation](INSTALL.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
 - [OpenAPI contract](docs/contracts/openapi.json)
 - [Changelog](CHANGELOG.md)
 
