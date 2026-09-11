@@ -12,12 +12,26 @@ const undocumented = binaries.filter((filePath) => !notices.includes(filePath));
 if (undocumented.length > 0) {
   throw new Error(`Tracked binary assets need a license review in THIRD_PARTY_NOTICES.md: ${undocumented.join(', ')}`);
 }
+
+const secretPattern = '(BEGIN (RSA|OPENSSH) PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})';
+function checkSecretsWithGitGrep() {
+  try {
+    execFileSync('git', ['grep', '-n', '-I', '-E', secretPattern], {
+      cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    throw new Error('Potential secret material found in tracked files.');
+  } catch (error) {
+    if (error?.status !== 1) throw error;
+  }
+}
+
 try {
-  execFileSync('rg', ['-n', '-I', '--hidden', '--glob', '!.git/**', '--glob', '!node_modules/**', '--glob', '!dist/**', '--glob', '!web/dist/**', '--glob', '!local-computer/dist/**', '(BEGIN (RSA|OPENSSH) PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})', '.'], {
+  execFileSync('rg', ['-n', '-I', '--hidden', '--glob', '!.git/**', '--glob', '!node_modules/**', '--glob', '!dist/**', '--glob', '!web/dist/**', '--glob', '!local-computer/dist/**', secretPattern, '.'], {
     cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
   });
   throw new Error('Potential secret material found in tracked files.');
 } catch (error) {
-  if (error?.status !== 1) throw error;
+  if (error?.code === 'ENOENT') checkSecretsWithGitGrep();
+  else if (error?.status !== 1) throw error;
 }
 process.stdout.write(`Public asset and secret checks valid: ${binaries.length} tracked binary assets reviewed.\n`);

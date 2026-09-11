@@ -1,8 +1,22 @@
 # SenseNova Team Harness
 
-SenseNova Team Harness 是一个**自托管的团队协作工作区**，让人和本地 AI Agent 围绕同一份工作协同：讨论、待办、AI 执行和最终成果都放在同一个空间里，而不是散落在个人聊天窗口、文档和各种工具里。把「提出问题 → 分配工作 → 持续推进 → 交付成果」连成一条完整、可审计的协作链。项目采用 MIT 许可证，便于从源码运行并进行二次开发。
+[![CI](https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness/actions/workflows/ci.yml)
+[![项目状态：早期开发](https://img.shields.io/badge/status-early%20development-f59e0b)](#项目状态)
+[![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-339933?logo=nodedotjs&logoColor=white)](package.json)
+[![OpenAPI 3](https://img.shields.io/badge/API-OpenAPI%203-6BA539?logo=openapiinitiative&logoColor=white)](docs/contracts/openapi.json)
+[![许可证：MIT](https://img.shields.io/github/license/OpenSenseNova/SenseNova-Skills-TeamHarness)](LICENSE)
 
 [English](README.md) · [产品介绍](docs/PRODUCT_OVERVIEW.md)
+
+## 项目概览
+
+SenseNova Team Harness 是一个**自托管的团队协作工作区**，让人和本地 AI Agent 围绕同一份工作协同：讨论、待办、AI 执行和最终成果都放在同一个空间里，而不是散落在个人聊天窗口、文档和各种工具里。把「提出问题 → 分配工作 → 持续推进 → 交付成果」连成一条完整、可审计的协作链。项目采用 MIT 许可证，便于从源码运行并进行二次开发。
+
+## AI 协作架构
+
+![SenseNova Team Harness AI 协作架构图](assets/sensenova-team-harness-architecture.png)
+
+在会话中提及 Agent 或指派 WorkItem 后，服务会为绑定的 Local Computer 生成 Inbox 触发。Local Computer 创建或恢复 ACP Session，通过限定范围的 `teamctl` 网关让 Agent 访问团队上下文，同时把文件、凭据和工具留在成员电脑上。通过校验的消息和 Artifact 版本再经 API 回到 Workspace，成为团队共享、可复核的协作事实。
 
 ## 为什么需要它
 
@@ -33,7 +47,7 @@ SenseNova Team Harness 是一个**自托管的团队协作工作区**，让人�
 ## 工作方式
 
 1. 创建 **Workspace**，通过可撤销的 Join Link 邀请成员。
-2. 加入一个 **Project**，配置 **Agent**，并为其绑定一台已上线的 **Local Computer** Runtime。
+2. 添加一个 **Project**，配置 **Agent**，并为其绑定一台已上线的 **Local Computer** Runtime。
 3. 在 Workspace 或 Project 的 **Conversation** 中提及 `@Agent`，或创建 **WorkItem** 指派负责人。
 4. Local Computer 在本地运行 Agent；Agent 读取请求和 Inbox 上下文后，用消息回复，或通过 HTTP API 发布 / 更新 **Artifact**。
 5. 团队在任务看板和 Artifact 版本历史中查看进展、负责人和最终成果。
@@ -46,6 +60,19 @@ SenseNova Team Harness 是一个**自托管的团队协作工作区**，让人�
 - **软件研发** —— 理解需求、分析代码、排查问题、生成测试和整理技术文档。
 - **内容与设计** —— 协作完成文章、脚本、活动方案和多版本内容。
 - **跨角色项目** —— 多个成员和多个 AI 围绕同一目标分工推进，由人在关键节点验收。
+
+## 项目状态
+
+SenseNova Team Harness 目前处于早期自托管开发阶段。仓库已经包含运行并检查完整协作闭环所需的源码；下表同时列出当前公开范围，避免把尚未提供的能力误认为可用。
+
+| 领域 | 当前状态 |
+| --- | --- |
+| **协作界面** | 提供 React Web 应用与 Fastify API，覆盖 Workspace、Project、Conversation、Agent、WorkItem 和版本化 Artifact。 |
+| **Agent 执行** | Local Computer 提供 ACP Runtime 检测、持久 Session、限定范围的 `teamctl` 操作，以及 Codex、Claude、Gemini、Goose、Hermes 和通用 ACP 命令的 Runtime 配置。实际可用性取决于绑定电脑是否已安装并完成认证。 |
+| **数据与契约** | 使用 SQLite 保存 workspace/local-node 数据，使用内容寻址文件保存 Artifact，并维护生成的 OpenAPI 契约。 |
+| **验证流程** | CI 通过 `npm run verify:public` 执行 API/schema 校验、类型检查、后端与 Web 测试、公开文档检查、打包检查和生产构建。 |
+| **分发方式** | 服务端从源码运行；Local Computer 压缩包可在本地构建，并在版本标签触发的 GitHub Release 中作为附件发布。当前没有 Docker 镜像、原生安装器或 npm registry 包。 |
+| **部署范围** | 面向受信任的开发网络；生产加固、部署方案、备份、监控和 schema 迁移仍需部署方自行完成。 |
 
 ## 快速开始
 
@@ -86,7 +113,7 @@ npm run build
 
 ## 文档与范围
 
-这是一个早期自托管项目，本身不是生产安全边界。将服务暴露到非信任网络前，请自行评估认证、网络边界、密钥存储、备份和本地 Agent 权限。当前不提供生产部署方案、Docker 镜像、原生安装器、npm registry 包或 schema 迁移层。
+将服务暴露到非信任网络前，请自行评估认证、网络边界、密钥存储、备份和本地 Agent 权限。
 
 - [产品介绍](docs/PRODUCT_OVERVIEW.md)
 - [安装](INSTALL_CN.md) · [Installation](INSTALL.md)
