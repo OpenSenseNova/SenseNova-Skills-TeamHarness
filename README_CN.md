@@ -1,20 +1,26 @@
-# SenseNova Team Harness
+<div align="center">
 
-[![CI](https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness/actions/workflows/ci.yml)
-[![项目状态：早期开发](https://img.shields.io/badge/status-early%20development-f59e0b)](#项目状态)
-[![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-339933?logo=nodedotjs&logoColor=white)](package.json)
-[![OpenAPI 3](https://img.shields.io/badge/API-OpenAPI%203-6BA539?logo=openapiinitiative&logoColor=white)](docs/contracts/openapi.json)
-[![许可证：MIT](https://img.shields.io/github/license/OpenSenseNova/SenseNova-Skills-TeamHarness)](LICENSE)
+<h1>SenseNova Team Harness</h1>
 
-[English](README.md) · [产品介绍](docs/PRODUCT_OVERVIEW.md)
+<p><a href="README.md">English</a> · <a href="README_CN.md">简体中文</a> · <a href="docs/PRODUCT_OVERVIEW.md">产品介绍</a></p>
+
+<p><img src="assets/sensenova-team-harness-architecture.png" alt="SenseNova Team Harness AI 协作架构图" width="100%"></p>
+
+<p>
+  <a href="https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness/actions/workflows/ci.yml"><img src="https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="#项目状态"><img src="https://img.shields.io/badge/status-early%20development-f59e0b" alt="项目状态：早期开发"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/Node.js-24%2B-339933?logo=nodedotjs&logoColor=white" alt="Node.js 24+"></a>
+  <a href="docs/contracts/openapi.json"><img src="https://img.shields.io/badge/API-OpenAPI%203-6BA539?logo=openapiinitiative&logoColor=white" alt="OpenAPI 3"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/OpenSenseNova/SenseNova-Skills-TeamHarness" alt="许可证：MIT"></a>
+</p>
+
+</div>
 
 ## 项目概览
 
 SenseNova Team Harness 是一个**自托管的团队协作工作区**，让人和本地 AI Agent 围绕同一份工作协同：讨论、待办、AI 执行和最终成果都放在同一个空间里，而不是散落在个人聊天窗口、文档和各种工具里。把「提出问题 → 分配工作 → 持续推进 → 交付成果」连成一条完整、可审计的协作链。项目采用 MIT 许可证，便于从源码运行并进行二次开发。
 
-## AI 协作架构
-
-![SenseNova Team Harness AI 协作架构图](assets/sensenova-team-harness-architecture.png)
+## 架构一览
 
 在会话中提及 Agent 或指派 WorkItem 后，服务会为绑定的 Local Computer 生成 Inbox 触发。Local Computer 创建或恢复 ACP Session，通过限定范围的 `teamctl` 网关让 Agent 访问团队上下文，同时把文件、凭据和工具留在成员电脑上。通过校验的消息和 Artifact 版本再经 API 回到 Workspace，成为团队共享、可复核的协作事实。
 
