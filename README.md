@@ -1,8 +1,55 @@
 # SenseNova Team Harness
 
+[![CI](https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness/actions/workflows/ci.yml)
+[![Project status: early development](https://img.shields.io/badge/status-early%20development-f59e0b)](#project-status)
+[![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-339933?logo=nodedotjs&logoColor=white)](package.json)
+[![OpenAPI 3](https://img.shields.io/badge/API-OpenAPI%203-6BA539?logo=openapiinitiative&logoColor=white)](docs/contracts/openapi.json)
+[![License: MIT](https://img.shields.io/github/license/OpenSenseNova/SenseNova-Skills-TeamHarness)](LICENSE)
+
+[English](README.md) · [Chinese](README_CN.md) · [Product overview](docs/PRODUCT_OVERVIEW.md)
+
+## Overview
+
 SenseNova Team Harness is a self-hosted workspace where people and local AI agents work together on conversations, projects, work items, and artifacts. Instead of leaving AI answers stranded in individual chat windows, it keeps the whole flow — raise a question, assign the work, make progress, deliver a result — in one shared, auditable space. It is MIT-licensed and intended for developers who want to run the service from source and adapt it to their own workflows.
 
-[中文说明](README_CN.md) · [Product overview](docs/PRODUCT_OVERVIEW.md)
+## AI collaboration architecture
+
+```mermaid
+flowchart LR
+  subgraph Team["Team"]
+    People["Human members"] <--> Web["React Web app"]
+  end
+
+  subgraph Harness["SenseNova Team Harness service"]
+    API["Fastify HTTP API<br/>OpenAPI contract"]
+    Core["Collaboration services<br/>Workspace · Project · Conversation<br/>WorkItem · Artifact"]
+    DB[("SQLite<br/>workspace + local-node")]
+    Blobs[("Content-addressed<br/>Artifact blobs")]
+
+    Web <--> API
+    API <--> Core
+    Core <--> DB
+    Core <--> Blobs
+  end
+
+  subgraph Machine["Member machine"]
+    Computer["Local Computer<br/>CLI + background service"]
+    Sessions["Session coordinator<br/>Inbox + Runtime binding"]
+    Gateway["Agent Workspace Gateway<br/>teamctl over local IPC"]
+    Runtime["AI Agent Runtime via ACP<br/>Codex · Claude · Gemini<br/>Goose · Hermes · generic ACP"]
+    Local[("Local files and tools")]
+
+    Computer --> Sessions
+    Sessions <--> Runtime
+    Runtime <--> Gateway
+    Runtime <--> Local
+    Gateway --> Computer
+  end
+
+  API <-->|"Authenticated HTTP<br/>triggers, progress, messages, artifacts"| Computer
+```
+
+A mention or assigned WorkItem becomes an inbox trigger for the bound Local Computer. The Local Computer opens or resumes an ACP session, gives the Agent a session-scoped `teamctl` gateway, and keeps files, credentials, and tools on the member's machine. Validated messages and Artifact versions return through the API and are stored as shared, reviewable workspace state.
 
 ## Why it exists
 
@@ -47,6 +94,19 @@ Many teams already use AI, but the work stays fragmented: answers live in privat
 - **Content and design** — collaborate on articles, scripts, campaign plans, and multi-version drafts.
 - **Cross-role projects** — several people and several agents work toward one goal, with humans signing off at key checkpoints.
 
+## Project status
+
+SenseNova Team Harness is in early self-hosted development. The repository currently contains the complete source path needed to run and inspect the collaboration loop; the limits below are part of the current public scope.
+
+| Area | Current state |
+| --- | --- |
+| **Collaboration surface** | React Web app and Fastify API for workspaces, projects, conversations, agents, WorkItems, and versioned Artifacts. |
+| **Agent execution** | Local Computer service with ACP runtime detection, persistent sessions, scoped `teamctl` operations, and runtime profiles for Codex, Claude, Gemini, Goose, Hermes, and a generic ACP command. Runtime availability depends on what is installed and authenticated on the bound machine. |
+| **Data and contracts** | SQLite workspace/local-node stores, content-addressed Artifact blobs, and a generated OpenAPI contract. |
+| **Verification** | CI runs API/schema checks, type checking, backend and Web tests, public-document checks, package checks, and a production build through `npm run verify:public`. |
+| **Distribution** | The server runs from source. The Local Computer archive is built locally and attached to tag-based GitHub Releases; there is no Docker image, native installer, or npm registry package. |
+| **Deployment scope** | Intended for trusted development networks. Production hardening, deployment recipes, backups, monitoring, and schema migrations remain deployment responsibilities. |
+
 ## Quick start
 
 Requirements: Node.js 24 and npm. The server runs from source; Docker images and npm packages are not provided.
@@ -86,11 +146,11 @@ npm run build
 
 ## Documentation and scope
 
-This is an early self-hosted project and not a production security boundary by itself. Review authentication, network exposure, secret storage, backups, and local-agent permissions before using it beyond a trusted development network. It does not provide a production deployment recipe, Docker image, native installer, npm registry package, or schema migration layer.
+Review authentication, network exposure, secret storage, backups, and local-agent permissions before using the project beyond a trusted development network.
 
-- [Installation](INSTALL.md) · [安装](INSTALL_CN.md)
-- [Contributing](CONTRIBUTING.md) · [贡献指南](CONTRIBUTING_CN.md)
-- [Security](SECURITY.md) · [安全说明](SECURITY_CN.md)
+- [Installation](INSTALL.md) · [Chinese installation guide](INSTALL_CN.md)
+- [Contributing](CONTRIBUTING.md) · [Chinese contributing guide](CONTRIBUTING_CN.md)
+- [Security](SECURITY.md) · [Chinese security guide](SECURITY_CN.md)
 - [OpenAPI contract](docs/contracts/openapi.json)
 - [Changelog](CHANGELOG.md)
 
