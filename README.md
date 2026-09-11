@@ -1,20 +1,26 @@
-# SenseNova Team Harness
+<div align="center">
 
-[![CI](https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness/actions/workflows/ci.yml)
-[![Project status: early development](https://img.shields.io/badge/status-early%20development-f59e0b)](#project-status)
-[![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-339933?logo=nodedotjs&logoColor=white)](package.json)
-[![OpenAPI 3](https://img.shields.io/badge/API-OpenAPI%203-6BA539?logo=openapiinitiative&logoColor=white)](docs/contracts/openapi.json)
-[![License: MIT](https://img.shields.io/github/license/OpenSenseNova/SenseNova-Skills-TeamHarness)](LICENSE)
+<h1>SenseNova Team Harness</h1>
 
-[English](README.md) · [Chinese](README_CN.md) · [Product overview](docs/PRODUCT_OVERVIEW.md)
+<p><a href="README.md">English</a> · <a href="README_CN.md">简体中文</a></p>
+
+<p><img src="assets/sensenova-team-harness-architecture.png" alt="SenseNova Team Harness AI collaboration architecture" width="100%"></p>
+
+<p>
+  <a href="https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness/actions/workflows/ci.yml"><img src="https://github.com/OpenSenseNova/SenseNova-Skills-TeamHarness/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="#project-status"><img src="https://img.shields.io/badge/status-early%20development-f59e0b" alt="Project status: early development"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/Node.js-24%2B-339933?logo=nodedotjs&logoColor=white" alt="Node.js 24+"></a>
+  <a href="docs/contracts/openapi.json"><img src="https://img.shields.io/badge/API-OpenAPI%203-6BA539?logo=openapiinitiative&logoColor=white" alt="OpenAPI 3"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/OpenSenseNova/SenseNova-Skills-TeamHarness" alt="License: MIT"></a>
+</p>
+
+</div>
 
 ## Overview
 
 SenseNova Team Harness is a self-hosted workspace where people and local AI agents work together on conversations, projects, work items, and artifacts. Instead of leaving AI answers stranded in individual chat windows, it keeps the whole flow — raise a question, assign the work, make progress, deliver a result — in one shared, auditable space. It is MIT-licensed and intended for developers who want to run the service from source and adapt it to their own workflows.
 
-## AI collaboration architecture
-
-![SenseNova Team Harness AI collaboration architecture](assets/sensenova-team-harness-architecture.png)
+## Architecture at a glance
 
 A mention or assigned WorkItem becomes an inbox trigger for the bound Local Computer. The Local Computer opens or resumes an ACP session, gives the Agent a session-scoped `teamctl` gateway, and keeps files, credentials, and tools on the member's machine. Validated messages and Artifact versions return through the API and are stored as shared, reviewable workspace state.
 
@@ -115,9 +121,9 @@ npm run build
 
 Review authentication, network exposure, secret storage, backups, and local-agent permissions before using the project beyond a trusted development network.
 
-- [Installation](INSTALL.md) · [Chinese installation guide](INSTALL_CN.md)
-- [Contributing](CONTRIBUTING.md) · [Chinese contributing guide](CONTRIBUTING_CN.md)
-- [Security](SECURITY.md) · [Chinese security guide](SECURITY_CN.md)
+- [Installation](INSTALL.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
 - [OpenAPI contract](docs/contracts/openapi.json)
 - [Changelog](CHANGELOG.md)
 
