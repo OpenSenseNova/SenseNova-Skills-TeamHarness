@@ -19,6 +19,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm ci --prefix local-computer
       - run: npm run verify:public
       - run: sha256sum web/public/downloads/anc-local-computer.tgz > web/public/downloads/anc-local-computer.tgz.sha256
       - name: Create GitHub Release
