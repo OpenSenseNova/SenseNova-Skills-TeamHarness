@@ -2,7 +2,7 @@
 
 <h1>SenseNova Team Harness</h1>
 
-<p><a href="README.md">English</a> · <a href="README_CN.md">简体中文</a> · <a href="docs/PRODUCT_OVERVIEW.md">产品介绍</a></p>
+<p><a href="README.md">English</a> · <a href="README_CN.md">简体中文</a></p>
 
 <p><img src="assets/sensenova-team-harness-architecture.png" alt="SenseNova Team Harness AI 协作架构图" width="100%"></p>
 
@@ -121,7 +121,6 @@ npm run build
 
 将服务暴露到非信任网络前，请自行评估认证、网络边界、密钥存储、备份和本地 Agent 权限。
 
-- [产品介绍](docs/PRODUCT_OVERVIEW.md)
 - [安装](INSTALL_CN.md) · [Installation](INSTALL.md)
 - [贡献指南](CONTRIBUTING_CN.md) · [Contributing](CONTRIBUTING.md)
 - [安全说明](SECURITY_CN.md) · [Security](SECURITY.md)

@@ -12,7 +12,7 @@ npm run verify:public
 
 使用 Node.js 24。`docs/contracts/openapi.json` 是公开 HTTP 契约；修改路由后运行 `npm run openapi`，同时检查契约和生成的 Web client 类型。Schema 变化使用 `npm run db:check` 校验。不要把私有设计笔记、凭据、数据库、日志或构建产物加入仓库。
 
-公开文档保持精简：README、安装、贡献、安全、产品介绍、Local Computer 命令参考、变更记录、许可证和 OpenAPI 契约。扩展说明写在本文件或英文版本中，不新增内部架构专题文档。
+公开文档保持精简：README、安装、贡献、安全、Local Computer 命令参考、变更记录、许可证和 OpenAPI 契约。扩展说明写在本文件或英文版本中，不新增内部架构专题文档。
 
 ## Pull Request
 

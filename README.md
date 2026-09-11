@@ -2,7 +2,7 @@
 
 <h1>SenseNova Team Harness</h1>
 
-<p><a href="README.md">English</a> · <a href="README_CN.md">简体中文</a> · <a href="docs/PRODUCT_OVERVIEW.md">Product overview</a></p>
+<p><a href="README.md">English</a> · <a href="README_CN.md">简体中文</a></p>
 
 <p><img src="assets/sensenova-team-harness-architecture.png" alt="SenseNova Team Harness AI collaboration architecture" width="100%"></p>
 
