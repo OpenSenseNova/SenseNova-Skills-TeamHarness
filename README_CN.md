@@ -14,40 +14,7 @@ SenseNova Team Harness 是一个**自托管的团队协作工作区**，让人�
 
 ## AI 协作架构
 
-```mermaid
-flowchart LR
-  subgraph Team["团队"]
-    People["团队成员"] <--> Web["React Web 应用"]
-  end
-
-  subgraph Harness["SenseNova Team Harness 服务"]
-    API["Fastify HTTP API<br/>OpenAPI 契约"]
-    Core["协作服务<br/>Workspace · Project · Conversation<br/>WorkItem · Artifact"]
-    DB[("SQLite<br/>workspace + local-node")]
-    Blobs[("内容寻址的<br/>Artifact 文件存储")]
-
-    Web <--> API
-    API <--> Core
-    Core <--> DB
-    Core <--> Blobs
-  end
-
-  subgraph Machine["成员电脑"]
-    Computer["Local Computer<br/>命令行 + 后台服务"]
-    Sessions["Session 调度<br/>Inbox + Runtime 绑定"]
-    Gateway["Agent Workspace Gateway<br/>通过本地 IPC 提供 teamctl"]
-    Runtime["通过 ACP 连接 AI Agent Runtime<br/>Codex · Claude · Gemini<br/>Goose · Hermes · 通用 ACP"]
-    Local[("本地文件与工具")]
-
-    Computer --> Sessions
-    Sessions <--> Runtime
-    Runtime <--> Gateway
-    Runtime <--> Local
-    Gateway --> Computer
-  end
-
-  API <-->|"认证 HTTP 通道<br/>触发、进度、消息与成果"| Computer
-```
+![SenseNova Team Harness AI 协作架构图](assets/sensenova-team-harness-architecture.png)
 
 在会话中提及 Agent 或指派 WorkItem 后，服务会为绑定的 Local Computer 生成 Inbox 触发。Local Computer 创建或恢复 ACP Session，通过限定范围的 `teamctl` 网关让 Agent 访问团队上下文，同时把文件、凭据和工具留在成员电脑上。通过校验的消息和 Artifact 版本再经 API 回到 Workspace，成为团队共享、可复核的协作事实。
 

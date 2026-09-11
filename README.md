@@ -14,40 +14,7 @@ SenseNova Team Harness is a self-hosted workspace where people and local AI agen
 
 ## AI collaboration architecture
 
-```mermaid
-flowchart LR
-  subgraph Team["Team"]
-    People["Human members"] <--> Web["React Web app"]
-  end
-
-  subgraph Harness["SenseNova Team Harness service"]
-    API["Fastify HTTP API<br/>OpenAPI contract"]
-    Core["Collaboration services<br/>Workspace · Project · Conversation<br/>WorkItem · Artifact"]
-    DB[("SQLite<br/>workspace + local-node")]
-    Blobs[("Content-addressed<br/>Artifact blobs")]
-
-    Web <--> API
-    API <--> Core
-    Core <--> DB
-    Core <--> Blobs
-  end
-
-  subgraph Machine["Member machine"]
-    Computer["Local Computer<br/>CLI + background service"]
-    Sessions["Session coordinator<br/>Inbox + Runtime binding"]
-    Gateway["Agent Workspace Gateway<br/>teamctl over local IPC"]
-    Runtime["AI Agent Runtime via ACP<br/>Codex · Claude · Gemini<br/>Goose · Hermes · generic ACP"]
-    Local[("Local files and tools")]
-
-    Computer --> Sessions
-    Sessions <--> Runtime
-    Runtime <--> Gateway
-    Runtime <--> Local
-    Gateway --> Computer
-  end
-
-  API <-->|"Authenticated HTTP<br/>triggers, progress, messages, artifacts"| Computer
-```
+![SenseNova Team Harness AI collaboration architecture](assets/sensenova-team-harness-architecture.png)
 
 A mention or assigned WorkItem becomes an inbox trigger for the bound Local Computer. The Local Computer opens or resumes an ACP session, gives the Agent a session-scoped `teamctl` gateway, and keeps files, credentials, and tools on the member's machine. Validated messages and Artifact versions return through the API and are stored as shared, reviewable workspace state.
 

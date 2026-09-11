@@ -10,7 +10,7 @@ Run `npm run license:check` before a release. It audits the root server and Loca
 
 ## Project assets
 
-The public repository contains project-authored source and documentation assets. No external image, font, audio, video, or presentation fixture is distributed by the release package. New third-party assets must be documented here with their source, license, and redistribution permission before merge.
+The public repository contains project-authored source and documentation assets. The architecture illustration at `assets/sensenova-team-harness-architecture.png` is generated for this project with OpenAI image generation; no external image assets were supplied. New third-party assets must be documented here with their source, license, and redistribution permission before merge.
 
 ## Production dependencies
 
@@ -28,7 +28,6 @@ The public repository contains project-authored source and documentation assets.
 - `@ant-design/react-slick@2.0.0` — License: MIT
 - `@ant-design/x@2.9.0` — License: MIT
 - `@antfu/install-pkg@1.1.0` — License: MIT
-- `@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.232` — License: SEE LICENSE IN LICENSE.md
 - `@anthropic-ai/claude-agent-sdk@0.3.232` — License: SEE LICENSE IN README.md
 - `@anthropic-ai/sdk@0.117.1` — License: MIT
 - `@babel/runtime@7.29.7` — License: MIT
@@ -83,7 +82,6 @@ The public repository contains project-authored source and documentation assets.
 - `@marijn/find-cluster-break@1.0.3` — License: MIT
 - `@mermaid-js/parser@1.2.0` — License: MIT
 - `@modelcontextprotocol/sdk@1.30.0` — License: MIT
-- `@openai/codex-darwin-arm64@0.147.0-darwin-arm64` — License: Apache-2.0
 - `@openai/codex@0.147.0` — License: Apache-2.0
 - `@pinojs/redact@0.4.0` — License: MIT
 - `@rc-component/async-validator@6.0.0` — License: MIT
