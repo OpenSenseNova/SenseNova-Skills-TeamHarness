@@ -2,6 +2,7 @@ import { Alert, Button, Form, Select, Space, Tag, Typography } from 'antd';
 import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { ApiError, errorMessage, type Computer, type RuntimeId, type RuntimeReasoningEffort } from '../api/client';
+import { useLanguage } from '../language';
 
 const { Text } = Typography;
 
@@ -13,21 +14,29 @@ export interface RuntimeBindingFormValue {
   mode?: string | null;
 }
 
-export const runtimeOptions: Array<{ value: RuntimeId; label: string; description: string }> = [
-  { value: 'codex', label: 'Codex CLI', description: '使用这台计算机上已登录的 Codex CLI' },
-  { value: 'claude', label: 'Claude Code', description: '使用这台计算机上已登录的 Claude Code' },
-  { value: 'gemini', label: 'Gemini CLI', description: '使用这台计算机上已登录的 Gemini CLI' },
-  { value: 'goose', label: 'Goose', description: '使用这台计算机上的 Goose' },
-  { value: 'hermes', label: 'Hermes Agent', description: '使用这台计算机上已安装的 Hermes Agent' },
+export const runtimeOptions: Array<{ value: RuntimeId; label: string; description: string; descriptionEn: string }> = [
+  { value: 'codex', label: 'Codex CLI', description: '使用这台计算机上已登录的 Codex CLI', descriptionEn: 'Use the Codex CLI signed in on this computer' },
+  { value: 'claude', label: 'Claude Code', description: '使用这台计算机上已登录的 Claude Code', descriptionEn: 'Use the Claude Code signed in on this computer' },
+  { value: 'gemini', label: 'Gemini CLI', description: '使用这台计算机上已登录的 Gemini CLI', descriptionEn: 'Use the Gemini CLI signed in on this computer' },
+  { value: 'goose', label: 'Goose', description: '使用这台计算机上的 Goose', descriptionEn: 'Use the Goose on this computer' },
+  { value: 'hermes', label: 'Hermes Agent', description: '使用这台计算机上已安装的 Hermes Agent', descriptionEn: 'Use the Hermes Agent installed on this computer' },
 ];
 
 export function runtimeLabel(runtimeId: RuntimeId): string {
   return runtimeOptions.find((runtime) => runtime.value === runtimeId)?.label ?? runtimeId;
 }
 
-export function computerLoadErrorMessage(error: unknown): string {
+export function runtimeDescription(runtimeId: RuntimeId, isEnglish: boolean): string {
+  const option = runtimeOptions.find((runtime) => runtime.value === runtimeId);
+  if (!option) return runtimeId;
+  return isEnglish ? option.descriptionEn : option.description;
+}
+
+export function computerLoadErrorMessage(error: unknown, isEnglish: boolean): string {
   if (error instanceof ApiError && error.status === 404) {
-    return '当前服务版本过旧，暂时无法读取本地计算机。请重启后端服务后再试。';
+    return isEnglish
+      ? 'The current service version is too old and cannot read the local computer for now. Please restart the backend service and try again.'
+      : '当前服务版本过旧，暂时无法读取本地计算机。请重启后端服务后再试。';
   }
   return errorMessage(error);
 }
@@ -37,6 +46,8 @@ export function AgentRuntimeFields({ computers, children, onSetupComputer }: {
   children?: ReactNode;
   onSetupComputer?: () => void;
 }) {
+  const { isEnglish } = useLanguage();
+  const tx = (zh: string, en: string) => isEnglish ? en : zh;
   const activeComputers = computers.filter((computer) => computer.status === 'active');
   const bindableComputers = activeComputers.filter((computer) => (
     computer.connectionStatus === 'online'
@@ -66,12 +77,12 @@ export function AgentRuntimeFields({ computers, children, onSetupComputer }: {
       && supportedReasoningEfforts.includes(effort.id as Exclude<RuntimeReasoningEffort, null>))
   ));
   const reasoningHelp = !runtimeConfiguration?.reasoningEfforts.length
-    ? '本地 Agent 未暴露推理强度。'
+    ? tx('本地 Agent 未暴露推理强度。', 'The local Agent does not expose reasoning effort.')
     : effectiveModelId !== null && supportedReasoningEfforts === null
-      ? `本地 Agent 未声明模型 ${effectiveModelId} 支持哪些推理强度，因此不允许显式选择。`
+      ? tx(`本地 Agent 未声明模型 ${effectiveModelId} 支持哪些推理强度，因此不允许显式选择。`, `The local Agent does not declare which reasoning efforts model ${effectiveModelId} supports, so explicit selection is not allowed.`)
       : effectiveModelId !== null && supportedReasoningEfforts?.length === 0
-        ? `模型 ${effectiveModelId} 不提供推理强度配置。`
-        : '只显示当前模型明确支持的推理强度；不支持的组合不会进入本地 Agent 绑定。';
+        ? tx(`模型 ${effectiveModelId} 不提供推理强度配置。`, `Model ${effectiveModelId} does not offer reasoning effort configuration.`)
+        : tx('只显示当前模型明确支持的推理强度；不支持的组合不会进入本地 Agent 绑定。', 'Only reasoning efforts explicitly supported by the current model are shown; unsupported combinations will not be used in the local Agent binding.');
 
   useEffect(() => {
     if (bindableComputers.some((computer) => computer.id === computerId)) return;
@@ -107,20 +118,20 @@ export function AgentRuntimeFields({ computers, children, onSetupComputer }: {
         <Alert
           type="warning"
           showIcon
-          title={activeComputers.length ? '没有可用于运行 Agent 的计算机' : '还没有添加计算机'}
+          title={activeComputers.length ? tx('没有可用于运行 Agent 的计算机', 'No computer available to run an Agent') : tx('还没有添加计算机', 'No computers added yet')}
           description={activeComputers.length
-            ? '可以启动已有计算机，或添加另一台已安装并登录本地 Agent 的计算机。'
-            : '先添加这台计算机，再连接本机已经安装并登录的本地 Agent。'}
+            ? tx('可以启动已有计算机，或添加另一台已安装并登录本地 Agent 的计算机。', 'Start an existing computer or add another with a local Agent installed and signed in.')
+            : tx('先添加这台计算机，再连接本机已经安装并登录的本地 Agent。', 'Add this computer first, then connect a local Agent installed and signed in here.')}
           action={onSetupComputer
-            ? <Button size="small" onClick={onSetupComputer}>添加计算机</Button>
+            ? <Button size="small" onClick={onSetupComputer}>{tx('添加计算机', 'Add computer')}</Button>
             : undefined}
           style={{ marginBottom: 18 }}
         />
       )}
-      <Form.Item name="computerId" label="计算机" rules={[{ required: true, message: '请选择运行 Agent 的计算机' }]}>
+      <Form.Item name="computerId" label={tx('计算机', 'Computer')} rules={[{ required: true, message: tx('请选择运行 Agent 的计算机', 'Select a computer to run the Agent') }]}>
         <Select
           size="large"
-          placeholder="选择已连接的计算机"
+          placeholder={tx('选择已连接的计算机', 'Select a connected computer')}
           disabled={!bindableComputers.length}
           options={activeComputers.map((computer) => ({
             value: computer.id,
@@ -134,8 +145,8 @@ export function AgentRuntimeFields({ computers, children, onSetupComputer }: {
             return (
               <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                 <span>{option.label}</span>
-                <Tag color={computer?.connectionStatus === 'online' ? 'success' : 'default'}>{computer?.connectionStatus === 'online' ? '在线' : '离线'}</Tag>
-                {computer && !computer.runtimes.some((runtime) => runtime.availability === 'ready') && <Text type="secondary">未检测到本地 Agent</Text>}
+                <Tag color={computer?.connectionStatus === 'online' ? 'success' : 'default'}>{computer?.connectionStatus === 'online' ? tx('在线', 'Online') : tx('离线', 'Offline')}</Tag>
+                {computer && !computer.runtimes.some((runtime) => runtime.availability === 'ready') && <Text type="secondary">{tx('未检测到本地 Agent', 'No local Agent detected')}</Text>}
               </Space>
             );
           }}
@@ -146,8 +157,8 @@ export function AgentRuntimeFields({ computers, children, onSetupComputer }: {
           <span className={selectedComputer.connectionStatus === 'online' ? 'runtime-status-dot online' : 'runtime-status-dot'} />
           <Text type="secondary">
             {selectedComputer.connectionStatus === 'online'
-              ? '在线'
-              : '当前离线'}
+              ? tx('在线', 'Online')
+              : tx('当前离线', 'Currently offline')}
           </Text>
         </div>
       )}
@@ -156,20 +167,20 @@ export function AgentRuntimeFields({ computers, children, onSetupComputer }: {
         <Alert
           type="warning"
           showIcon
-          title="这台计算机未检测到本地 Agent"
-          description="请先在这台计算机上安装并登录对应的本地 Agent 命令行工具。"
+          title={tx('这台计算机未检测到本地 Agent', 'No local Agent detected on this computer')}
+          description={tx('请先在这台计算机上安装并登录对应的本地 Agent 命令行工具。', 'Install and sign in to the corresponding local Agent CLI on this computer first.')}
           style={{ marginBottom: 18 }}
         />
       )}
-      <Form.Item name="runtimeId" label="本地 Agent" rules={[{ required: true, message: '请选择本地 Agent' }]}>
+      <Form.Item name="runtimeId" label={tx('本地 Agent', 'Local Agent')} rules={[{ required: true, message: tx('请选择本地 Agent', 'Select a local Agent') }]}>
         <Select
           size="large"
-          placeholder="选择本地 Agent"
+          placeholder={tx('选择本地 Agent', 'Select a local Agent')}
           disabled={!selectedComputer || !readyRuntimes.length}
           options={readyRuntimes.map((runtime) => ({
             value: runtime.runtimeId,
             label: runtimeLabel(runtime.runtimeId),
-            description: runtimeOptions.find((item) => item.value === runtime.runtimeId)?.description ?? runtime.runtimeId,
+            description: runtimeDescription(runtime.runtimeId, isEnglish),
             detectedVersion: runtime.detectedVersion,
           }))}
           optionRender={(option) => (
@@ -187,23 +198,23 @@ export function AgentRuntimeFields({ computers, children, onSetupComputer }: {
         <Alert
           type="error"
           showIcon
-          title="本地 Agent 能力尚未完成检测"
-          description="这台计算机需要重新上报本地 Agent 的模型、推理强度和模式后才能绑定。"
+          title={tx('本地 Agent 能力尚未完成检测', 'Local Agent capability detection not finished')}
+          description={tx('这台计算机需要重新上报本地 Agent 的模型、推理强度和模式后才能绑定。', 'This computer must re-report the local Agent model, reasoning effort, and mode before it can be bound.')}
           style={{ marginBottom: 18 }}
         />
       )}
       <Form.Item
         name="model"
-        label="模型"
+        label={tx('模型', 'Model')}
         extra={runtimeConfiguration?.defaultModelId
-          ? `留空时使用本地 Agent 当前默认模型：${runtimeConfiguration.defaultModelId}`
-          : '留空时使用本地 Agent 当前默认模型。'}
+          ? tx(`留空时使用本地 Agent 当前默认模型：${runtimeConfiguration.defaultModelId}`, `Leave blank to use the local Agent's current default model: ${runtimeConfiguration.defaultModelId}`)
+          : tx('留空时使用本地 Agent 当前默认模型。', "Leave blank to use the local Agent's current default model.")}
       >
         <Select
           size="large"
           allowClear
           disabled={!runtimeConfiguration?.models.length}
-          placeholder={runtimeConfiguration?.models.length ? '使用本地 Agent 默认模型' : '本地 Agent 未暴露模型选择'}
+          placeholder={runtimeConfiguration?.models.length ? tx('使用本地 Agent 默认模型', 'Use the local Agent default model') : tx('本地 Agent 未暴露模型选择', 'The local Agent does not expose model selection')}
           options={(runtimeConfiguration?.models ?? []).map((model) => ({
             value: model.id,
             label: model.label,
@@ -220,29 +231,29 @@ export function AgentRuntimeFields({ computers, children, onSetupComputer }: {
       </Form.Item>
       <Form.Item
         name="reasoningEffort"
-        label="推理强度"
+        label={tx('推理强度', 'Reasoning effort')}
         extra={reasoningHelp}
       >
         <Select
           size="large"
           allowClear
           disabled={!reasoningOptions.length}
-          placeholder={reasoningOptions.length ? '使用本地 Agent 默认值' : '本地 Agent 未暴露推理强度'}
+          placeholder={reasoningOptions.length ? tx('使用本地 Agent 默认值', 'Use the local Agent default') : tx('本地 Agent 未暴露推理强度', 'The local Agent does not expose reasoning effort')}
           options={reasoningOptions.map((option) => ({ value: option.id, label: option.label }))}
         />
       </Form.Item>
       <Form.Item
         name="mode"
-        label="运行模式"
+        label={tx('运行模式', 'Run mode')}
         extra={runtimeConfiguration?.defaultModeId
-          ? `留空时使用本地 Agent 当前默认模式：${runtimeConfiguration.defaultModeId}`
-          : '留空时使用本地 Agent 当前默认模式。'}
+          ? tx(`留空时使用本地 Agent 当前默认模式：${runtimeConfiguration.defaultModeId}`, `Leave blank to use the local Agent's current default mode: ${runtimeConfiguration.defaultModeId}`)
+          : tx('留空时使用本地 Agent 当前默认模式。', "Leave blank to use the local Agent's current default mode.")}
       >
         <Select
           size="large"
           allowClear
           disabled={!runtimeConfiguration?.modes.length}
-          placeholder={runtimeConfiguration?.modes.length ? '使用本地 Agent 默认模式' : '本地 Agent 未暴露模式选择'}
+          placeholder={runtimeConfiguration?.modes.length ? tx('使用本地 Agent 默认模式', 'Use the local Agent default mode') : tx('本地 Agent 未暴露模式选择', 'The local Agent does not expose mode selection')}
           options={(runtimeConfiguration?.modes ?? []).map((mode) => ({
             value: mode.id,
             label: mode.label,
@@ -250,7 +261,7 @@ export function AgentRuntimeFields({ computers, children, onSetupComputer }: {
         />
       </Form.Item>
       <Text type="secondary">
-        这里只显示这台计算机已经安装、登录并通过能力检测的本地 Agent。
+        {tx('这里只显示这台计算机已经安装、登录并通过能力检测的本地 Agent。', 'Only local Agents on this computer that are installed, signed in, and passed capability detection are shown here.')}
       </Text>
     </>
   );

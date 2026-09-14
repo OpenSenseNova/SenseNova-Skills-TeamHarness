@@ -6,6 +6,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { Application } from './app';
 import './styles.css';
 import { ThemeProvider } from './theme';
+import { LanguageProvider } from './language';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -16,14 +17,16 @@ const queryClient = new QueryClient({
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ThemeProvider>
-      <AntApp>
-        <QueryClientProvider client={queryClient}>
-          <BrowserRouter>
-            <Application />
-          </BrowserRouter>
-        </QueryClientProvider>
-      </AntApp>
-    </ThemeProvider>
+    <LanguageProvider>
+      <ThemeProvider>
+        <AntApp>
+          <QueryClientProvider client={queryClient}>
+            <BrowserRouter>
+              <Application />
+            </BrowserRouter>
+          </QueryClientProvider>
+        </AntApp>
+      </ThemeProvider>
+    </LanguageProvider>
   </React.StrictMode>,
 );

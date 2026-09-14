@@ -37,6 +37,9 @@ button:focus-visible, a:focus-visible, [role='button']:focus-visible { outline: 
 }
 
 .auth-brand { display: flex; justify-content: center; gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: -.01em; color: #344054; }
+.language-toggle { border: 1px solid #d0d5dd; border-radius: 8px; background: rgba(255,255,255,.82); color: #344054; padding: 6px 10px; font-size: 12px; font-weight: 650; cursor: pointer; }
+.language-toggle:hover { border-color: #4f6ef7; color: #3f59d7; }
+.auth-language-toggle { position: absolute; top: 18px; right: 74px; }
 .auth-brand .anticon { color: #4f6ef7; font-size: 24px; }
 .auth-card { width: min(440px, calc(100vw - 32px)); border: 1px solid rgba(226, 230, 237, .9); box-shadow: 0 18px 60px rgba(27, 39, 75, .10); }
 .auth-card .ant-typography { margin-top: 0; }
@@ -540,6 +543,8 @@ button:focus-visible, a:focus-visible, [role='button']:focus-visible { outline: 
 :root[data-theme='light'] .auth-theme-toggle { position: absolute; top: 18px; right: 20px; color: #667085; }
 :root[data-theme='dark'] .entry-theme-toggle,
 :root[data-theme='light'] .entry-theme-toggle { position: absolute; top: 18px; right: 20px; }
+.entry-language-toggle { position: absolute; top: 18px; right: 74px; }
+:root[data-theme='dark'] .language-toggle { border-color: #475467; background: rgba(20,20,20,.82); color: #d0d5dd; }
 :root[data-theme='dark'] .entry-theme-toggle { color: #c6ccda; }
 :root[data-theme='light'] .entry-theme-toggle { color: #667085; }
 

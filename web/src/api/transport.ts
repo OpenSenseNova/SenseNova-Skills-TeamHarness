@@ -13,6 +13,21 @@ export class ApiError extends Error {
 
 type ErrorPayload = { error?: { code?: string; message?: string; details?: unknown } };
 
+/** Reads the current UI language from storage (mirrors the keys used by language.tsx). */
+function isEnglishLocale(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const stored = window.localStorage.getItem('anc:language') ?? window.localStorage.getItem('anc:locale');
+    return stored === 'en-US';
+  } catch {
+    return false;
+  }
+}
+
+function requestFailedMessage(status: number): string {
+  return isEnglishLocale() ? `Request failed (${status})` : `请求失败（${status}）`;
+}
+
 export function commandKey(): string {
   if (typeof globalThis.crypto.randomUUID === 'function') {
     return globalThis.crypto.randomUUID();
@@ -34,7 +49,7 @@ export async function unwrap<T = unknown>(
   throw new ApiError(
     result.response.status,
     error?.error?.code ?? 'REQUEST_FAILED',
-    error?.error?.message ?? `请求失败（${result.response.status}）`,
+    error?.error?.message ?? requestFailedMessage(result.response.status),
     error?.error?.details,
   );
 }
@@ -57,7 +72,7 @@ function errorFromPayload(status: number, payload: unknown): ApiError {
   return new ApiError(
     status,
     error?.code ?? 'REQUEST_FAILED',
-    error?.message ?? `请求失败（${status}）`,
+    error?.message ?? requestFailedMessage(status),
     error?.details,
   );
 }
@@ -79,8 +94,9 @@ export async function requestBlob(input: string, init: RequestInit = {}): Promis
 }
 
 export function errorMessage(error: unknown): string {
+  const english = isEnglishLocale();
   if (error instanceof ApiError) {
-    const known: Record<string, string> = {
+    const knownZh: Record<string, string> = {
       INVALID_LOGIN: '邮箱或密码错误。',
       EMAIL_NOT_VERIFIED: '请先完成邮箱验证。',
       EMAIL_ALREADY_REGISTERED: '该邮箱已经注册，请直接登录。',
@@ -94,7 +110,23 @@ export function errorMessage(error: unknown): string {
       COMPUTER_NOT_FOUND: '这台计算机不存在、已停用或不属于当前账号。',
       CONVERSATION_CLOSED: '对方已不再是成员，这个私聊只能查看历史消息。',
     };
-    return known[error.code] ?? `${error.message}（${error.code}）`;
+    const knownEn: Record<string, string> = {
+      INVALID_LOGIN: 'Incorrect email or password.',
+      EMAIL_NOT_VERIFIED: 'Please verify your email first.',
+      EMAIL_ALREADY_REGISTERED: 'This email is already registered. Please sign in instead.',
+      INVALID_VERIFICATION_CODE: 'The verification code is incorrect.',
+      VERIFICATION_CODE_EXPIRED: 'The verification code has expired. Please resend it.',
+      STALE_REVISION: 'The content has changed. Please refresh and try again.',
+      CONVERSATION_VERSION_CONFLICT: 'The conversation participants have changed. Please refresh and try again.',
+      WORKSPACE_MEMBERSHIP_REQUIRED: 'You are no longer a member of this Workspace.',
+      COMPUTER_OFFLINE: 'This computer is offline. Reconnect it before creating an Agent.',
+      RUNTIME_UNAVAILABLE_ON_COMPUTER: 'The selected local Agent is not ready on this computer. Check its installation or sign-in status and try again.',
+      COMPUTER_NOT_FOUND: 'This computer does not exist, is disabled, or does not belong to the current account.',
+      CONVERSATION_CLOSED: 'The other person is no longer a member; this direct message is read-only.',
+    };
+    const known = english ? knownEn : knownZh;
+    return known[error.code] ?? (english ? `${error.message} (${error.code})` : `${error.message}（${error.code}）`);
   }
-  return error instanceof Error ? error.message : '发生未知错误。';
+  if (error instanceof Error) return error.message;
+  return english ? 'An unknown error occurred.' : '发生未知错误。';
 }

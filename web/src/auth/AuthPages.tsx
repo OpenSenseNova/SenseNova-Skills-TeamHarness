@@ -6,6 +6,7 @@ import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } 
 import { api, errorMessage } from '../api/client';
 import { sessionQueryKey } from '../app';
 import { ThemeToggleButton } from '../theme';
+import { LanguageToggleButton, useLanguage } from '../language';
 
 const { Title, Text } = Typography;
 
@@ -13,6 +14,7 @@ function AuthFrame({ children, title, subtitle }: { children: React.ReactNode; t
   return (
     <main className="auth-page">
       <ThemeToggleButton className="auth-theme-toggle" compact />
+      <LanguageToggleButton className="auth-language-toggle" compact />
       <div className="auth-brand"><RobotOutlined /><span>SenseNova Team Harness</span></div>
       <Card className="auth-card" variant="borderless">
         <Text className="auth-kicker">HUMAN + LOCAL AGENT</Text>
@@ -25,6 +27,7 @@ function AuthFrame({ children, title, subtitle }: { children: React.ReactNode; t
 }
 
 export function LoginPage() {
+  const { t } = useLanguage();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -37,23 +40,24 @@ export function LoginPage() {
     },
   });
   return (
-    <AuthFrame title="欢迎回来" subtitle="登录后回到你的协作空间">
+    <AuthFrame title={t('auth.welcome')} subtitle={t('auth.welcome.subtitle')}>
       {mutation.error && <Alert type="error" showIcon title={errorMessage(mutation.error)} />}
       <Form layout="vertical" onFinish={(value: { email: string; password: string }) => mutation.mutate(value)}>
-        <Form.Item name="email" label="邮箱" rules={[{ required: true }, { type: 'email' }]}>
+        <Form.Item name="email" label={t('auth.email')} rules={[{ required: true }, { type: 'email' }]}>
           <Input size="large" prefix={<MailOutlined />} autoComplete="email" />
         </Form.Item>
-        <Form.Item name="password" label="密码" rules={[{ required: true, min: 10 }]}>
+        <Form.Item name="password" label={t('auth.password')} rules={[{ required: true, min: 10 }]}>
           <Input.Password size="large" prefix={<LockOutlined />} autoComplete="current-password" />
         </Form.Item>
-        <Button type="primary" htmlType="submit" size="large" block loading={mutation.isPending}>登录</Button>
+        <Button type="primary" htmlType="submit" size="large" block loading={mutation.isPending}>{t('auth.login')}</Button>
       </Form>
-      <Text>还没有账号？<Link to={returnTo ? `/register?returnTo=${encodeURIComponent(returnTo)}` : '/register'}>创建账号</Link></Text>
+      <Text>{t('auth.noAccount')}<Link to={returnTo ? `/register?returnTo=${encodeURIComponent(returnTo)}` : '/register'}>{t('auth.create')}</Link></Text>
     </AuthFrame>
   );
 }
 
 export function RegisterPage() {
+  const { t } = useLanguage();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const returnTo = params.get('returnTo') || '';
@@ -65,26 +69,27 @@ export function RegisterPage() {
     ),
   });
   return (
-    <AuthFrame title="创建账号" subtitle="注册后输入 6 位验证码，立即开始协作">
+    <AuthFrame title={t('auth.createAccount')} subtitle={t('auth.createAccount.subtitle')}>
       {mutation.error && <Alert type="error" showIcon title={errorMessage(mutation.error)} />}
       <Form layout="vertical" onFinish={(value: { displayName: string; email: string; password: string }) => mutation.mutate(value)}>
-        <Form.Item name="displayName" label="显示名称" rules={[{ required: true, max: 120 }]}>
+        <Form.Item name="displayName" label={t('auth.displayName')} rules={[{ required: true, max: 120 }]}>
           <Input size="large" prefix={<UserOutlined />} autoComplete="name" />
         </Form.Item>
-        <Form.Item name="email" label="邮箱" rules={[{ required: true }, { type: 'email' }]}>
+        <Form.Item name="email" label={t('auth.email')} rules={[{ required: true }, { type: 'email' }]}>
           <Input size="large" prefix={<MailOutlined />} autoComplete="email" />
         </Form.Item>
-        <Form.Item name="password" label="密码" extra="至少 10 个字符，建议混合使用字母、数字和符号" rules={[{ required: true, min: 10, max: 128 }]}>
+        <Form.Item name="password" label={t('auth.password')} extra={t('auth.passwordHint')} rules={[{ required: true, min: 10, max: 128 }]}>
           <Input.Password size="large" prefix={<LockOutlined />} autoComplete="new-password" />
         </Form.Item>
-        <Button type="primary" htmlType="submit" size="large" block loading={mutation.isPending}>注册并发送验证码</Button>
+        <Button type="primary" htmlType="submit" size="large" block loading={mutation.isPending}>{t('auth.register')}</Button>
       </Form>
-      <Text>已有账号？<Link to={returnTo ? `/login?returnTo=${encodeURIComponent(returnTo)}` : '/login'}>返回登录</Link></Text>
+      <Text>{t('auth.hasAccount')}<Link to={returnTo ? `/login?returnTo=${encodeURIComponent(returnTo)}` : '/login'}>{t('auth.backToLogin')}</Link></Text>
     </AuthFrame>
   );
 }
 
 export function VerifyEmailPage() {
+  const { t } = useLanguage();
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -116,12 +121,12 @@ export function VerifyEmailPage() {
   });
   if (!registrationId) return <Navigate to="/register" replace />;
   return (
-    <AuthFrame title="验证邮箱" subtitle={`验证码已发送至 ${email || '你的邮箱'}，完成验证后即可进入 Workspace`}>
+    <AuthFrame title={t('auth.verifyEmail')} subtitle={t('auth.verifyEmail.subtitle').replace('{email}', email || t('auth.email'))}>
       {developmentVerificationCode ? (
         <Alert
           type="success"
           showIcon
-          title="开发环境验证码"
+          title={t('auth.devCode')}
           description={(
             <Text className="development-verification-code" copyable={{ text: developmentVerificationCode }}>
               {developmentVerificationCode}
@@ -129,21 +134,23 @@ export function VerifyEmailPage() {
           )}
         />
       ) : (
-        <Alert type="info" showIcon title="请输入邮件中的 6 位验证码；没有收到时可以重新发送。" />
+        <Alert type="info" showIcon title={t('auth.codeHint')} />
       )}
       {(verify.error || resend.error) && <Alert type="error" showIcon title={errorMessage(verify.error || resend.error)} />}
       <Form layout="vertical" onFinish={(value: { code: string }) => verify.mutate(value.code)}>
-        <Form.Item name="code" label="验证码" rules={[{ required: true, pattern: /^\d{6}$/, message: '请输入 6 位数字' }]}>
+        <Form.Item name="code" label={t('auth.code')} rules={[{ required: true, pattern: /^\d{6}$/, message: t('auth.codeInvalid') }]}>
           <Input.OTP length={6} size="large" />
         </Form.Item>
-        <Button type="primary" htmlType="submit" size="large" block loading={verify.isPending}>确认并进入</Button>
+        <Button type="primary" htmlType="submit" size="large" block loading={verify.isPending}>{t('auth.confirmEnter')}</Button>
       </Form>
-      <Button type="link" loading={resend.isPending} onClick={() => resend.mutate()}>重新发送验证码</Button>
+      <Button type="link" loading={resend.isPending} onClick={() => resend.mutate()}>{t('auth.resendCode')}</Button>
     </AuthFrame>
   );
 }
 
 export function WorkspaceJoinPage() {
+  const { isEnglish } = useLanguage();
+  const tx = (zh: string, en: string) => isEnglish ? en : zh;
   const { token = '' } = useParams();
   const navigate = useNavigate();
   const { message } = App.useApp();
@@ -155,7 +162,7 @@ export function WorkspaceJoinPage() {
   const mutation = useMutation({
     mutationFn: () => api.acceptWorkspaceJoinLink(token),
     onSuccess: () => {
-      void message.success('已加入 Workspace');
+      void message.success(tx('已加入 Workspace', 'Joined Workspace'));
       navigate(`/w/${preview.data!.workspaceId}`, { replace: true });
     },
   });
@@ -166,14 +173,14 @@ export function WorkspaceJoinPage() {
   if (preview.isError) {
     return (
       <main className="full-page-center page-background">
-        <Result status="404" title="邀请链接不可用" subTitle="链接不存在或地址不完整，请联系 Workspace 所有者获取新的链接。" />
+        <Result status="404" title={tx('邀请链接不可用', 'Invite link unavailable')} subTitle={tx('链接不存在或地址不完整，请联系 Workspace 所有者获取新的链接。', 'This link does not exist or is incomplete. Ask the Workspace owner for a new link.')} />
       </main>
     );
   }
   if (preview.data.status === 'revoked') {
     return (
       <main className="full-page-center page-background">
-        <Result status="warning" title="邀请链接已停用" subTitle="请联系 Workspace 所有者获取新的加入链接。" />
+        <Result status="warning" title={tx('邀请链接已停用', 'Invite link deactivated')} subTitle={tx('请联系 Workspace 所有者获取新的加入链接。', 'Ask the Workspace owner for a new invite link.')} />
       </main>
     );
   }
@@ -181,17 +188,17 @@ export function WorkspaceJoinPage() {
     <main className="full-page-center page-background">
       <Card className="compact-card">
         <Space orientation="vertical" size="large">
-          <Title level={3}>加入 {preview.data.workspaceName}</Title>
+          <Title level={3}>{tx('加入', 'Join')} {preview.data.workspaceName}</Title>
           <Text type="secondary">
             {preview.data.alreadyMember
-              ? '你已经是这个 Workspace 的成员，可以直接进入。'
-              : '确认后，你会以成员身份加入这个 Workspace。链接不会向 Owner 暴露你的注册邮箱。'}
+              ? tx('你已经是这个 Workspace 的成员，可以直接进入。', 'You are already a member of this Workspace and can enter directly.')
+              : tx('确认后，你会以成员身份加入这个 Workspace。链接不会向 Owner 暴露你的注册邮箱。', 'After confirmation, you will join this Workspace as a member. The link does not reveal your registration email to the Owner.')}
           </Text>
           {mutation.error && <Alert type="error" showIcon title={errorMessage(mutation.error)} />}
           {preview.data.alreadyMember ? (
-            <Button type="primary" size="large" onClick={() => navigate(`/w/${preview.data.workspaceId}`, { replace: true })}>进入 Workspace</Button>
+            <Button type="primary" size="large" onClick={() => navigate(`/w/${preview.data.workspaceId}`, { replace: true })}>{tx('进入 Workspace', 'Enter Workspace')}</Button>
           ) : (
-            <Button type="primary" size="large" loading={mutation.isPending} onClick={() => mutation.mutate()}>确认加入</Button>
+            <Button type="primary" size="large" loading={mutation.isPending} onClick={() => mutation.mutate()}>{tx('确认加入', 'Confirm and join')}</Button>
           )}
         </Space>
       </Card>

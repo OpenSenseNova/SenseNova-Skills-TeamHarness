@@ -4,6 +4,7 @@ import { Avatar, Button, Card, Empty, Space, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type Agent } from '../api/client';
+import { useLanguage } from '../language';
 import { AgentCreateModal } from './AgentCreateModal';
 import { runtimeLabel } from './AgentRuntimeFields';
 import { useWorkspace, workspaceKeys } from './workspace-context';
@@ -14,12 +15,14 @@ function lifecycleColor(status: Agent['lifecycleStatus']): string {
   return { active: 'success', suspended: 'warning' }[status];
 }
 
-function lifecycleLabel(status: Agent['lifecycleStatus']): string {
-  return { active: '可用', suspended: '已暂停' }[status];
+function lifecycleLabel(status: Agent['lifecycleStatus'], isEnglish = false): string {
+  return isEnglish ? ({ active: 'Available', suspended: 'Suspended' }[status]) : ({ active: '可用', suspended: '已暂停' }[status]);
 }
 
 export function AgentsPage() {
   const { workspace, agents, openDirectMessage, openingDirectMessageMembershipId } = useWorkspace();
+  const { isEnglish } = useLanguage();
+  const tx = (zh: string, en: string) => isEnglish ? en : zh;
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const computers = useQuery({
@@ -39,17 +42,17 @@ export function AgentsPage() {
         <div>
           <Text className="page-eyebrow">TEAM</Text>
           <Title level={2}>Agent</Title>
-          <Text type="secondary">把需要持续协作的任务交给本地 Agent，并随时查看它的运行状态。</Text>
+          <Text type="secondary">{tx('把需要持续协作的任务交给本地 Agent，并随时查看它的运行状态。', 'Delegate ongoing work to local Agents and monitor their runtime status.')}</Text>
         </div>
         <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-          创建 Agent
+          {tx('创建 Agent', 'Create Agent')}
         </Button>
       </div>
 
       <div className="agent-directory-summary">
-        <Card size="small" variant="borderless"><Text type="secondary">Agent 总数</Text><strong>{agents.length}</strong></Card>
-        <Card size="small" variant="borderless"><Text type="secondary">可用</Text><strong>{active}</strong></Card>
-        <Card size="small" variant="borderless"><Text type="secondary">本地在线</Text><strong>{connected}</strong></Card>
+        <Card size="small" variant="borderless"><Text type="secondary">{tx('Agent 总数', 'Total Agents')}</Text><strong>{agents.length}</strong></Card>
+        <Card size="small" variant="borderless"><Text type="secondary">{tx('可用', 'Available')}</Text><strong>{active}</strong></Card>
+        <Card size="small" variant="borderless"><Text type="secondary">{tx('本地在线', 'Online locally')}</Text><strong>{connected}</strong></Card>
       </div>
 
       {agents.length ? (
@@ -70,7 +73,7 @@ export function AgentsPage() {
                   loading={openingDirectMessageMembershipId === agent.membershipId}
                   onClick={() => void openDirectMessage(agent.membershipId)}
                 >
-                  聊天
+                  {tx('聊天', 'Chat')}
                 </Button>,
                 <Button
                   key="detail"
@@ -78,7 +81,7 @@ export function AgentsPage() {
                   icon={<ArrowRightOutlined />}
                   onClick={() => navigate(`/w/${workspace.id}/agents/${agent.id}`)}
                 >
-                  查看详情
+                  {tx('查看详情', 'View details')}
                 </Button>,
               ]}
             >
@@ -87,9 +90,9 @@ export function AgentsPage() {
                 <div className="agent-card-title">
                   <Space wrap size={6}>
                     <Title level={4}>{agent.name}</Title>
-                    <Tag color={lifecycleColor(agent.lifecycleStatus)}>{lifecycleLabel(agent.lifecycleStatus)}</Tag>
+                    <Tag color={lifecycleColor(agent.lifecycleStatus)}>{lifecycleLabel(agent.lifecycleStatus, isEnglish)}</Tag>
                   </Space>
-                  <Text type="secondary" ellipsis>{agent.description || '还没有描述'}</Text>
+                  <Text type="secondary" ellipsis>{agent.description || tx('还没有描述', 'No description')}</Text>
                 </div>
               </div>
               <div className={agent.runtimeBinding ? `agent-runtime-summary${runtimeConnected ? ' connected' : ''}` : 'agent-runtime-summary unbound'}>
@@ -97,10 +100,10 @@ export function AgentsPage() {
                 {agent.runtimeBinding ? (
                   <div>
                     <Text strong>{runtimeLabel(agent.runtimeBinding.runtimeId)}</Text>
-                    <Text type="secondary">{agent.runtimeBinding.computerName} · {runtimeConnected ? '已连接' : '离线'}</Text>
+                    <Text type="secondary">{agent.runtimeBinding.computerName} · {runtimeConnected ? tx('已连接', 'Connected') : tx('离线', 'Offline')}</Text>
                   </div>
                 ) : (
-                  <div><Text strong>尚未连接</Text><Text type="secondary">选择一台在线计算机和本地 Agent</Text></div>
+                  <div><Text strong>{tx('尚未连接', 'Not connected')}</Text><Text type="secondary">{tx('选择一台在线计算机和本地 Agent', 'Choose an online computer and local Agent')}</Text></div>
                 )}
               </div>
             </Card>
@@ -111,9 +114,9 @@ export function AgentsPage() {
         <Card className="surface-card agent-empty-card" variant="borderless">
           <Empty
             image={<RobotOutlined className="agent-empty-icon" />}
-            description={<Space orientation="vertical" size={2}><Text strong>还没有 Agent</Text><Text type="secondary">连接一台本地计算机后，就可以创建第一个 Agent。</Text></Space>}
+            description={<Space orientation="vertical" size={2}><Text strong>{tx('还没有 Agent', 'No Agents yet')}</Text><Text type="secondary">{tx('连接一台本地计算机后，就可以创建第一个 Agent。', 'Connect a local computer to create your first Agent.')}</Text></Space>}
           >
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>创建第一个 Agent</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>{tx('创建第一个 Agent', 'Create your first Agent')}</Button>
           </Empty>
         </Card>
       )}

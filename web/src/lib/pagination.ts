@@ -25,7 +25,7 @@ export async function loadAllPages<T>(
     const nextCursor = page.nextCursor ?? undefined;
     if (nextCursor === undefined) return items;
     if (seenCursors.has(nextCursor)) {
-      throw new Error('分页游标未推进，服务端返回了重复游标。');
+      throw new Error('Pagination cursor did not advance; the server returned a duplicate cursor.');
     }
     seenCursors.add(nextCursor);
     cursor = nextCursor;

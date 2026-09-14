@@ -3,6 +3,7 @@ import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { Button, Result, Spin } from 'antd';
 import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from 'react';
 import { api } from './api/client';
+import { useLanguage } from './language';
 
 const LoginPage = lazy(() => import('./auth/AuthPages').then((module) => ({ default: module.LoginPage })));
 const RegisterPage = lazy(() => import('./auth/AuthPages').then((module) => ({ default: module.RegisterPage })));
@@ -49,19 +50,19 @@ class ApplicationErrorBoundary extends Component<{ children: ReactNode }, { erro
 
   render() {
     if (this.state.error) {
-      return (
-        <div className="full-page-center page-background">
-          <Result
-            status="error"
-            title="页面加载失败"
-            subTitle="前端遇到了未处理错误，请刷新后重试。"
-            extra={<Button type="primary" onClick={() => window.location.reload()}>刷新页面</Button>}
-          />
-        </div>
-      );
+      return <ApplicationErrorFallback />;
     }
     return this.props.children;
   }
+}
+
+function ApplicationErrorFallback() {
+  const { isEnglish } = useLanguage();
+  return (
+    <div className="full-page-center page-background">
+      <Result status="error" title={isEnglish ? 'Page failed to load' : '页面加载失败'} subTitle={isEnglish ? 'The frontend encountered an unexpected error. Please refresh and try again.' : '前端遇到了未处理错误，请刷新后重试。'} extra={<Button type="primary" onClick={() => window.location.reload()}>{isEnglish ? 'Refresh page' : '刷新页面'}</Button>} />
+    </div>
+  );
 }
 
 export function Application() {
