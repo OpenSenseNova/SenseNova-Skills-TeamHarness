@@ -47,25 +47,26 @@ import {
   type WorkspaceMessage,
 } from '../api/client';
 import { sessionQueryKey } from '../app';
+import { localizeConversationName, useLanguage } from '../language';
 import { useWorkspace, workspaceKeys } from './workspace-context';
 import { WorkItemCommentDrawer } from './WorkItemCommentDrawer';
 
 const { Text, Title } = Typography;
 type ComposerParticipant = Pick<Participant, 'actorId' | 'actorType' | 'displayName'>;
 
-function conversationKindLabel(kind: Conversation['kind']): string {
-  return kind === 'dm' ? '私聊' : '频道';
+function conversationKindLabel(kind: Conversation['kind'], isEnglish = false): string {
+  return kind === 'dm' ? (isEnglish ? 'Direct message' : '私聊') : (isEnglish ? 'Channel' : '频道');
 }
 
 function formatConversationTime(timestamp: number): string {
-  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(timestamp);
+  return new Intl.DateTimeFormat(document.documentElement.lang || 'zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(timestamp);
 }
 
-function workItemLifecycleLabel(status: WorkItem['lifecycleStatus'], assigned: boolean): string {
-  if (status === 'open') return assigned ? '进行中' : '待处理';
-  if (status === 'blocked') return '已阻塞';
-  if (status === 'completed') return '已完成';
-  return '已取消';
+function workItemLifecycleLabel(status: WorkItem['lifecycleStatus'], assigned: boolean, isEnglish: boolean): string {
+  if (status === 'open') return assigned ? (isEnglish ? 'In progress' : '进行中') : (isEnglish ? 'Pending' : '待处理');
+  if (status === 'blocked') return isEnglish ? 'Blocked' : '已阻塞';
+  if (status === 'completed') return isEnglish ? 'Completed' : '已完成';
+  return isEnglish ? 'Cancelled' : '已取消';
 }
 
 function workItemLifecycleIcon(status: WorkItem['lifecycleStatus']): React.ReactNode {
@@ -148,6 +149,8 @@ export function Composer({
   ) => Promise<void>;
 }) {
   const { workspace, project } = useWorkspace();
+  const { isEnglish } = useLanguage();
+  const tx = (zh: string, en: string) => isEnglish ? en : zh;
   const queryClient = useQueryClient();
   const { message } = App.useApp();
   const [value, setValue] = useState('');
@@ -179,7 +182,7 @@ export function Composer({
   const availableWorkItems = workItems.filter((item) => !selectedWorkItems.some((selectedItem) => selectedItem.id === item.id));
   const uploadArtifact = useMutation({
     mutationFn: (file: File) => {
-      if (!project) throw new Error('只有项目会话可以上传 Artifact。');
+      if (!project) throw new Error(tx('只有项目会话可以上传 Artifact。', 'Only project conversations can upload artifacts.'));
       return api.publishArtifactV2(project.id, file);
     },
     onSuccess: async (result) => {
@@ -215,29 +218,29 @@ export function Composer({
   const attachmentMenu = {
     items: [{
       type: 'group' as const,
-      label: '添加内容',
+      label: tx('添加内容', 'Add content'),
       children: [
-        { key: 'upload', icon: <UploadOutlined />, label: '上传 Artifact', disabled: !project },
+        { key: 'upload', icon: <UploadOutlined />, label: tx('上传 Artifact', 'Upload artifact'), disabled: !project },
         {
           key: 'existing-artifacts',
           icon: <ImportOutlined />,
-          label: '添加已有交付物',
+          label: tx('添加已有交付物', 'Add existing deliverable'),
           children: artifactMenuItems.length
             ? artifactMenuItems
-            : [{ key: 'no-artifacts', disabled: true, label: '当前没有可添加的交付物' }],
+            : [{ key: 'no-artifacts', disabled: true, label: tx('当前没有可添加的交付物', 'No deliverables available to add') }],
         },
         {
           key: 'work-items',
           icon: <CheckSquareOutlined />,
-          label: '引用 WorkItem',
+          label: tx('引用 WorkItem', 'Reference WorkItem'),
           children: workItemMenuItems.length
             ? workItemMenuItems
-            : [{ key: 'no-work-items', disabled: true, label: '当前项目没有可引用的任务' }],
+            : [{ key: 'no-work-items', disabled: true, label: tx('当前项目没有可引用的任务', 'No tasks available to reference in this project') }],
         },
         ...(onCreateWorkItem ? [{
           key: 'create-work-item',
           icon: <CheckSquareOutlined />,
-          label: '创建任务',
+          label: tx('创建任务', 'Create task'),
           disabled: creatingWorkItem,
         }] : []),
       ],
@@ -315,11 +318,11 @@ export function Composer({
     if (!onCreateWorkItem) return;
     const taskDescription = value.trim();
     if (!taskDescription) {
-      void message.warning('请输入任务内容。');
+      void message.warning(tx('请输入任务内容。', 'Enter task details.'));
       return;
     }
     if (taskDescription.length > 10_000) {
-      void message.error('任务描述最多 10000 字。');
+      void message.error(tx('任务描述最多 10000 字。', 'Task descriptions can be at most 10,000 characters.'));
       return;
     }
     try {
@@ -345,15 +348,15 @@ export function Composer({
       {replyTarget && (
         <div className="reply-context">
           <div className="reply-context-copy">
-            <Text strong>{workItemReplyId ? '任务讨论' : `回复 @${replyTarget.authorDisplayName}`}</Text>
+            <Text strong>{workItemReplyId ? tx('任务讨论', 'Task discussion') : tx(`回复 @${replyTarget.authorDisplayName}`, `Reply to @${replyTarget.authorDisplayName}`)}</Text>
             <Text type="secondary" ellipsis>{replyTarget.body}</Text>
           </div>
-          <Button type="text" size="small" onClick={onCancelReply}>取消</Button>
+          <Button type="text" size="small" onClick={onCancelReply}>{tx('取消', 'Cancel')}</Button>
         </div>
       )}
       {effectiveSelected.length > 0 && (
         <div className="mention-strip">
-          <Text type="secondary">提及：</Text>
+          <Text type="secondary">{tx('提及：', 'Mentions:')}</Text>
           {effectiveSelected.map((participant) => (
             <Tag
               key={participant.actorId}
@@ -368,7 +371,7 @@ export function Composer({
       )}
       {selectedArtifacts.length > 0 && (
         <div className="mention-strip">
-          <Text type="secondary">已添加：</Text>
+          <Text type="secondary">{tx('已添加：', 'Added:')}</Text>
           {selectedArtifacts.map((selection) => (
             <Tag
               key={selection.artifact.artifactId}
@@ -383,7 +386,7 @@ export function Composer({
       )}
       {selectedWorkItems.length > 0 && (
         <div className="mention-strip">
-          <Text type="secondary">任务：</Text>
+          <Text type="secondary">{tx('任务：', 'Task:')}</Text>
           {selectedWorkItems.map((item) => (
             <Tag
               key={item.id}
@@ -411,18 +414,18 @@ export function Composer({
                     setMentionOpen(false);
                   }}
                 >
-                  @{participant.displayName} <Text type="secondary">{participant.actorType === 'agent' ? 'Agent' : '成员'}</Text>
+                  @{participant.displayName} <Text type="secondary">{participant.actorType === 'agent' ? 'Agent' : tx('成员', 'Member')}</Text>
                 </Button>
               ))}
             </Space>
-          ) : <Text type="secondary">当前会话没有其他可提及成员。</Text>}
+          ) : <Text type="secondary">{tx('当前会话没有其他可提及成员。', 'No other members can be mentioned in this conversation.')}</Text>}
         </div>
       )}
       <input
         ref={uploadInput}
         className="composer-file-input"
         type="file"
-        aria-label="选择要上传的交付物"
+        aria-label={tx('选择要上传的交付物', 'Choose a deliverable to upload')}
         onChange={(event) => {
           const file = event.target.files?.[0];
           if (file) uploadArtifact.mutate(file);
@@ -433,14 +436,14 @@ export function Composer({
         value={value}
         loading={loading}
         placeholder={workItemReplyId
-          ? '写下评论，输入 @ 提及成员'
+          ? tx('写下评论，输入 @ 提及成员', 'Write a comment, type @ to mention members')
           : replyTarget
-            ? `回复 @${replyTarget.authorDisplayName}…`
+            ? tx(`回复 @${replyTarget.authorDisplayName}…`, `Reply to @${replyTarget.authorDisplayName}…`)
             : taskMode
-              ? '描述任务目标，输入 @ 选择负责人'
+              ? tx('描述任务目标，输入 @ 选择负责人', 'Describe the task, type @ to choose assignees')
               : agentRequestIsImplicit
-                ? '写下消息，点击 + 添加内容'
-                : '写下消息，输入 @ 提及成员，点击 + 添加内容'}
+                ? tx('写下消息，点击 + 添加内容', 'Write a message, click + to add content')
+                : tx('写下消息，输入 @ 提及成员，点击 + 添加内容', 'Write a message, type @ to mention members, click + to add content')}
         autoSize={{ minRows: 1, maxRows: 8 }}
         prefix={(
           <Dropdown
@@ -451,7 +454,7 @@ export function Composer({
           >
             <Button
               type="text"
-              aria-label="添加内容"
+              aria-label={tx('添加内容', 'Add content')}
               loading={uploadArtifact.isPending}
               icon={<PlusOutlined />}
               onClick={() => setMentionOpen(false)}
@@ -467,9 +470,9 @@ export function Composer({
       {taskMode && (
         <div className="composer-task-hint" role="status">
           <CheckSquareOutlined />
-          <span className="composer-task-hint-title">创建任务</span>
-          <Text type="secondary">提交后会创建任务；@Agent 会自动成为负责人，否则进入待处理。</Text>
-          <Button type="text" size="small" aria-label="取消创建任务" onClick={() => setTaskMode(false)}>取消</Button>
+          <span className="composer-task-hint-title">{tx('创建任务', 'Create task')}</span>
+          <Text type="secondary">{tx('提交后会创建任务；@Agent 会自动成为负责人，否则进入待处理。', 'Submitting creates a task; @Agent becomes the assignee automatically, otherwise it stays in backlog.')}</Text>
+          <Button type="text" size="small" aria-label={tx('取消创建任务', 'Cancel task creation')} onClick={() => setTaskMode(false)}>{tx('取消', 'Cancel')}</Button>
         </div>
       )}
     </div>
@@ -478,6 +481,8 @@ export function Composer({
 
 export function ConversationPage() {
   const { conversationId = '' } = useParams();
+  const { isEnglish } = useLanguage();
+  const tx = (zh: string, en: string) => isEnglish ? en : zh;
   const location = useLocation();
   const { workspace, project, members, projectMembers } = useWorkspace();
   const queryClient = useQueryClient();
@@ -573,7 +578,7 @@ export function ConversationPage() {
       workItemIds: string[];
       artifactSelections: Array<{ artifactId: string; artifactVersionId: string }>;
     }) => {
-      if (!project) throw new Error('当前会话不属于项目。');
+      if (!project) throw new Error(tx('当前会话不属于项目。', 'This conversation does not belong to a project.'));
       const assigneeProjectMembershipIds = projectMembers
         .filter((member) => member.actorType === 'agent' && mentionedActorIds.includes(member.actorId))
         .map((member) => member.projectMembershipId);
@@ -598,8 +603,11 @@ export function ConversationPage() {
         ]);
       }
       void message.success(workItem.assignees.some((assignee) => assignee.actorType === 'agent')
-        ? `任务已创建，并已分配给 ${workItem.assignees.filter((assignee) => assignee.actorType === 'agent').map((assignee) => assignee.displayName).join('、')}。`
-        : '任务已放入待处理。');
+        ? tx(
+            `任务已创建，并已分配给 ${workItem.assignees.filter((assignee) => assignee.actorType === 'agent').map((assignee) => assignee.displayName).join('、')}。`,
+            `Task created and assigned to ${workItem.assignees.filter((assignee) => assignee.actorType === 'agent').map((assignee) => assignee.displayName).join(', ')}.`,
+          )
+        : tx('任务已放入待处理。', 'Task added to backlog.'));
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -618,7 +626,7 @@ export function ConversationPage() {
       ]);
       setReplyTarget(null);
       setReplyWorkItemId(null);
-      void message.success('任务评论已发布。');
+      void message.success(tx('任务评论已发布。', 'Task comment posted.'));
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -638,7 +646,7 @@ export function ConversationPage() {
           queryClient.invalidateQueries({ queryKey: workspaceKeys.projectArchivedConversations(updated.projectId) }),
         ] : []),
       ]);
-      void message.success(variables.action === 'archive' ? '会话已归档' : '会话已恢复');
+      void message.success(variables.action === 'archive' ? tx('会话已归档', 'Conversation archived') : tx('会话已恢复', 'Conversation restored'));
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -653,7 +661,7 @@ export function ConversationPage() {
         queryClient.invalidateQueries({ queryKey: ['conversation', conversationId] }),
         queryClient.invalidateQueries({ queryKey: ['conversation', conversationId, 'participants'] }),
       ]);
-      void message.success('成员已添加');
+      void message.success(tx('成员已添加', 'Member added'));
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -670,7 +678,7 @@ export function ConversationPage() {
         queryClient.invalidateQueries({ queryKey: workspaceKeys.conversations(workspace.id) }),
         ...(project ? [queryClient.invalidateQueries({ queryKey: workspaceKeys.projectConversations(project.id) })] : []),
       ]);
-      void message.success('成员已移除');
+      void message.success(tx('成员已移除', 'Member removed'));
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -724,12 +732,12 @@ export function ConversationPage() {
   const availableParticipants = (project
     ? projectMembers.map((member) => ({
         value: member.projectMembershipId,
-        label: `${member.displayName} · ${member.actorType === 'agent' ? 'Agent' : '成员'}`,
+        label: `${member.displayName} · ${member.actorType === 'agent' ? 'Agent' : tx('成员', 'Member')}`,
         actorType: member.actorType,
       }))
     : members.map((member) => ({
         value: member.membershipId,
-        label: `${member.displayName} · ${member.actorType === 'agent' ? 'Agent' : '成员'}`,
+        label: `${member.displayName} · ${member.actorType === 'agent' ? 'Agent' : tx('成员', 'Member')}`,
         actorType: member.actorType,
       })))
     .filter((option) => !audienceIds.has(option.value))
@@ -759,8 +767,8 @@ export function ConversationPage() {
           avatar={<Avatar icon={item.authorActorType === 'agent' ? <MessageOutlined /> : <UserOutlined />} style={{ background: item.authorActorType === 'agent' ? '#eef2ff' : '#e9f8f3', color: item.authorActorType === 'agent' ? '#4f6ef7' : '#208c70' }} />}
           header={(
             <div className="message-meta">
-              {item.authorDisplayName} {item.authorDeleted && <Tag bordered={false}>已删除</Tag>} ·{' '}
-              {new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(item.createdAt)}
+              {item.authorDisplayName} {item.authorDeleted && <Tag bordered={false}>{tx('已删除', 'Deleted')}</Tag>} ·{' '}
+              {new Intl.DateTimeFormat(isEnglish ? 'en-US' : 'zh-CN', { hour: '2-digit', minute: '2-digit' }).format(item.createdAt)}
             </div>
           )}
           content={(
@@ -768,7 +776,7 @@ export function ConversationPage() {
               {replySource && (
                 <div
                   className="message-reply-reference"
-                  aria-label={`引用 ${replySource.authorDisplayName} 的消息`}
+                  aria-label={tx(`引用 ${replySource.authorDisplayName} 的消息`, `Quoted message from ${replySource.authorDisplayName}`)}
                 >
                   <Text strong>@{replySource.authorDisplayName}</Text>
                   <Text type="secondary" ellipsis>{replySource.body}</Text>
@@ -777,13 +785,13 @@ export function ConversationPage() {
               <div className="message-body-line">
                 {renderedBody}
                 {mentionedTaskReferences.length > 0 && (
-                  <span className="message-task-mentions" aria-label="引用的任务">
+                  <span className="message-task-mentions" aria-label={tx('引用的任务', 'Referenced tasks')}>
                     {mentionedTaskReferences.map((reference) => (
                       <a
                         key={reference.workItemId}
                         className="message-task-mention"
                         href={`/w/${workspace.id}/p/${project?.id ?? item.projectId}/work-items?workItemId=${reference.workItemId}`}
-                        aria-label={`打开任务 #${reference.taskNumber}`}
+                        aria-label={tx(`打开任务 #${reference.taskNumber}`, `Open task #${reference.taskNumber}`)}
                       >
                         @task#{reference.taskNumber}
                       </a>
@@ -792,7 +800,7 @@ export function ConversationPage() {
                 )}
               </div>
               {createdTaskReferences.length > 0 && (
-                <div className="message-task-card-list" aria-label="消息中的任务">
+                <div className="message-task-card-list" aria-label={tx('消息中的任务', 'Tasks in this message')}>
                   {createdTaskReferences.map((reference) => {
                     const task = workItems.data?.find((candidate) => candidate.id === reference.workItemId);
                     const taskNumber = task?.taskNumber ?? reference.taskNumber;
@@ -804,45 +812,45 @@ export function ConversationPage() {
                           <a
                             className="message-task-card-link"
                             href={taskHref}
-                            aria-label={`打开任务 #${taskNumber}`}
+                            aria-label={tx(`打开任务 #${taskNumber}`, `Open task #${taskNumber}`)}
                           >
                             <div className="message-task-card-header">
                               <span className="message-task-card-label"><CheckSquareOutlined /> @task#{taskNumber}</span>
                               {task && (
                                 <span className="message-task-card-status">
-                                  {workItemLifecycleIcon(task.lifecycleStatus)} {workItemLifecycleLabel(task.lifecycleStatus, task.assignees.length > 0)}
+                                  {workItemLifecycleIcon(task.lifecycleStatus)} {workItemLifecycleLabel(task.lifecycleStatus, task.assignees.length > 0, isEnglish)}
                                 </span>
                               )}
                             </div>
-                            <strong>{task?.description ?? '任务详情加载中…'}</strong>
+                            <strong>{task?.description ?? tx('任务详情加载中…', 'Loading task details…')}</strong>
                             {relatedTaskReferences.length > 0 && (
-                              <div className="message-task-card-related" aria-label="关联任务">
-                                <span className="message-task-card-related-label">关联任务：</span>
+                              <div className="message-task-card-related" aria-label={tx('关联任务', 'Related tasks')}>
+                                <span className="message-task-card-related-label">{tx('关联任务：', 'Related tasks:')}</span>
                                 {relatedTaskReferences.map((related) => (
                                   <a
                                     key={related.workItemId}
                                     className="message-task-mention"
                                     href={`/w/${workspace.id}/p/${project?.id ?? item.projectId}/work-items?workItemId=${related.workItemId}`}
-                                    aria-label={`打开关联任务 #${related.taskNumber}`}
+                                    aria-label={tx(`打开关联任务 #${related.taskNumber}`, `Open related task #${related.taskNumber}`)}
                                   >
                                     @task#{related.taskNumber}
                                   </a>
                                 ))}
                               </div>
                             )}
-                            {task?.blockerReason && <p className="message-task-card-reason blocked">阻塞：{task.blockerReason}</p>}
-                            {task?.cancellationReason && <p className="message-task-card-reason cancelled">取消：{task.cancellationReason}</p>}
+                            {task?.blockerReason && <p className="message-task-card-reason blocked">{tx('阻塞：', 'Blocked: ')}{task.blockerReason}</p>}
+                            {task?.cancellationReason && <p className="message-task-card-reason cancelled">{tx('取消：', 'Cancelled: ')}{task.cancellationReason}</p>}
                             {task && (
                               <div className="message-task-card-meta">
                                 <span className="message-task-card-person">
                                   <Avatar size={20} icon={<UserOutlined />} />
-                                  <span><span className="message-task-card-person-label">发起人：</span>{task.createdByDisplayName}</span>
+                                  <span><span className="message-task-card-person-label">{tx('发起人：', 'Created by: ')}</span>{task.createdByDisplayName}</span>
                                 </span>
                                 <span className={`message-task-card-person${task.assignees.length ? '' : ' message-task-card-unassigned'}`}>
                                   <Avatar size={20} icon={task.assignees[0]?.actorType === 'agent' ? <MessageOutlined /> : <UserOutlined />} />
                                   <span>
-                                    <span className="message-task-card-person-label">负责人：</span>
-                                    {task.assignees.length ? task.assignees.map((assignee) => assignee.displayName).join('、') : '未分配'}
+                                    <span className="message-task-card-person-label">{tx('负责人：', 'Assignee: ')}</span>
+                                    {task.assignees.length ? task.assignees.map((assignee) => assignee.displayName).join(isEnglish ? ', ' : '、') : tx('未分配', 'Unassigned')}
                                   </span>
                                 </span>
                               </div>
@@ -854,7 +862,7 @@ export function ConversationPage() {
                                 type="link"
                                 size="small"
                                 icon={<MessageOutlined />}
-                                aria-label={`打开任务 #${taskNumber} 评论`}
+                                aria-label={tx(`打开任务 #${taskNumber} 评论`, `Open comments for task #${taskNumber}`)}
                                 onClick={() => {
                                   setTaskThreadMessageId(item.id);
                                   setTaskThreadWorkItemId(reference.workItemId);
@@ -862,7 +870,7 @@ export function ConversationPage() {
                                   setReplyTarget(null);
                                 }}
                               >
-                                评论{task?.commentFrontier ? ` ${task.commentFrontier}` : ''}
+                                {tx('评论', 'Comments')}{task?.commentFrontier ? ` ${task.commentFrontier}` : ''}
                               </Button>
                             </footer>
                           )}
@@ -880,11 +888,11 @@ export function ConversationPage() {
                     </a>
                   ) : (
                     <Text type="secondary">
-                      {reference.artifactName} · v{reference.version} · 该版本内容已删除
+                      {reference.artifactName} · v{reference.version} · {tx('该版本内容已删除', "This version's content was deleted")}
                     </Text>
                   )}
                   {reference.artifactStatus !== 'active' && (
-                    <Text type="secondary"> · 交付物{reference.artifactStatus === 'deleted' ? '已删除' : '已清理'}</Text>
+                    <Text type="secondary"> · {tx('交付物', 'Deliverable ')}{reference.artifactStatus === 'deleted' ? tx('已删除', 'deleted') : tx('已清理', 'purged')}</Text>
                   )}
                 </div>
               ))}
@@ -902,7 +910,7 @@ export function ConversationPage() {
                   setReplyTarget(item);
                 }}
               >
-                回复
+                {tx('回复', 'Reply')}
               </Button>
             )
             : undefined}
@@ -914,8 +922,8 @@ export function ConversationPage() {
   const otherDirectParticipant = conversation.data.kind === 'dm'
     ? participants.data.find((participant) => participant.workspaceMembershipId !== workspace.membershipId)
     : undefined;
-  const conversationTitle = conversation.data.title
-    || (conversation.data.kind === 'dm' ? otherDirectParticipant?.displayName ?? '私聊' : '未命名会话');
+  const conversationTitle = localizeConversationName(conversation.data.title, isEnglish)
+    || (conversation.data.kind === 'dm' ? otherDirectParticipant?.displayName ?? tx('私聊', 'Direct message') : tx('未命名会话', 'Untitled conversation'));
   return (
     <section className="conversation-page">
       <header className="conversation-header">
@@ -924,36 +932,36 @@ export function ConversationPage() {
             <Title level={3}>{conversationTitle}</Title>
             {conversation.data.kind === 'channel' && (
               <Tag icon={conversation.data.visibility === 'private' ? <LockOutlined /> : <GlobalOutlined />}>
-                {conversation.data.visibility === 'private' ? '私密' : '公开'}
+                {conversation.data.visibility === 'private' ? tx('私密', 'Private') : tx('公开', 'Public')}
               </Tag>
             )}
-            {archived && <Tag icon={<InboxOutlined />}>已归档</Tag>}
-            {!archived && directMessageClosed && <Tag>只读</Tag>}
+            {archived && <Tag icon={<InboxOutlined />}>{tx('已归档', 'Archived')}</Tag>}
+            {!archived && directMessageClosed && <Tag>{tx('只读', 'Read-only')}</Tag>}
           </Space>
           <Text type="secondary">
-            {conversationKindLabel(conversation.data.kind)} · {participants.data.length} 位成员
+            {conversationKindLabel(conversation.data.kind, isEnglish)} · {participants.data.length} {tx('位成员', 'members')}
           </Text>
         </div>
         <Space>
-          <Button icon={<TeamOutlined />} onClick={() => setParticipantsOpen(true)}>成员</Button>
+          <Button icon={<TeamOutlined />} onClick={() => setParticipantsOpen(true)}>{tx('成员', 'Members')}</Button>
           {canManageLifecycle && (archived ? (
             <Button
               icon={<RollbackOutlined />}
               loading={lifecycle.isPending}
               onClick={() => lifecycle.mutate({ action: 'restore', revision: conversation.data.revision })}
             >
-              恢复
+              {tx('恢复', 'Restore')}
             </Button>
           ) : (
             <Popconfirm
-              title="归档这个会话？"
-              description="消息和执行历史会保留；归档后不能继续发送消息或请求 Agent。"
-              okText="归档"
-              cancelText="取消"
+              title={tx('归档这个会话？', 'Archive this conversation?')}
+              description={tx('消息和执行历史会保留；归档后不能继续发送消息或请求 Agent。', 'Messages and execution history are kept; once archived you cannot send messages or request Agents.')}
+              okText={tx('归档', 'Archive')}
+              cancelText={tx('取消', 'Cancel')}
               okButtonProps={{ danger: true }}
               onConfirm={() => lifecycle.mutate({ action: 'archive', revision: conversation.data.revision })}
             >
-              <Button danger icon={<InboxOutlined />} loading={lifecycle.isPending}>归档</Button>
+              <Button danger icon={<InboxOutlined />} loading={lifecycle.isPending}>{tx('归档', 'Archive')}</Button>
             </Popconfirm>
           ))}
         </Space>
@@ -965,32 +973,32 @@ export function ConversationPage() {
               <Alert
                 type="info"
                 showIcon
-                title="请先加入这个会话"
-                description="把自己加入成员后即可访问完整历史。"
+                title={tx('请先加入这个会话', 'Join this conversation first')}
+                description={tx('把自己加入成员后即可访问完整历史。', 'Add yourself as a member to access the full history.')}
               />
               <Button style={{ marginTop: 16 }} type="primary" icon={<TeamOutlined />} onClick={() => setParticipantsOpen(true)}>
-                加入会话
+                {tx('加入会话', 'Join conversation')}
               </Button>
             </Card>
           </div>
         ) : (messages.data ?? []).length ? (
           <div className="message-stack">{(messages.data ?? []).map((item) => renderMessage(item))}</div>
-        ) : <Empty description="还没有消息，开始协作吧。" />}
+        ) : <Empty description={tx('还没有消息，开始协作吧。', 'No messages yet — start collaborating.')} />}
       </div>
       {conversation.data.accessMode === 'content' && <div className="conversation-composer">
         {archived ? (
           <Alert
             type="info"
             showIcon
-            title="该会话已归档"
-            description="消息和执行历史仍可查看；恢复后才能继续发送消息或请求 Agent。"
+            title={tx('该会话已归档', 'This conversation is archived')}
+            description={tx('消息和执行历史仍可查看；恢复后才能继续发送消息或请求 Agent。', 'Messages and execution history remain viewable; restore it to send messages or request Agents again.')}
           />
         ) : directMessageClosed ? (
           <Alert
             type="info"
             showIcon
-            title="该私聊已结束"
-            description="对方成员已被删除，历史消息仅供查看。"
+            title={tx('该私聊已结束', 'This direct message has ended')}
+            description={tx('对方成员已被删除，历史消息仅供查看。', 'The other member has been removed; past messages are view-only.')}
           />
         ) : (
           <Composer
@@ -1071,7 +1079,7 @@ export function ConversationPage() {
           />
         ) : null}
       />
-      <Modal title="会话成员" open={participantsOpen} footer={null} onCancel={() => setParticipantsOpen(false)}>
+      <Modal title={tx('会话成员', 'Conversation members')} open={participantsOpen} footer={null} onCancel={() => setParticipantsOpen(false)}>
         {conversation.data.kind === 'channel' && conversation.data.scope.type !== 'direct_message'
           && !projectGroupIsExplicit && (
           <Alert
@@ -1079,14 +1087,14 @@ export function ConversationPage() {
             showIcon
             style={{ marginBottom: 16 }}
             title={project
-              ? '项目成员会自动进入主群；Agent 需要由 Owner 单独加入。'
-              : 'Workspace 成员会自动进入团队会话；Agent 需要由 Owner 单独加入。'}
+              ? tx('项目成员会自动进入主群；Agent 需要由 Owner 单独加入。', 'Project members join the main channel automatically; Agents must be added separately by the owner.')
+              : tx('Workspace 成员会自动进入团队会话；Agent 需要由 Owner 单独加入。', 'Workspace members join the team conversation automatically; Agents must be added separately by the owner.')}
           />
         )}
         {conversation.data.kind === 'channel' && canManageAudience && (
           <Select
-            aria-label="添加参与者"
-            placeholder="添加成员或 Agent"
+            aria-label={tx('添加参与者', 'Add participant')}
+            placeholder={tx('添加成员或 Agent', 'Add a member or Agent')}
             options={availableParticipants}
             loading={addParticipant.isPending}
             disabled={availableParticipants.length === 0}
@@ -1100,10 +1108,10 @@ export function ConversationPage() {
             <List.Item {...((participant.actorType === 'agent' || canManageHumanAudience) ? { actions: [
               <Popconfirm
                 key="remove"
-                title={`移除 ${participant.displayName}？`}
-                description="移出后会立即失去完整历史、消息、变更流和 Agent 执行权限。"
-                okText="移除"
-                cancelText="取消"
+                title={tx(`移除 ${participant.displayName}？`, `Remove ${participant.displayName}?`)}
+                description={tx('移出后会立即失去完整历史、消息、变更流和 Agent 执行权限。', 'Removing them immediately revokes access to full history, messages, change streams, and Agent execution.')}
+                okText={tx('移除', 'Remove')}
+                cancelText={tx('取消', 'Cancel')}
                 okButtonProps={{ danger: true }}
                 onConfirm={() => removeParticipant.mutate(participant.scopeMembershipId)}
               >
@@ -1112,14 +1120,14 @@ export function ConversationPage() {
                   danger
                   loading={removeParticipant.isPending && removeParticipant.variables === participant.scopeMembershipId}
                 >
-                  移除
+                  {tx('移除', 'Remove')}
                 </Button>
               </Popconfirm>,
             ] } : {})}>
               <List.Item.Meta
                 avatar={<Avatar icon={participant.actorType === 'agent' ? <MessageOutlined /> : <UserOutlined />} />}
                 title={participant.displayName}
-                description={participant.actorType === 'agent' ? 'Agent' : '成员'}
+                description={participant.actorType === 'agent' ? 'Agent' : tx('成员', 'Member')}
               />
             </List.Item>
           )}

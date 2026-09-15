@@ -36,6 +36,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, errorMessage, type CreateWorkItemInput, type ProjectMember, type WorkItem } from '../api/client';
+import { useLanguage } from '../language';
 import { useWorkspace, workspaceKeys } from './workspace-context';
 import { isWorkItemSubmissionPending } from './work-item-presentation';
 import { Composer } from './ConversationPage';
@@ -66,13 +67,13 @@ function boardColumn(workItem: WorkItem): BoardColumnKey {
   return (workItem.assignees?.length ?? (workItem.assignee ? 1 : 0)) > 0 ? 'in_progress' : 'backlog';
 }
 
-function relativeTime(timestamp: number): string {
+function relativeTime(timestamp: number, isEnglish: boolean): string {
   const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
-  if (minutes < 1) return '刚刚';
-  if (minutes < 60) return `${minutes} 分钟前`;
+  if (minutes < 1) return isEnglish ? 'just now' : '刚刚';
+  if (minutes < 60) return isEnglish ? `${minutes} min ago` : `${minutes} 分钟前`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} 小时前`;
-  return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(timestamp);
+  if (hours < 24) return isEnglish ? `${hours} hr ago` : `${hours} 小时前`;
+  return new Intl.DateTimeFormat(isEnglish ? 'en-US' : 'zh-CN', { month: 'short', day: 'numeric' }).format(timestamp);
 }
 
 function artifactHref(workspaceId: string, projectId: string, artifactId: string, versionId: string): string {
@@ -88,10 +89,12 @@ function SubmissionArtifacts({
   workspaceId: string;
   projectId: string;
 }) {
+  const { isEnglish } = useLanguage();
+  const tx = (zh: string, en: string) => isEnglish ? en : zh;
   if (!submission?.artifactReferences.length) return null;
   return (
-    <div className="work-item-submission-artifacts" aria-label="交付结果">
-      <Text type="secondary">交付结果：</Text>
+    <div className="work-item-submission-artifacts" aria-label={tx('交付结果', 'Submission')}>
+      <Text type="secondary">{tx('交付结果：', 'Submission:')}</Text>
       {submission.artifactReferences.map((reference) => reference.contentAvailable ? (
         <a
           key={reference.artifactVersionId}
@@ -101,7 +104,7 @@ function SubmissionArtifacts({
         </a>
       ) : (
         <Text type="secondary" key={reference.artifactVersionId}>
-          {reference.artifactName} · v{reference.version} · 该版本已不可访问
+          {reference.artifactName} · v{reference.version} · {tx('该版本已不可访问', 'This version is no longer accessible')}
         </Text>
       ))}
     </div>
@@ -110,6 +113,13 @@ function SubmissionArtifacts({
 
 export function WorkItemBoardPage() {
   const { workspace, project, projectMembers, members } = useWorkspace();
+  const { isEnglish } = useLanguage();
+  const tx = (zh: string, en: string) => isEnglish ? en : zh;
+  const localizedColumns = columns.map((column) => ({
+    ...column,
+    title: tx(column.title, ({ 待处理: 'Backlog', 进行中: 'In progress', 已阻塞: 'Blocked', 已完成: 'Completed', 已取消: 'Cancelled' } as Record<string, string>)[column.title] ?? column.title),
+    empty: tx(column.empty, ({ '暂无待处理任务': 'No backlog tasks', '暂无进行中的任务': 'No tasks in progress', '暂无阻塞任务': 'No blocked tasks', '暂无已完成任务': 'No completed tasks', '暂无已取消任务': 'No cancelled tasks' } as Record<string, string>)[column.empty] ?? column.empty),
+  }));
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -168,8 +178,8 @@ export function WorkItemBoardPage() {
         queryClient.invalidateQueries({ queryKey: workspaceKeys.projects(workspace.id) }),
       ]);
       void message.success(workItem.assignees.some((assignee) => assignee.actorType === 'agent')
-        ? `任务已创建，并已通知 ${workItem.assignees.filter((assignee) => assignee.actorType === 'agent').map((assignee) => assignee.displayName).join('、')}。`
-        : '任务已创建。');
+        ? tx(`任务已创建，并已通知 ${workItem.assignees.filter((assignee) => assignee.actorType === 'agent').map((assignee) => assignee.displayName).join('、')}。`, `Task created and notified ${workItem.assignees.filter((assignee) => assignee.actorType === 'agent').map((assignee) => assignee.displayName).join(', ')}.`)
+        : tx('任务已创建。', 'Task created.'));
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -181,7 +191,7 @@ export function WorkItemBoardPage() {
       setReasonAction(undefined);
       reasonForm.resetFields();
       await refresh();
-      void message.success(variables.action.kind === 'block' ? '任务已标记为阻塞。' : '任务已取消。');
+      void message.success(variables.action.kind === 'block' ? tx('任务已标记为阻塞。', 'Task marked as blocked.') : tx('任务已取消。', 'Task cancelled.'));
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -200,8 +210,8 @@ export function WorkItemBoardPage() {
       assignmentForm.resetFields();
       await refresh();
       void message.success(workItem.assignees.length
-        ? `已分配给 ${workItem.assignees.map((assignee) => assignee.displayName).join('、')}${workItem.assignees.some((assignee) => assignee.actorType === 'agent') ? '，并通知相关 Agent' : ''}。`
-        : '已解除分配。');
+        ? tx(`已分配给 ${workItem.assignees.map((assignee) => assignee.displayName).join('、')}${workItem.assignees.some((assignee) => assignee.actorType === 'agent') ? '，并通知相关 Agent' : ''}。`, `Assigned to ${workItem.assignees.map((assignee) => assignee.displayName).join(', ')}${workItem.assignees.some((assignee) => assignee.actorType === 'agent') ? ', and notified the relevant Agent' : ''}.`)
+        : tx('已解除分配。', 'Assignment cleared.'));
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -215,7 +225,7 @@ export function WorkItemBoardPage() {
       setEditAction(undefined);
       editForm.resetFields();
       await refresh();
-      void message.success('任务详情已更新。');
+      void message.success(tx('任务详情已更新。', 'Task details updated.'));
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -225,7 +235,7 @@ export function WorkItemBoardPage() {
       : api.completeWorkItem(workItem.id, workItem.revision),
     onSuccess: async (_, variables) => {
       await refresh();
-      void message.success(variables.kind === 'unblock' ? '任务已解除阻塞。' : '任务已完成。');
+      void message.success(variables.kind === 'unblock' ? tx('任务已解除阻塞。', 'Task unblocked.') : tx('任务已完成。', 'Task completed.'));
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -252,7 +262,7 @@ export function WorkItemBoardPage() {
     },
     onSuccess: async () => {
       await refresh();
-      void message.success('交付结果已提交，等待验收。');
+      void message.success(tx('交付结果已提交，等待验收。', 'Result submitted, awaiting review.'));
     },
     onError: (error) => void message.error(errorMessage(error)),
   });
@@ -282,12 +292,12 @@ export function WorkItemBoardPage() {
   const canManage = project.role === 'owner' || project.role === 'manager';
   const confirmComplete = (workItem: WorkItem) => {
     modal.confirm({
-      title: '确认完成这个任务？',
+      title: tx('确认完成这个任务？', 'Complete this task?'),
       content: workItem.currentSubmission
-        ? `将验收 ${workItem.currentSubmission.submittedByDisplayName} 提交的结果；完成后不可重新打开。`
-        : '当前没有结构化结果提交；仍可按人工完成策略直接完成。完成后不可重新打开。',
-      okText: '确认完成',
-      cancelText: '返回',
+        ? tx(`将验收 ${workItem.currentSubmission.submittedByDisplayName} 提交的结果；完成后不可重新打开。`, `Accept the result submitted by ${workItem.currentSubmission.submittedByDisplayName}; it cannot be reopened once completed.`)
+        : tx('当前没有结构化结果提交；仍可按人工完成策略直接完成。完成后不可重新打开。', 'No structured result has been submitted; you can still complete it manually. It cannot be reopened once completed.'),
+      okText: tx('确认完成', 'Confirm completion'),
+      cancelText: tx('返回', 'Back'),
       onOk: () => transition.mutateAsync({ workItem, kind: 'complete' }),
     });
   };
@@ -297,11 +307,11 @@ export function WorkItemBoardPage() {
       <header className="work-item-board-header">
         <div>
           <Text className="work-item-board-eyebrow">{project.name}</Text>
-          <Title level={2}>任务看板</Title>
-          <Text type="secondary">把协作拆成可跟踪的任务，明确负责人和交付结果。</Text>
+          <Title level={2}>{tx('任务看板', 'Task board')}</Title>
+          <Text type="secondary">{tx('把协作拆成可跟踪的任务，明确负责人和交付结果。', 'Break collaboration into trackable tasks with clear owners and outcomes.')}</Text>
         </div>
         <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-          创建任务
+          {tx('创建任务', 'Create task')}
         </Button>
       </header>
 
@@ -309,34 +319,34 @@ export function WorkItemBoardPage() {
         <Input
           allowClear
           prefix={<SearchOutlined />}
-          aria-label="搜索任务"
-          placeholder="搜索任务描述或负责人"
+          aria-label={tx('搜索任务', 'Search tasks')}
+              placeholder={tx('搜索任务描述或负责人', 'Search task descriptions or assignees')}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
         <Select
-          aria-label="按负责人筛选"
+          aria-label={tx('按负责人筛选', 'Filter by assignee')}
           value={assigneeFilter}
           onChange={setAssigneeFilter}
           options={[
-            { value: 'all', label: '全部负责人' },
-            { value: 'unassigned', label: '未分配' },
+            { value: 'all', label: tx('全部负责人', 'All assignees') },
+            { value: 'unassigned', label: tx('未分配', 'Unassigned') },
             ...projectMembers.map((member) => ({
               value: member.projectMembershipId,
-              label: `${member.actorType === 'agent' ? 'Agent' : '成员'} · ${member.displayName}`,
+              label: `${member.actorType === 'agent' ? 'Agent' : tx('成员', 'Member')} · ${member.displayName}`,
             })),
           ]}
         />
-        <Text type="secondary">显示 {filteredItems.length} / {workItems.data?.length ?? 0} 个任务</Text>
+        <Text type="secondary">{tx('显示', 'Showing')} {filteredItems.length} / {workItems.data?.length ?? 0} {tx('个任务', 'tasks')}</Text>
       </div>
 
       {workItems.isPending ? (
         <div className="work-item-board-loading"><Spin size="large" /></div>
       ) : workItems.isError ? (
-        <Alert type="error" showIcon title="任务看板加载失败" description={errorMessage(workItems.error)} />
+        <Alert type="error" showIcon title={tx('任务看板加载失败', 'Failed to load the task board')} description={errorMessage(workItems.error)} />
       ) : (
-        <section className="work-item-board" aria-label={`${project.name} 任务看板`}>
-          {columns.map((column) => {
+        <section className="work-item-board" aria-label={tx(`${project.name} 任务看板`, `${project.name} task board`)}>
+          {localizedColumns.map((column) => {
             const items = filteredItems.filter((workItem) => boardColumn(workItem) === column.key);
             return (
               <section className={`work-item-column ${column.key}`} key={column.key} aria-labelledby={`column-${column.key}`}>
@@ -352,20 +362,20 @@ export function WorkItemBoardPage() {
                     const menuItems = [
                       ...((canManage || workItem.assignees.some((assignee) => assignee.workspaceMembershipId === workspace.membershipId))
                         && workItem.lifecycleStatus === 'open'
-                        ? [{ key: 'upload-result', label: '上传交付结果', icon: <UploadOutlined /> }] : []),
+                        ? [{ key: 'upload-result', label: tx('上传交付结果', 'Upload result'), icon: <UploadOutlined /> }] : []),
                       ...(workItem.sourceConversationId && workItem.sourceMessageId
-                        ? [{ key: 'view-source', label: '查看来源', icon: <LinkOutlined /> }] : []),
+                        ? [{ key: 'view-source', label: tx('查看来源', 'View source'), icon: <LinkOutlined /> }] : []),
                       ...(canManage && workItem.lifecycleStatus === 'open' && workItem.assignees.length === 0
-                        ? [{ key: 'edit', label: '编辑任务', icon: <EditOutlined /> }] : []),
+                        ? [{ key: 'edit', label: tx('编辑任务', 'Edit task'), icon: <EditOutlined /> }] : []),
                       ...(canManage && (workItem.lifecycleStatus === 'open' || workItem.lifecycleStatus === 'blocked')
-                        ? [{ key: 'assign', label: workItem.assignees.length ? '更换负责人' : '分配负责人', icon: <SwapOutlined /> }] : []),
-                      ...(canBlock ? [{ key: 'block', label: '报告阻塞', icon: <PauseCircleOutlined /> }] : []),
+                        ? [{ key: 'assign', label: workItem.assignees.length ? tx('更换负责人', 'Change assignee') : tx('分配负责人', 'Assign'), icon: <SwapOutlined /> }] : []),
+                      ...(canBlock ? [{ key: 'block', label: tx('报告阻塞', 'Report blocker'), icon: <PauseCircleOutlined /> }] : []),
                       ...(canManage && workItem.lifecycleStatus === 'blocked'
-                        ? [{ key: 'unblock', label: '解除阻塞', icon: <CheckCircleOutlined /> }] : []),
+                        ? [{ key: 'unblock', label: tx('解除阻塞', 'Unblock'), icon: <CheckCircleOutlined /> }] : []),
                       ...(canManage && workItem.lifecycleStatus === 'open'
-                        ? [{ key: 'complete', label: '确认完成', icon: <CheckCircleOutlined /> }] : []),
+                        ? [{ key: 'complete', label: tx('确认完成', 'Confirm completion'), icon: <CheckCircleOutlined /> }] : []),
                       ...(canManage && (workItem.lifecycleStatus === 'open' || workItem.lifecycleStatus === 'blocked')
-                        ? [{ key: 'cancel', label: '取消任务', icon: <CloseCircleOutlined />, danger: true }] : []),
+                        ? [{ key: 'cancel', label: tx('取消任务', 'Cancel task'), icon: <CloseCircleOutlined />, danger: true }] : []),
                     ];
                     return (
                       <article className="work-item-card" key={workItem.id}>
@@ -413,29 +423,29 @@ export function WorkItemBoardPage() {
                                 },
                               }}
                             >
-                              <Button type="text" size="small" aria-label="任务操作" icon={<MoreOutlined />} />
+                              <Button type="text" size="small" aria-label={tx('任务操作', 'Task actions')} icon={<MoreOutlined />} />
                             </Dropdown>
                           )}
                         </div>
                         {isWorkItemSubmissionPending(workItem) && (
-                          <Tag className="work-item-submission-tag" color="processing">结果待验收</Tag>
+                          <Tag className="work-item-submission-tag" color="processing">{tx('结果待验收', 'Result pending review')}</Tag>
                         )}
                         <SubmissionArtifacts
                           submission={workItem.currentSubmission}
                           workspaceId={workspace.id}
                           projectId={workItem.projectId}
                         />
-                        {workItem.blockerReason && <p className="work-item-reason blocked">阻塞：{workItem.blockerReason}</p>}
-                        {workItem.cancellationReason && <p className="work-item-reason cancelled">取消：{workItem.cancellationReason}</p>}
+                        {workItem.blockerReason && <p className="work-item-reason blocked">{tx('阻塞：', 'Blocked: ')}{workItem.blockerReason}</p>}
+                        {workItem.cancellationReason && <p className="work-item-reason cancelled">{tx('取消：', 'Cancelled: ')}{workItem.cancellationReason}</p>}
                         {relatedWorkItemReferences.length > 0 && (
-                          <div className="work-item-related" aria-label="关联任务">
-                            <span className="work-item-related-label">关联任务：</span>
+                          <div className="work-item-related" aria-label={tx('关联任务', 'Related tasks')}>
+                            <span className="work-item-related-label">{tx('关联任务：', 'Related tasks: ')}</span>
                             {relatedWorkItemReferences.map((reference) => (
                               <a
                                 key={reference.workItemId}
                                 href={`/w/${workspace.id}/p/${workItem.projectId}/work-items?workItemId=${reference.workItemId}`}
                                 className="work-item-related-link"
-                                aria-label={`打开关联任务 #${reference.taskNumber}`}
+                                aria-label={tx(`打开关联任务 #${reference.taskNumber}`, `Open related task #${reference.taskNumber}`)}
                               >
                                 @task#{reference.taskNumber}
                               </a>
@@ -446,30 +456,30 @@ export function WorkItemBoardPage() {
                           <span className="work-item-card-person">
                             <Avatar size={22} icon={<UserOutlined />} />
                             <span className="work-item-card-person-copy">
-                              <span className="work-item-card-person-label">发起人：</span>{workItem.createdByDisplayName}
+                              <span className="work-item-card-person-label">{tx('发起人：', 'Created by: ')}</span>{workItem.createdByDisplayName}
                             </span>
                           </span>
                           {workItem.assignees.length ? (
                             <span className="work-item-card-person">
                               <Avatar size={22} icon={workItem.assignees[0]?.actorType === 'agent' ? <RobotOutlined /> : <UserOutlined />} />
                               <span className="work-item-card-person-copy">
-                                <span className="work-item-card-person-label">负责人：</span>
-                                {workItem.assignees.map((assignee) => assignee.displayName).join('、')}
+                                <span className="work-item-card-person-label">{tx('负责人：', 'Assignee: ')}</span>
+                                {workItem.assignees.map((assignee) => assignee.displayName).join(isEnglish ? ', ' : '、')}
                               </span>
                             </span>
                           ) : (
                             <span className="work-item-card-person work-item-unassigned">
                               <Avatar size={22} icon={<UserOutlined />} />
                               <span className="work-item-card-person-copy">
-                                <span className="work-item-card-person-label">负责人：</span>未分配
+                                <span className="work-item-card-person-label">{tx('负责人：', 'Assignee: ')}</span>{tx('未分配', 'Unassigned')}
                               </span>
                             </span>
                           )}
                         </div>
                         <footer className="work-item-card-footer">
-                          <Text type="secondary"><ClockCircleOutlined /> {relativeTime(workItem.updatedAt)}</Text>
+                          <Text type="secondary"><ClockCircleOutlined /> {relativeTime(workItem.updatedAt, isEnglish)}</Text>
                           <Button type="link" size="small" icon={<MessageOutlined />} onClick={() => setCommentAction(workItem)}>
-                            评论{workItem.commentFrontier ? ` ${workItem.commentFrontier}` : ''}
+                            {tx('评论', 'Comments')}{workItem.commentFrontier ? ` ${workItem.commentFrontier}` : ''}
                           </Button>
                         </footer>
                       </article>
@@ -489,7 +499,7 @@ export function WorkItemBoardPage() {
         className="composer-file-input"
         type="file"
         hidden
-        aria-label="上传交付结果"
+        aria-label={tx('上传交付结果', 'Upload result')}
         onChange={(event) => {
           const file = event.target.files?.[0];
           const workItem = resultUploadWorkItem.current;
@@ -499,24 +509,24 @@ export function WorkItemBoardPage() {
       />
 
       <Modal
-        title="创建任务"
+        title={tx('创建任务', 'Create task')}
         open={createOpen}
-        okText="创建"
-        cancelText="取消"
+        okText={tx('创建', 'Create')}
+        cancelText={tx('取消', 'Cancel')}
         confirmLoading={create.isPending}
         onCancel={() => setCreateOpen(false)}
         onOk={() => void createForm.validateFields().then((value) => create.mutate(value))}
       >
         <Form form={createForm} layout="vertical">
-          <Form.Item name="description" label="具体描述" rules={[{ required: true, max: 10000, whitespace: true }]}>
-            <Input.TextArea autoFocus rows={5} placeholder="描述要交付的内容、范围和验收标准" />
+          <Form.Item name="description" label={tx('具体描述', 'Description')} rules={[{ required: true, max: 10000, whitespace: true }]}>
+            <Input.TextArea autoFocus rows={5} placeholder={tx('描述要交付的内容、范围和验收标准', 'Describe what to deliver, the scope, and acceptance criteria')} />
           </Form.Item>
-          <Form.Item name="assigneeProjectMembershipIds" label="负责人（可多选）">
+          <Form.Item name="assigneeProjectMembershipIds" label={tx('负责人（可多选）', 'Assignees (multiple)')}>
             <Select
               mode="multiple"
               maxTagCount="responsive"
               allowClear
-              placeholder="暂不分配"
+              placeholder={tx('暂不分配', 'Leave unassigned')}
               options={projectMembers.map((member) => ({
                 value: member.projectMembershipId,
                 label: `${member.actorType === 'agent' ? 'Agent' : 'Human'} · ${member.displayName}`,
@@ -526,7 +536,7 @@ export function WorkItemBoardPage() {
           <Alert
             type="info"
             showIcon
-            title="任务使用独立评论区；分配或 @Agent 时才会定向唤醒。"
+            title={tx('任务使用独立评论区；分配或 @Agent 时才会定向唤醒。', 'Tasks have their own comment thread; an Agent is only woken when assigned or @-mentioned.')}
           />
         </Form>
       </Modal>
@@ -568,10 +578,10 @@ export function WorkItemBoardPage() {
       />
 
       <Modal
-        title="编辑任务"
+        title={tx('编辑任务', 'Edit task')}
         open={Boolean(editAction)}
-        okText="保存"
-        cancelText="取消"
+        okText={tx('保存', 'Save')}
+        cancelText={tx('取消', 'Cancel')}
         confirmLoading={editMutation.isPending}
         onCancel={() => {
           setEditAction(undefined);
@@ -582,18 +592,18 @@ export function WorkItemBoardPage() {
         })}
       >
         <Form form={editForm} layout="vertical">
-          <Form.Item name="description" label="具体描述" rules={[{ required: true, max: 10000, whitespace: true }]}>
-            <Input.TextArea autoFocus rows={5} placeholder="描述要交付的内容、范围和验收标准" />
+          <Form.Item name="description" label={tx('具体描述', 'Description')} rules={[{ required: true, max: 10000, whitespace: true }]}>
+            <Input.TextArea autoFocus rows={5} placeholder={tx('描述要交付的内容、范围和验收标准', 'Describe what to deliver, the scope, and acceptance criteria')} />
           </Form.Item>
-          <Alert type="info" showIcon title="只有未分配且仍在待处理的任务可以编辑。" />
+          <Alert type="info" showIcon title={tx('只有未分配且仍在待处理的任务可以编辑。', 'Only unassigned tasks still in the backlog can be edited.')} />
         </Form>
       </Modal>
 
       <Modal
-        title={assignmentAction?.assignees.length ? '更换负责人' : '分配负责人'}
+        title={assignmentAction?.assignees.length ? tx('更换负责人', 'Change assignee') : tx('分配负责人', 'Assign')}
         open={Boolean(assignmentAction)}
-        okText="确认"
-        cancelText="取消"
+        okText={tx('确认', 'Confirm')}
+        cancelText={tx('取消', 'Cancel')}
         confirmLoading={assignmentMutation.isPending}
         onCancel={() => {
           setAssignmentAction(undefined);
@@ -609,11 +619,11 @@ export function WorkItemBoardPage() {
         <Form form={assignmentForm} layout="vertical">
           <Form.Item
             name="assigneeProjectMembershipIds"
-            label="负责人（可多选）"
+            label={tx('负责人（可多选）', 'Assignees (multiple)')}
             rules={[{
               validator: (_, value?: string[]) => (
                 (value ?? []).slice().sort().join(',') === (assignmentAction?.assignees ?? []).map((assignee) => assignee.projectMembershipId).slice().sort().join(',')
-                  ? Promise.reject(new Error('请选择不同的负责人，或清空以解除分配。'))
+                  ? Promise.reject(new Error(tx('请选择不同的负责人，或清空以解除分配。', 'Choose a different assignee, or clear to remove the assignment.')))
                   : Promise.resolve()
               ),
             }]}
@@ -622,27 +632,27 @@ export function WorkItemBoardPage() {
               mode="multiple"
               maxTagCount="responsive"
               allowClear
-              placeholder="清空后解除分配"
+              placeholder={tx('清空后解除分配', 'Clear to remove the assignment')}
               options={projectMembers.map((member) => ({
                 value: member.projectMembershipId,
-                label: `${member.actorType === 'agent' ? 'Agent' : '成员'} · ${member.displayName}`,
+                label: `${member.actorType === 'agent' ? 'Agent' : tx('成员', 'Member')} · ${member.displayName}`,
               }))}
             />
           </Form.Item>
           <Alert
             type="info"
             showIcon
-            title="重新分配会更新任务版本，并让旧的待验收提交失效；分配给 Agent 时会再次通知它。"
+            title={tx('重新分配会更新任务版本，并让旧的待验收提交失效；分配给 Agent 时会再次通知它。', 'Reassigning bumps the task version and invalidates the previous pending submission; the Agent is notified again when assigned.')}
           />
         </Form>
       </Modal>
 
       <Modal
-        title={reasonAction?.kind === 'block' ? '报告阻塞' : '取消任务'}
+        title={reasonAction?.kind === 'block' ? tx('报告阻塞', 'Report blocker') : tx('取消任务', 'Cancel task')}
         open={Boolean(reasonAction)}
-        okText={reasonAction?.kind === 'block' ? '确认阻塞' : '确认取消'}
+        okText={reasonAction?.kind === 'block' ? tx('确认阻塞', 'Confirm block') : tx('确认取消', 'Confirm cancel')}
         okButtonProps={{ danger: reasonAction?.kind === 'cancel' }}
-        cancelText="返回"
+        cancelText={tx('返回', 'Back')}
         confirmLoading={reasonMutation.isPending}
         onCancel={() => {
           setReasonAction(undefined);
@@ -655,10 +665,10 @@ export function WorkItemBoardPage() {
         <Form form={reasonForm} layout="vertical">
           <Form.Item
             name="reason"
-            label={reasonAction?.kind === 'block' ? '阻塞原因' : '取消原因'}
+            label={reasonAction?.kind === 'block' ? tx('阻塞原因', 'Blocker reason') : tx('取消原因', 'Cancellation reason')}
             rules={reasonAction?.kind === 'block' ? [{ required: true, max: 2000 }] : [{ max: 2000 }]}
           >
-            <Input.TextArea rows={4} placeholder={reasonAction?.kind === 'block' ? '记录一个可追溯的具体原因' : '可选填取消原因'} />
+            <Input.TextArea rows={4} placeholder={reasonAction?.kind === 'block' ? tx('记录一个可追溯的具体原因', 'Record a specific, traceable reason') : tx('可选填取消原因', 'Cancellation reason (optional)')} />
           </Form.Item>
         </Form>
       </Modal>

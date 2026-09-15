@@ -1,7 +1,9 @@
 import { MoonOutlined, SunOutlined } from '@ant-design/icons';
 import { Button, ConfigProvider, theme as antdTheme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
+import enUS from 'antd/locale/en_US';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useLanguage } from './language';
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -33,6 +35,7 @@ function initialThemeMode(): ThemeMode {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
+  const { isEnglish } = useLanguage();
   const [mode, setMode] = useState<ThemeMode>(initialThemeMode);
   const isDark = mode === 'dark';
 
@@ -57,7 +60,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   return (
     <ThemeModeContext.Provider value={contextValue}>
       <ConfigProvider
-        locale={zhCN}
+        locale={isEnglish ? enUS : zhCN}
         theme={{
           algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
           token: {
@@ -80,7 +83,10 @@ export function useThemeMode() {
 
 export function ThemeToggleButton({ className, compact = false }: { className?: string; compact?: boolean }) {
   const { isDark, toggle } = useThemeMode();
-  const label = isDark ? '切换为浅色模式' : '切换为深色模式';
+  const { isEnglish } = useLanguage();
+  const label = isDark
+    ? (isEnglish ? 'Switch to light mode' : '切换为浅色模式')
+    : (isEnglish ? 'Switch to dark mode' : '切换为深色模式');
   return (
     <Button
       type={compact ? 'text' : 'default'}

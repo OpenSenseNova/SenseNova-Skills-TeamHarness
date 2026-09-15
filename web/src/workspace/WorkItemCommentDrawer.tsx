@@ -11,6 +11,7 @@ import {
 } from 'antd';
 import type { ReactNode } from 'react';
 import { errorMessage, type WorkItem, type WorkItemComment } from '../api/client';
+import { useLanguage } from '../language';
 
 const { Text: TypographyText } = Typography;
 
@@ -30,7 +31,7 @@ export interface WorkItemCommentDrawerProps {
 }
 
 function commentTime(timestamp: number): string {
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat(document.documentElement.lang || 'zh-CN', {
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
@@ -52,21 +53,23 @@ export function WorkItemCommentDrawer({
   onClose,
   onOpenTaskComments,
 }: WorkItemCommentDrawerProps) {
+  const { isEnglish } = useLanguage();
+  const copy = (zh: string, en: string) => isEnglish ? en : zh;
   return (
     <Drawer
       open={open}
       placement="right"
       size="50%"
-      title={workItem ? `任务讨论 · #${workItem.taskNumber}` : '任务讨论'}
+      title={workItem ? `${copy('任务讨论', 'Task discussion')} · #${workItem.taskNumber}` : copy('任务讨论', 'Task discussion')}
       styles={{ body: { padding: 20 } }}
       onClose={onClose}
     >
       {submissionContent}
       {commentsPending ? <Spin /> : commentsError ? (
-        <Alert type="error" showIcon title="评论加载失败" description={errorMessage(commentsError)} />
+        <Alert type="error" showIcon title={copy('评论加载失败', 'Failed to load comments')} description={errorMessage(commentsError)} />
       ) : (
         <List
-          locale={{ emptyText: '还没有评论' }}
+          locale={{ emptyText: copy('还没有评论', 'No comments yet') }}
           dataSource={comments ?? []}
           renderItem={(comment) => {
             const missingMentions = (comment.mentions ?? [])
@@ -105,7 +108,7 @@ export function WorkItemCommentDrawer({
                             </a>
                           ) : (
                             <TypographyText type="secondary">
-                              {reference.artifactName} · v{reference.version} · 内容已删除
+                              {reference.artifactName} · v{reference.version} · {copy('内容已删除', 'content deleted')}
                             </TypographyText>
                           )}
                         </div>
@@ -125,7 +128,7 @@ export function WorkItemCommentDrawer({
           icon={<MessageOutlined />}
           href={`/w/${workspaceId}/p/${projectId}/work-items?workItemId=${workItem.id}`}
         >
-          打开任务看板
+          {copy('打开任务看板', 'Open task board')}
         </Button>
       )}
     </Drawer>

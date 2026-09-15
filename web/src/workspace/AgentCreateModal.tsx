@@ -6,6 +6,7 @@ import { api, errorMessage } from '../api/client';
 import { AgentRuntimeFields, computerLoadErrorMessage, type RuntimeBindingFormValue } from './AgentRuntimeFields';
 import { ComputerSetupModal } from './ComputerSetupModal';
 import { workspaceKeys } from './workspace-context';
+import { useLanguage } from '../language';
 
 interface AgentCreateValue extends RuntimeBindingFormValue {
   name: string;
@@ -22,6 +23,8 @@ export function AgentCreateModal({ workspaceId, open, onClose }: {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { message } = App.useApp();
+  const { isEnglish } = useLanguage();
+  const tx = (zh: string, en: string) => isEnglish ? en : zh;
   const computers = useQuery({
     queryKey: workspaceKeys.computers,
     queryFn: () => api.listComputers().then((page) => page.items),
@@ -61,7 +64,7 @@ export function AgentCreateModal({ workspaceId, open, onClose }: {
         queryClient.invalidateQueries({ queryKey: workspaceKeys.members(workspaceId) }),
       ]);
       queryClient.setQueryData(workspaceKeys.agent(workspaceId, agent.id), agent);
-      void message.success('Agent 已创建，并已连接本地运行环境');
+      void message.success(tx('Agent 已创建，并已连接本地运行环境', 'Agent created and connected to the local runtime'));
       navigate(`/w/${workspaceId}/agents/${agent.id}`);
     },
   });
@@ -76,11 +79,11 @@ export function AgentCreateModal({ workspaceId, open, onClose }: {
   return (
     <Modal
       className="agent-create-modal"
-      title="创建 Agent"
+      title={tx('创建 Agent', 'Create Agent')}
       open={open}
       width={600}
-      okText="创建 Agent"
-      cancelText="取消"
+      okText={tx('创建 Agent', 'Create Agent')}
+      cancelText={tx('取消', 'Cancel')}
       confirmLoading={create.isPending}
       okButtonProps={{ disabled: computers.isPending || !bindableComputers.length }}
       onCancel={close}
@@ -93,20 +96,20 @@ export function AgentCreateModal({ workspaceId, open, onClose }: {
           <Alert
             type="error"
             showIcon
-            title="暂时无法创建 Agent"
-            description={computerLoadErrorMessage(computers.error)}
+            title={tx('暂时无法创建 Agent', 'Unable to create Agent right now')}
+            description={computerLoadErrorMessage(computers.error, isEnglish)}
           />
         ) : (
           <AgentRuntimeFields computers={computers.data ?? []} onSetupComputer={() => setComputerSetupOpen(true)}>
-            <Form.Item name="name" label="名称" required rules={[{ required: true, max: 120, whitespace: true }]}>
-              <Input size="large" placeholder="例如 Alice" autoFocus />
+            <Form.Item name="name" label={tx('名称', 'Name')} required rules={[{ required: true, max: 120, whitespace: true }]}>
+              <Input size="large" placeholder={tx('例如 Alice', 'For example: Alice')} autoFocus />
             </Form.Item>
-            <Form.Item name="description" label="描述" rules={[{ max: 2000 }]}>
+            <Form.Item name="description" label={tx('描述', 'Description')} rules={[{ max: 2000 }]}>
               <Input.TextArea
                 rows={4}
                 maxLength={2000}
                 showCount
-              placeholder="例如：负责整理资料、跟进任务或生成周报"
+              placeholder={tx('例如：负责整理资料、跟进任务或生成周报', 'For example: organize research, track tasks, or prepare weekly reports')}
               />
             </Form.Item>
           </AgentRuntimeFields>
